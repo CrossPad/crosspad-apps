@@ -289,12 +289,10 @@ class AppManager:
 
     def run_command(self, cmd: str) -> int:
         """Run a shell command in the project dir, return exit code."""
-        if self.config.platform == "esp-idf" and "idf.py" in cmd:
+        if self.config.platform == "esp-idf":
             idf_path = self._find_idf_path()
             if idf_path:
-                idf_py = os.path.join(idf_path, "tools", "idf.py")
-                cmd = cmd.replace("idf.py",
-                                  f"{sys.executable} {idf_py}")
+                # Source export.sh — puts idf.py + toolchain on PATH
                 export_sh = os.path.join(idf_path, "export.sh")
                 if os.path.exists(export_sh):
                     cmd = (f"export IDF_PATH={idf_path} && "
