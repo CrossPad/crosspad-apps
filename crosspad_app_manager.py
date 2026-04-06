@@ -260,20 +260,45 @@ class AppManager:
                     continue
         return ""
 
+    def _find_idf_path(self) -> str:
+        """Find ESP-IDF installation path."""
+        # 1. Environment variable
+        p = os.environ.get("IDF_PATH", "")
+        if p and os.path.isdir(p):
+            return p
+        # 2. VSCode settings (idf.espIdfPath)
+        vscode_settings = self.project_dir / ".vscode" / "settings.json"
+        if vscode_settings.exists():
+            try:
+                with open(vscode_settings) as f:
+                    data = json.load(f)
+                p = data.get("idf.espIdfPath", "")
+                if p and os.path.isdir(p):
+                    return p
+            except (json.JSONDecodeError, OSError):
+                pass
+        # 3. Common locations
+        for candidate in [
+            Path.home() / "esp" / "esp-idf",
+            Path.home() / "esp" / "v5.5" / "esp-idf",
+            Path("/opt/esp-idf"),
+        ]:
+            if candidate.is_dir():
+                return str(candidate)
+        return ""
+
     def run_command(self, cmd: str) -> int:
         """Run a shell command in the project dir, return exit code."""
-        if self.config.platform == "esp-idf":
-            idf_path = os.environ.get("IDF_PATH", "")
+        if self.config.platform == "esp-idf" and "idf.py" in cmd:
+            idf_path = self._find_idf_path()
             if idf_path:
-                # Resolve idf.py to full path
-                if "idf.py" in cmd:
-                    idf_py = os.path.join(idf_path, "tools", "idf.py")
-                    cmd = cmd.replace("idf.py",
-                                      f"{sys.executable} {idf_py}")
-                # Source export.sh to set up toolchain PATH
+                idf_py = os.path.join(idf_path, "tools", "idf.py")
+                cmd = cmd.replace("idf.py",
+                                  f"{sys.executable} {idf_py}")
                 export_sh = os.path.join(idf_path, "export.sh")
                 if os.path.exists(export_sh):
-                    cmd = f". {export_sh} > /dev/null 2>&1 && {cmd}"
+                    cmd = (f"export IDF_PATH={idf_path} && "
+                           f". {export_sh} > /dev/null 2>&1 && {cmd}")
         print(f"\n  Running: {cmd}\n")
         result = subprocess.run(cmd, shell=True, cwd=str(self.project_dir))
         return result.returncode
