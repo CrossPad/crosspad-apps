@@ -484,12 +484,26 @@ def cli_main(config: PlatformConfig):
     elif args.command == "sync":
         mgr.sync()
     elif args.command == "tui" or args.command is None:
-        tui_main(config)
+        if _is_interactive():
+            tui_main(config)
+        elif args.command is None:
+            parser.print_help()
+        else:
+            print("Error: TUI requires an interactive terminal.")
+            sys.exit(1)
     else:
         parser.print_help()
 
 
 # ── Interactive TUI ──────────────────────────────────────────────────
+
+def _is_interactive():
+    """Check if stdin is a real terminal."""
+    try:
+        return os.isatty(sys.stdin.fileno())
+    except (OSError, AttributeError):
+        return False
+
 
 def _read_key():
     """Read a single keypress, return normalized key name."""
