@@ -7,12 +7,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
+- **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Instructions v0.1.0** — Initial release — markdown rendering, file auto-discovery
 - **Serial Monitor v0.1.0** — Initial release — live UART output, input field, baud config
 - **Mixer v0.1.0** — Initial release — VU meters, 3x2 routing matrix, volume + mute/solo
 - **Piano v0.1.0** — Initial release — ADSR sliders, presets, octave +/- buttons
-- **Sampler v0.1.0** — Initial release — pad playback, waveform view, kit selector
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -20,7 +20,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- APP_TABLE_START -->
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
-| **Instructions** | 0.1.0 | Markdown-based instructions and help viewer | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
+| **Instructions** | 0.2.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
 | **Mixer** | 0.1.0 | Audio mixer/router with VU meters, routing matrix, channel strips | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
 | **Sampler** | 0.1.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |

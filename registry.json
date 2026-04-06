@@ -3,13 +3,15 @@
   "apps": {
     "instructions": {
       "name": "Instructions",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Markdown-based instructions and help viewer",
       "repo": "https://github.com/CrossPad/crosspad-instructions.git",
       "component_path": "components/crosspad-instructions",
-      "icon": "help.png",
+      "icon": "info.png",
       "category": "tools",
       "platforms": [
+        "esp-idf",
+        "arduino",
         "pc"
       ],
       "requires": {
