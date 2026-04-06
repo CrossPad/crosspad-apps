@@ -48,58 +48,67 @@ jobs:
           exit 1
 
       - name: Notify Discord — new apps
-        if: steps.diff.outputs.new_apps != ''
+        if: steps.diff.outputs.has_new_apps == 'true'
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          APPS_JSON: ${{ steps.diff.outputs.new_apps_json }}
         run: |
+          # Build one embed per new app
+          EMBEDS=$(echo "$APPS_JSON" | jq '[.[] | {
+            title: ("📦 " + .name + " v" + .version),
+            description: .description,
+            url: .repo,
+            color: 5814783,
+            fields: [
+              { name: "Version", value: .version, inline: true },
+              { name: "Platforms", value: .platforms, inline: true },
+              { name: "Category", value: (.category // "—"), inline: true }
+            ]
+          }]')
           PAYLOAD=$(jq -n \
-            --arg title "New CrossPad app available!" \
-            --arg desc "${{ steps.diff.outputs.new_apps }}" \
-            --arg url "https://github.com/CrossPad/crosspad-apps" \
-            '{
-              embeds: [{
-                title: $title,
-                description: $desc,
-                url: $url,
-                color: 5814783
-              }]
-            }')
+            --arg content "**New CrossPad app available!**" \
+            --argjson embeds "$EMBEDS" \
+            '{ content: $content, embeds: $embeds }')
           curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
 
       - name: Notify Discord — new platforms
-        if: steps.diff.outputs.new_platforms != ''
+        if: steps.diff.outputs.has_new_platforms == 'true'
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          PLATFORMS_JSON: ${{ steps.diff.outputs.new_platforms_json }}
         run: |
+          EMBEDS=$(echo "$PLATFORMS_JSON" | jq '[.[] | {
+            title: ("🌐 " + .name + " — new platform support"),
+            url: .repo,
+            color: 3447003,
+            fields: [
+              { name: "Version", value: .version, inline: true },
+              { name: "New", value: .gained, inline: true },
+              { name: "All platforms", value: .all_platforms, inline: true }
+            ]
+          }]')
           PAYLOAD=$(jq -n \
-            --arg title "App platform support expanded" \
-            --arg desc "${{ steps.diff.outputs.new_platforms }}" \
-            --arg url "https://github.com/CrossPad/crosspad-apps" \
-            '{
-              embeds: [{
-                title: $title,
-                description: $desc,
-                url: $url,
-                color: 3447003
-              }]
-            }')
+            --argjson embeds "$EMBEDS" \
+            '{ embeds: $embeds }')
           curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
 
       - name: Notify Discord — version updates (nightly only)
-        if: steps.diff.outputs.version_updates != '' && github.event_name == 'schedule'
+        if: steps.diff.outputs.has_version_updates == 'true' && github.event_name == 'schedule'
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          UPDATES_JSON: ${{ steps.diff.outputs.version_updates_json }}
         run: |
+          EMBEDS=$(echo "$UPDATES_JSON" | jq '[.[] | {
+            title: ("🔄 " + .name + " updated"),
+            url: .repo,
+            color: 16750848,
+            fields: [
+              { name: "Previous", value: .old_version, inline: true },
+              { name: "New", value: .new_version, inline: true }
+            ]
+          }]')
           PAYLOAD=$(jq -n \
-            --arg title "App updates detected" \
-            --arg desc "${{ steps.diff.outputs.version_updates }}" \
-            --arg url "https://github.com/CrossPad/crosspad-apps" \
-            '{
-              embeds: [{
-                title: $title,
-                description: $desc,
-                url: $url,
-                color: 16750848
-              }]
-            }')
+            --arg content "**App updates detected**" \
+            --argjson embeds "$EMBEDS" \
+            '{ content: $content, embeds: $embeds }')
           curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"

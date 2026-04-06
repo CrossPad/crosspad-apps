@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Compare old and new registry.json, output change summaries for CI.
+"""Compare old and new registry.json, output change details for CI.
 
-Sets GitHub Actions outputs:
-  new_apps         — markdown lines for newly added apps
-  new_platforms    — markdown lines for apps that gained new platform support
-  version_updates  — markdown lines for apps with version bumps
+Sets GitHub Actions outputs as JSON arrays for rich Discord embeds:
+  new_apps_json       — JSON array of {name, version, description, platforms, repo}
+  new_platforms_json   — JSON array of {name, version, gained, all_platforms, repo}
+  version_updates_json — JSON array of {name, old_version, new_version, repo}
+  has_new_apps         — "true" or "false"
+  has_new_platforms    — "true" or "false"
+  has_version_updates  — "true" or "false"
 """
 
 import json
@@ -33,11 +36,19 @@ def main():
         name = info.get("name", app_id)
         version = info.get("version", "")
         platforms = info.get("platforms", [])
-        plat_str = ", ".join(platforms) if platforms else "all"
         desc = info.get("description", "")
+        category = info.get("category", "")
+        repo = info.get("repo", "").replace(".git", "")
 
         if app_id not in old_apps:
-            added.append(f"**{name}** v{version} ({plat_str}) — {desc}")
+            added.append({
+                "name": name,
+                "version": version,
+                "description": desc,
+                "platforms": ", ".join(platforms) if platforms else "all",
+                "category": category,
+                "repo": repo,
+            })
             continue
 
         old_info = old_apps[app_id]
@@ -47,38 +58,50 @@ def main():
         new_plats = set(platforms)
         gained = new_plats - old_plats
         if gained:
-            platform_changes.append(f"**{name}** now supports: {', '.join(gained)}")
+            platform_changes.append({
+                "name": name,
+                "version": version,
+                "gained": ", ".join(sorted(gained)),
+                "all_platforms": ", ".join(sorted(platforms)) if platforms else "all",
+                "repo": repo,
+            })
 
         # Version changes
         old_ver = old_info.get("version", "")
         if version and version != old_ver:
-            version_changes.append(f"**{name}** {old_ver} → {version}")
+            version_changes.append({
+                "name": name,
+                "old_version": old_ver,
+                "new_version": version,
+                "repo": repo,
+            })
 
     # Write to GitHub Actions outputs
     output_file = os.environ.get("GITHUB_OUTPUT", "")
     if output_file:
         with open(output_file, "a") as f:
-            _write_multiline(f, "new_apps", added)
-            _write_multiline(f, "new_platforms", platform_changes)
-            _write_multiline(f, "version_updates", version_changes)
+            f.write(f"new_apps_json={json.dumps(added)}\n")
+            f.write(f"new_platforms_json={json.dumps(platform_changes)}\n")
+            f.write(f"version_updates_json={json.dumps(version_changes)}\n")
+            f.write(f"has_new_apps={'true' if added else 'false'}\n")
+            f.write(f"has_new_platforms={'true' if platform_changes else 'false'}\n")
+            f.write(f"has_version_updates={'true' if version_changes else 'false'}\n")
     else:
         # Local testing
         if added:
-            print(f"New apps:\n" + "\n".join(f"  {a}" for a in added))
+            print("New apps:")
+            for a in added:
+                print(f"  {a['name']} v{a['version']} ({a['platforms']}) — {a['description']}")
         if platform_changes:
-            print(f"Platform changes:\n" + "\n".join(f"  {p}" for p in platform_changes))
+            print("Platform changes:")
+            for p in platform_changes:
+                print(f"  {p['name']} v{p['version']} gained: {p['gained']} (now: {p['all_platforms']})")
         if version_changes:
-            print(f"Version updates:\n" + "\n".join(f"  {v}" for v in version_changes))
+            print("Version updates:")
+            for v in version_changes:
+                print(f"  {v['name']} {v['old_version']} → {v['new_version']}")
         if not added and not platform_changes and not version_changes:
             print("No changes detected.")
-
-
-def _write_multiline(f, name, lines):
-    if lines:
-        text = "\\n".join(lines)
-        f.write(f"{name}={text}\n")
-    else:
-        f.write(f"{name}=\n")
 
 
 if __name__ == "__main__":
