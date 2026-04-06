@@ -262,12 +262,18 @@ class AppManager:
 
     def run_command(self, cmd: str) -> int:
         """Run a shell command in the project dir, return exit code."""
-        # Resolve idf.py to full path when IDF_PATH is set
-        if self.config.platform == "esp-idf" and "idf.py" in cmd:
+        if self.config.platform == "esp-idf":
             idf_path = os.environ.get("IDF_PATH", "")
             if idf_path:
-                idf_py = os.path.join(idf_path, "tools", "idf.py")
-                cmd = cmd.replace("idf.py", f"{sys.executable} {idf_py}")
+                # Resolve idf.py to full path
+                if "idf.py" in cmd:
+                    idf_py = os.path.join(idf_path, "tools", "idf.py")
+                    cmd = cmd.replace("idf.py",
+                                      f"{sys.executable} {idf_py}")
+                # Source export.sh to set up toolchain PATH
+                export_sh = os.path.join(idf_path, "export.sh")
+                if os.path.exists(export_sh):
+                    cmd = f". {export_sh} > /dev/null 2>&1 && {cmd}"
         print(f"\n  Running: {cmd}\n")
         result = subprocess.run(cmd, shell=True, cwd=str(self.project_dir))
         return result.returncode
