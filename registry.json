@@ -1,41 +1,4 @@
 {
   "version": 1,
-  "apps": {
-    "sampler": {
-      "name": "Sampler",
-      "description": "Sample player with 16 pads, waveform editing, kit management",
-      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
-      "component_path": "components/crosspad-sampler",
-      "icon": "audio.png",
-      "category": "music",
-      "requires": [
-        "crosspad-core",
-        "crosspad-gui"
-      ]
-    },
-    "sequencer": {
-      "name": "Sequencer",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "requires": [
-        "crosspad-core",
-        "crosspad-gui"
-      ]
-    },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
-      "requires": [
-        "crosspad-core",
-        "crosspad-gui"
-      ]
-    }
-  }
+  "apps": {}
 }
