@@ -298,6 +298,8 @@ class AppManager:
                     cmd = (f"export IDF_PATH={idf_path} && "
                            f". {export_sh} > /dev/null 2>&1 && {cmd}")
         print(f"\n  Running: {cmd}\n")
+        # Restore normal terminal mode so subprocess output is visible
+        _restore_terminal()
         result = subprocess.run(cmd, shell=True, cwd=str(self.project_dir))
         return result.returncode
 
@@ -759,6 +761,32 @@ def _show_cursor():
     _w("\033[?25h")
 
 
+# Terminal state management — raw mode breaks subprocess output
+_saved_termios = None
+
+
+def _save_terminal():
+    """Save terminal attributes before entering TUI."""
+    global _saved_termios
+    try:
+        import termios
+        _saved_termios = termios.tcgetattr(sys.stdin.fileno())
+    except (ImportError, OSError):
+        pass
+
+
+def _restore_terminal():
+    """Restore terminal to normal (cooked) mode for subprocess output."""
+    if _saved_termios is not None:
+        try:
+            import termios
+            termios.tcsetattr(sys.stdin.fileno(),
+                              termios.TCSADRAIN, _saved_termios)
+        except (ImportError, OSError):
+            pass
+    _show_cursor()
+
+
 def _read_key() -> str:
     """Read a single keypress, return normalized key name."""
     try:
@@ -910,13 +938,14 @@ class _TUI:
         return _get_size()[0]
 
     def run(self):
+        _save_terminal()
         _hide_cursor()
         try:
             self._dashboard()
         except KeyboardInterrupt:
             pass
         finally:
-            _show_cursor()
+            _restore_terminal()
             _clear()
 
     # -- formatting -----------------------------------------------------------
