@@ -1485,7 +1485,7 @@ class _TUI:
                 ("Flash (UART)",
                  "idf.py{port} flash"),
                 ("Flash (OTA)",
-                 "python tools/ota_flash.py"),
+                 "python3 tools/ota_flash.py"),
                 ("Monitor",
                  "idf.py{port} monitor"),
                 ("Flash + Monitor",
