@@ -2,6 +2,18 @@
 
 Central registry of available CrossPad applications. Auto-discovered from GitHub repos with the `crosspad-app` topic, plus external repos listed in `external-apps.json`.
 
+## Available Apps
+
+<!-- APP_TABLE_START -->
+| App | Description | Category | Repo |
+|-----|-------------|----------|------|
+| **Sampler** | Sample player with 16 pads, waveform editing, kit management | music | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
+| **Sequencer** | MIDI step sequencer with recording, playback, overdub | music | [CrossPad/crosspad-sequencer](https://github.com/CrossPad/crosspad-sequencer) |
+| **Synthesizer** | Polyphonic synth with 3 oscillators, ADSR, filter, effects | music | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
+
+*3 app(s) available*
+<!-- APP_TABLE_END -->
+
 ## How It Works
 
 1. Each app repo has the GitHub topic `crosspad-app` and contains a `crosspad-app.json` with metadata

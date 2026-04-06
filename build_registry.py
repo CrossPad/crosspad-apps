@@ -157,7 +157,47 @@ def main():
         json.dump(registry, f, indent=2)
         f.write("\n")
 
+    update_readme(apps)
     print(f"\nBuilt registry.json with {len(apps)} apps.")
+
+
+def update_readme(apps: dict):
+    """Update the app table in README.md between marker comments."""
+    readme_path = os.path.join(os.path.dirname(__file__), "README.md")
+    if not os.path.exists(readme_path):
+        return
+
+    with open(readme_path) as f:
+        content = f.read()
+
+    start_marker = "<!-- APP_TABLE_START -->"
+    end_marker = "<!-- APP_TABLE_END -->"
+
+    if start_marker not in content:
+        return
+
+    # Build markdown table
+    lines = [
+        "| App | Description | Category | Repo |",
+        "|-----|-------------|----------|------|",
+    ]
+    for app_id, info in sorted(apps.items()):
+        name = info.get("name", app_id)
+        desc = info.get("description", "")
+        cat = info.get("category", "")
+        repo_url = info.get("repo", "").replace(".git", "")
+        repo_name = repo_url.split("github.com/")[-1] if "github.com" in repo_url else repo_url
+        lines.append(f"| **{name}** | {desc} | {cat} | [{repo_name}]({repo_url}) |")
+
+    lines.append(f"\n*{len(apps)} app(s) available*")
+    table = "\n".join(lines)
+
+    start_idx = content.index(start_marker) + len(start_marker)
+    end_idx = content.index(end_marker)
+    new_content = content[:start_idx] + "\n" + table + "\n" + content[end_idx:]
+
+    with open(readme_path, "w") as f:
+        f.write(new_content)
 
 
 if __name__ == "__main__":
