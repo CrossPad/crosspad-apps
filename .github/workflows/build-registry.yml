@@ -16,6 +16,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Build registry from app repos
         env:
@@ -29,6 +32,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add registry.json README.md COMMUNITY_APPS.md
-          git diff --staged --quiet || git commit -m "chore: update registry.json [automated]"
-          git pull --rebase origin main
-          git push
+          git diff --staged --quiet && echo "No changes" && exit 0
+          git commit -m "chore: update registry.json [automated]"
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            echo "Push attempt $i failed, retrying..."
+            sleep 2
+          done
+          echo "Failed to push after 3 attempts"
+          exit 1
