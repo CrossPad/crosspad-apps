@@ -20,12 +20,17 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Save old registry for diff
+        run: cp registry.json registry_old.json 2>/dev/null || echo '{"version":1,"apps":{}}' > registry_old.json
+
       - name: Build registry from app repos
         env:
-          # Use ORG_READ_TOKEN (PAT with repo read access) for private app repos.
-          # Falls back to GITHUB_TOKEN which only has access to this repo.
           GITHUB_TOKEN: ${{ secrets.ORG_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: python3 build_registry.py
+
+      - name: Detect changes
+        id: diff
+        run: python3 diff_registry.py registry_old.json registry.json
 
       - name: Commit and push if changed
         run: |
@@ -41,3 +46,60 @@ jobs:
           done
           echo "Failed to push after 3 attempts"
           exit 1
+
+      - name: Notify Discord — new apps
+        if: steps.diff.outputs.new_apps != ''
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg title "New CrossPad app available!" \
+            --arg desc "${{ steps.diff.outputs.new_apps }}" \
+            --arg url "https://github.com/CrossPad/crosspad-apps" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                url: $url,
+                color: 5814783
+              }]
+            }')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
+
+      - name: Notify Discord — new platforms
+        if: steps.diff.outputs.new_platforms != ''
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg title "App platform support expanded" \
+            --arg desc "${{ steps.diff.outputs.new_platforms }}" \
+            --arg url "https://github.com/CrossPad/crosspad-apps" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                url: $url,
+                color: 3447003
+              }]
+            }')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
+
+      - name: Notify Discord — version updates (nightly only)
+        if: steps.diff.outputs.version_updates != '' && github.event_name == 'schedule'
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg title "App updates detected" \
+            --arg desc "${{ steps.diff.outputs.version_updates }}" \
+            --arg url "https://github.com/CrossPad/crosspad-apps" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                url: $url,
+                color: 16750848
+              }]
+            }')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
