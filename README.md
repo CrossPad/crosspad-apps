@@ -2,6 +2,8 @@
 
 Central registry of available CrossPad applications. Auto-discovered from GitHub repos with the `crosspad-app` topic, plus external repos listed in `external-apps.json`.
 
+> **Want to publish your app?** See [How It Works](#how-it-works) for setup instructions.
+
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
