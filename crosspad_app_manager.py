@@ -297,11 +297,16 @@ class AppManager:
                 if os.path.exists(export_sh):
                     cmd = (f"export IDF_PATH={idf_path} && "
                            f". {export_sh} > /dev/null 2>&1 && {cmd}")
-        print(f"\n  Running: {cmd}\n")
-        # Restore normal terminal mode so subprocess output is visible
+        sys.stdout.write(f"\n  Running: {cmd}\n\n")
+        sys.stdout.flush()
+        sys.stderr.flush()
         _restore_terminal()
-        result = subprocess.run(cmd, shell=True, cwd=str(self.project_dir))
-        return result.returncode
+        # os.system bypasses Python I/O — output goes directly to terminal
+        saved_dir = os.getcwd()
+        os.chdir(str(self.project_dir))
+        rc = os.system(cmd)
+        os.chdir(saved_dir)
+        return rc >> 8
 
     def check_gh_auth(self) -> tuple[bool, str]:
         """Check if gh CLI is authenticated. Returns (ok, username)."""
