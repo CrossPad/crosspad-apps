@@ -117,6 +117,27 @@ class AppManager:
             return line.lstrip(" -+").split()[0][:8]
         return "unknown"
 
+    def _get_default_branch(self, path: str) -> str:
+        """Detect the default branch of a submodule (main or master)."""
+        full_path = self.project_dir / path
+        result = subprocess.run(
+            ["git", "-C", str(full_path), "remote", "show", "origin"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "HEAD branch" in line:
+                    return line.split(":")[-1].strip()
+        # Fallback: check if main or master exists locally
+        for branch in ["main", "master"]:
+            r = subprocess.run(
+                ["git", "-C", str(full_path), "rev-parse", "--verify", f"origin/{branch}"],
+                capture_output=True, check=False,
+            )
+            if r.returncode == 0:
+                return branch
+        return "main"
+
     # ── path resolution ───────────────────────────────────────────────
 
     def _resolve_install_path(self, info: dict) -> str:
@@ -387,13 +408,14 @@ class AppManager:
 
             if exists_on_disk and not already_in_manifest:
                 commit = self._get_submodule_commit(install_path)
+                ref = self._get_default_branch(install_path)
                 manifest.setdefault("installed", {})[app_id] = {
                     "version": commit,
-                    "ref": "main",
+                    "ref": ref,
                     "repo": info.get("repo", ""),
                     "installed_at": datetime.now(timezone.utc).isoformat(),
                 }
-                print(f"  + {app_id} ({install_path} @ {commit})")
+                print(f"  + {app_id} ({install_path} @ {commit}, ref={ref})")
                 synced += 1
             elif not exists_on_disk and already_in_manifest:
                 del manifest["installed"][app_id]
