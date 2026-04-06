@@ -137,6 +137,14 @@ def main():
             continue
 
         app_id = meta.get("id", repo.split("/")[-1].replace("crosspad-", ""))
+
+        # Normalize requires: accept both list ["crosspad-core"] and dict {"crosspad-core": ">=0.3.0"}
+        raw_requires = meta.get("requires", {})
+        if isinstance(raw_requires, list):
+            requires = {r: "*" for r in raw_requires}
+        else:
+            requires = raw_requires
+
         apps[app_id] = {
             "name": meta.get("name", app_id),
             "description": meta.get("description", ""),
@@ -144,7 +152,8 @@ def main():
             "component_path": meta.get("component_path", f"components/crosspad-{app_id}"),
             "icon": meta.get("icon", ""),
             "category": meta.get("category", ""),
-            "requires": meta.get("requires", []),
+            "platforms": meta.get("platforms", []),
+            "requires": requires,
         }
         print(f"  -> {app_id}: {meta.get('name')}")
 
@@ -178,16 +187,23 @@ def update_readme(apps: dict):
 
     # Build markdown table
     lines = [
-        "| App | Description | Category | Repo |",
-        "|-----|-------------|----------|------|",
+        "| App | Description | Platforms | Requires | Repo |",
+        "|-----|-------------|-----------|----------|------|",
     ]
     for app_id, info in sorted(apps.items()):
         name = info.get("name", app_id)
         desc = info.get("description", "")
-        cat = info.get("category", "")
+        platforms = info.get("platforms", [])
+        platform_str = ", ".join(platforms) if platforms else "all"
+        requires = info.get("requires", {})
+        req_parts = []
+        for dep, ver in requires.items():
+            short = dep.replace("crosspad-", "")
+            req_parts.append(f"{short} {ver}" if ver != "*" else short)
+        req_str = ", ".join(req_parts) if req_parts else "-"
         repo_url = info.get("repo", "").replace(".git", "")
         repo_name = repo_url.split("github.com/")[-1] if "github.com" in repo_url else repo_url
-        lines.append(f"| **{name}** | {desc} | {cat} | [{repo_name}]({repo_url}) |")
+        lines.append(f"| **{name}** | {desc} | {platform_str} | {req_str} | [{repo_name}]({repo_url}) |")
 
     lines.append(f"\n*{len(apps)} app(s) available*")
     table = "\n".join(lines)
