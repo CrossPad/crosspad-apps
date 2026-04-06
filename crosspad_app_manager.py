@@ -468,6 +468,8 @@ def cli_main(config: PlatformConfig):
 
     sub.add_parser("sync", help="Sync manifest with existing submodules")
 
+    sub.add_parser("tui", help="Interactive terminal UI")
+
     args = parser.parse_args()
     mgr = AppManager(os.getcwd(), config)
 
@@ -481,5 +483,162 @@ def cli_main(config: PlatformConfig):
         mgr.update(app_name=args.app, update_all=args.all)
     elif args.command == "sync":
         mgr.sync()
+    elif args.command == "tui" or args.command is None:
+        tui_main(config)
     else:
         parser.print_help()
+
+
+# ── Interactive TUI ──────────────────────────────────────────────────
+
+def _read_key():
+    """Read a single keypress, return normalized key name."""
+    try:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+            if ch == '\x1b':
+                seq = sys.stdin.read(2)
+                if seq == '[A': return 'up'
+                if seq == '[B': return 'down'
+                if seq == '[C': return 'right'
+                if seq == '[D': return 'left'
+                return 'esc'
+            if ch in ('\r', '\n'): return 'enter'
+            if ch == 'q' or ch == '\x03': return 'quit'  # q or Ctrl+C
+            return ch
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    except (ImportError, OSError):
+        import msvcrt
+        ch = msvcrt.getch()
+        if ch in (b'\xe0', b'\x00'):
+            ch2 = msvcrt.getch()
+            if ch2 == b'H': return 'up'
+            if ch2 == b'P': return 'down'
+            if ch2 == b'K': return 'left'
+            if ch2 == b'M': return 'right'
+        if ch == b'\r': return 'enter'
+        if ch == b'\x1b': return 'esc'
+        if ch in (b'q', b'\x03'): return 'quit'
+        return ch.decode('utf-8', errors='ignore')
+
+
+def _clear():
+    sys.stdout.write('\033[2J\033[H')
+    sys.stdout.flush()
+
+
+def _menu_select(title: str, items: list[str], descriptions: list[str] = None) -> int:
+    """Show a menu, return selected index or -1 if cancelled."""
+    cursor = 0
+    while True:
+        _clear()
+        print(f"\033[1;36m{title}\033[0m\n")
+        for i, item in enumerate(items):
+            if i == cursor:
+                print(f"  \033[1;33m> {item}\033[0m")
+                if descriptions and i < len(descriptions) and descriptions[i]:
+                    print(f"    \033[90m{descriptions[i]}\033[0m")
+            else:
+                print(f"    {item}")
+        print(f"\n\033[90m  [arrows] navigate  [enter] select  [q/esc] back\033[0m")
+        key = _read_key()
+        if key == 'up': cursor = (cursor - 1) % len(items)
+        elif key == 'down': cursor = (cursor + 1) % len(items)
+        elif key == 'enter': return cursor
+        elif key in ('quit', 'esc'): return -1
+
+
+def _pause():
+    print(f"\n\033[90m  Press any key to continue...\033[0m")
+    _read_key()
+
+
+def tui_main(config: PlatformConfig):
+    """Interactive terminal UI for the app manager."""
+    mgr = AppManager(os.getcwd(), config)
+
+    while True:
+        choice = _menu_select(
+            f"CrossPad App Manager ({config.platform})",
+            [
+                "Browse apps",
+                "Install app",
+                "Remove app",
+                "Update all apps",
+                "Sync manifest",
+                "Exit",
+            ],
+            [
+                "List all available and installed apps",
+                "Add a new app from the registry",
+                "Uninstall an installed app",
+                "Update all installed apps to latest",
+                "Sync manifest with existing submodules on disk",
+                None,
+            ],
+        )
+
+        if choice in (-1, 5):
+            _clear()
+            break
+
+        _clear()
+
+        if choice == 0:  # Browse
+            mgr.list_apps(show_all=True)
+            _pause()
+
+        elif choice == 1:  # Install
+            registry = mgr._load_registry()
+            manifest = mgr._load_manifest()
+            apps = registry.get("apps", {})
+            available = {k: v for k, v in apps.items()
+                         if k not in manifest.get("installed", {})}
+
+            if not available:
+                print("  All apps are already installed.")
+                _pause()
+                continue
+
+            names = list(available.keys())
+            descs = []
+            for app_id in names:
+                info = available[app_id]
+                compat = mgr._is_compatible(info)
+                platforms = ", ".join(info.get("platforms", [])) or "all"
+                ver = info.get("version", "")
+                tag = "" if compat else f" \033[31m[{platforms} only]\033[0m"
+                descs.append(f"v{ver} — {info.get('description', '')}{tag}")
+
+            idx = _menu_select("Install which app?", names, descs)
+            if idx >= 0:
+                _clear()
+                mgr.install(names[idx], force=True)
+                _pause()
+
+        elif choice == 2:  # Remove
+            manifest = mgr._load_manifest()
+            installed = list(manifest.get("installed", {}).keys())
+            if not installed:
+                print("  No apps installed.")
+                _pause()
+                continue
+
+            idx = _menu_select("Remove which app?", installed)
+            if idx >= 0:
+                _clear()
+                mgr.remove(installed[idx])
+                _pause()
+
+        elif choice == 3:  # Update all
+            mgr.update(update_all=True)
+            _pause()
+
+        elif choice == 4:  # Sync
+            mgr.sync()
+            _pause()
