@@ -19,7 +19,9 @@ jobs:
 
       - name: Build registry from app repos
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use ORG_READ_TOKEN (PAT with repo read access) for private app repos.
+          # Falls back to GITHUB_TOKEN which only has access to this repo.
+          GITHUB_TOKEN: ${{ secrets.ORG_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: python3 build_registry.py
 
       - name: Commit and push if changed
