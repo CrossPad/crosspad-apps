@@ -127,6 +127,7 @@ def build_app_entry(meta: dict, clone_url: str, stars: int, source: str) -> dict
 
     return {
         "name": meta.get("name", ""),
+        "version": meta.get("version", "0.0.0"),
         "description": meta.get("description", ""),
         "repo": clone_url,
         "component_path": meta.get("component_path", ""),
@@ -134,6 +135,7 @@ def build_app_entry(meta: dict, clone_url: str, stars: int, source: str) -> dict
         "category": meta.get("category", ""),
         "platforms": meta.get("platforms", []),
         "requires": requires,
+        "changelog": meta.get("changelog", []),
         "stars": stars,
         "source": source,
     }
@@ -182,7 +184,7 @@ def main():
     # Write registry (without stars/source - those are build-time only)
     registry_apps = {}
     for app_id, info in apps.items():
-        registry_apps[app_id] = {k: v for k, v in info.items() if k not in ("stars", "source")}
+        registry_apps[app_id] = {k: v for k, v in info.items() if k not in ("stars", "source", "changelog")}
 
     registry = {"version": 1, "apps": registry_apps}
     with open("registry.json", "w") as f:
@@ -196,6 +198,7 @@ def main():
 
 def _app_table_row(app_id: str, info: dict, show_stars: bool = False) -> str:
     name = info.get("name", app_id)
+    version = info.get("version", "")
     desc = info.get("description", "")
     platforms = info.get("platforms", [])
     platform_str = ", ".join(platforms) if platforms else "all"
@@ -210,8 +213,8 @@ def _app_table_row(app_id: str, info: dict, show_stars: bool = False) -> str:
 
     if show_stars:
         stars = info.get("stars", 0)
-        return f"| **{name}** | {desc} | {platform_str} | {req_str} | {stars} | [{repo_name}]({repo_url}) |"
-    return f"| **{name}** | {desc} | {platform_str} | {req_str} | [{repo_name}]({repo_url}) |"
+        return f"| **{name}** | {version} | {desc} | {platform_str} | {req_str} | {stars} | [{repo_name}]({repo_url}) |"
+    return f"| **{name}** | {version} | {desc} | {platform_str} | {req_str} | [{repo_name}]({repo_url}) |"
 
 
 def update_readme(apps: dict):
@@ -231,8 +234,8 @@ def update_readme(apps: dict):
     start, end = "<!-- APP_TABLE_START -->", "<!-- APP_TABLE_END -->"
     if start in content:
         lines = [
-            "| App | Description | Platforms | Requires | Repo |",
-            "|-----|-------------|-----------|----------|------|",
+            "| App | Version | Description | Platforms | Requires | Repo |",
+            "|-----|---------|-------------|-----------|----------|------|",
         ]
         for app_id, info in sorted(official.items()):
             lines.append(_app_table_row(app_id, info))
@@ -248,8 +251,8 @@ def update_readme(apps: dict):
         top = sorted(community.items(), key=lambda x: x[1].get("stars", 0), reverse=True)[:TOP_COMMUNITY_COUNT]
         if top:
             lines = [
-                "| App | Description | Platforms | Requires | Stars | Repo |",
-                "|-----|-------------|-----------|----------|-------|------|",
+                "| App | Version | Description | Platforms | Requires | Stars | Repo |",
+                "|-----|---------|-------------|-----------|----------|-------|------|",
             ]
             for app_id, info in top:
                 lines.append(_app_table_row(app_id, info, show_stars=True))
@@ -259,6 +262,39 @@ def update_readme(apps: dict):
 
         si = content.index(start2) + len(start2)
         ei = content.index(end2)
+        content = content[:si] + "\n" + "\n".join(lines) + "\n" + content[ei:]
+
+    # --- Latest Updates ---
+    start3, end3 = "<!-- LATEST_UPDATES_START -->", "<!-- LATEST_UPDATES_END -->"
+    if start3 in content:
+        # Collect all changelog entries with app context, newest first
+        updates = []
+        for app_id, info in apps.items():
+            name = info.get("name", app_id)
+            repo_url = info.get("repo", "").replace(".git", "")
+            for entry in info.get("changelog", []):
+                # Parse "0.2.0: Description text"
+                if ":" in entry:
+                    ver, desc = entry.split(":", 1)
+                    updates.append((ver.strip(), name, desc.strip(), repo_url))
+
+        # Sort by semver descending, take top 6
+        def semver_key(item):
+            parts = item[0].split(".")
+            return tuple(int(p) for p in parts if p.isdigit())
+
+        updates.sort(key=semver_key, reverse=True)
+        updates = updates[:6]
+
+        if updates:
+            lines = []
+            for ver, name, desc, repo_url in updates:
+                lines.append(f"- **{name} v{ver}** — {desc}")
+        else:
+            lines = ["*No updates yet.*"]
+
+        si = content.index(start3) + len(start3)
+        ei = content.index(end3)
         content = content[:si] + "\n" + "\n".join(lines) + "\n" + content[ei:]
 
     with open(readme_path, "w") as f:
@@ -281,8 +317,8 @@ def update_community_apps(apps: dict):
 
     if sorted_apps:
         lines.extend([
-            "| App | Description | Platforms | Requires | Stars | Repo |",
-            "|-----|-------------|-----------|----------|-------|------|",
+            "| App | Version | Description | Platforms | Requires | Stars | Repo |",
+            "|-----|---------|-------------|-----------|----------|-------|------|",
         ])
         for app_id, info in sorted_apps:
             lines.append(_app_table_row(app_id, info, show_stars=True))
