@@ -18,6 +18,22 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.1.0",
+      "description": "Audio mixer/router with VU meters, routing matrix, channel strips",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "synthesizer": {
       "name": "Synthesizer",
       "version": "0.1.0",

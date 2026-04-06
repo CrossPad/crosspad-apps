@@ -9,6 +9,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- LATEST_UPDATES_START -->
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Sampler v0.1.0** — Initial release — pad playback, waveform view, kit selector
+- **Mixer v0.1.0** — Initial release — VU meters, 3x2 routing matrix, volume + mute/solo
 - **Synthesizer v0.1.0** — Initial release — 3 oscillators, ADSR, delay + reverb effects
 - **Sequencer v0.1.0** — Initial release — step sequencer with MIDI recording
 <!-- LATEST_UPDATES_END -->
@@ -18,11 +19,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- APP_TABLE_START -->
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
+| **Mixer** | 0.1.0 | Audio mixer/router with VU meters, routing matrix, channel strips | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Sampler** | 0.1.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.2.0 | MIDI step sequencer with recording, playback, overdub | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-sequencer](https://github.com/CrossPad/crosspad-sequencer) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*3 official app(s)*
+*4 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps
