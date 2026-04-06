@@ -1,17 +1,32 @@
 {
   "version": 1,
   "apps": {
-    "sampler": {
-      "name": "Sampler",
+    "instructions": {
+      "name": "Instructions",
       "version": "0.1.0",
-      "description": "Sample player with 16 pads, waveform editing, kit management",
-      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
-      "component_path": "components/crosspad-sampler",
-      "icon": "audio.png",
-      "category": "music",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "help.png",
+      "category": "tools",
       "platforms": [
-        "esp-idf",
-        "arduino"
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.0",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
@@ -28,6 +43,39 @@
       "category": "audio",
       "platforms": [
         "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "piano": {
+      "name": "Piano",
+      "version": "0.1.0",
+      "description": "Synth piano with parameter sliders, presets, octave control",
+      "repo": "https://github.com/CrossPad/crosspad-piano.git",
+      "component_path": "components/crosspad-piano",
+      "icon": "piano.png",
+      "category": "music",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "sampler": {
+      "name": "Sampler",
+      "version": "0.1.0",
+      "description": "Sample player with 16 pads, waveform editing, kit management",
+      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
+      "component_path": "components/crosspad-sampler",
+      "icon": "audio.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
