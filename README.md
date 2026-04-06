@@ -1,11 +1,11 @@
 # CrossPad App Registry
 
-Central registry of available CrossPad applications. Auto-generated from individual app repositories.
+Central registry of available CrossPad applications. Auto-discovered from GitHub repos with the `crosspad-app` topic.
 
 ## How It Works
 
-1. Each app repo contains a `crosspad-app.json` with metadata (name, description, icon, dependencies)
-2. CI runs `build_registry.py` which fetches metadata from all app repos listed in `app-sources.json`
+1. Each app repo has the GitHub topic `crosspad-app` and contains a `crosspad-app.json` with metadata
+2. CI runs `build_registry.py` which discovers all repos with the `crosspad-app` topic in the CrossPad org
 3. The result is `registry.json` — a single file consumed by the CrossPad app manager (`idf.py app-*` commands)
 
 ## Adding a New App
@@ -23,15 +23,12 @@ Central registry of available CrossPad applications. Auto-generated from individ
    }
    ```
 
-2. Add your repo to `app-sources.json` in this registry:
-   ```json
-   {
-     "repo": "CrossPad/crosspad-my-app",
-     "url": "https://github.com/CrossPad/crosspad-my-app.git"
-   }
+2. Add the `crosspad-app` topic to your repo:
+   ```bash
+   gh repo edit CrossPad/crosspad-my-app --add-topic crosspad-app
    ```
 
-3. CI will auto-update `registry.json` on next run, or trigger manually.
+3. CI will auto-discover your app on next run (every 6h), or trigger manually.
 
 ## Usage (from platform-idf)
 
@@ -45,6 +42,5 @@ idf.py app-update --all          # Update all
 
 ## Files
 
-- `app-sources.json` — List of app repos to index
-- `build_registry.py` — Script that builds `registry.json` from app repos
+- `build_registry.py` — Discovers repos by topic, fetches metadata, builds registry
 - `registry.json` — Auto-generated registry (consumed by app manager)
