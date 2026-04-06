@@ -1,17 +1,4 @@
 {
   "version": 1,
-  "apps": {
-    "sampler": {
-      "name": "Sampler",
-      "description": "Sample player with 16 pads, waveform editing, kit management",
-      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
-      "component_path": "components/crosspad-sampler",
-      "icon": "audio.png",
-      "category": "music",
-      "requires": [
-        "crosspad-core",
-        "crosspad-gui"
-      ]
-    }
-  }
+  "apps": {}
 }
