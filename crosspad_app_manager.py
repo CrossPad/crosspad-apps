@@ -388,8 +388,7 @@ def cli_main(config: PlatformConfig):
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("list", help="List available and installed apps")
-    list_cmd = sub.add_parser("list", help="List available apps")
+    list_cmd = sub.add_parser("list", help="List available and installed apps")
     list_cmd.add_argument("--all", action="store_true", help="Show incompatible apps too")
 
     install_cmd = sub.add_parser("install", help="Install an app")
