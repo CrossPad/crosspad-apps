@@ -84,22 +84,52 @@ def fetch_app_metadata(repo: str, token: str, branch: str = None) -> dict | None
         return None
 
 
+def load_external_repos() -> list[dict]:
+    """Load external (non-org) repos from external-apps.json."""
+    path = os.path.join(os.path.dirname(__file__), "external-apps.json")
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        data = json.load(f)
+    repos = []
+    for entry in data.get("repos", []):
+        repos.append({
+            "full_name": entry["repo"],
+            "clone_url": entry.get("url", f"https://github.com/{entry['repo']}.git"),
+            "default_branch": entry.get("branch"),
+        })
+    return repos
+
+
 def main():
     token = _get_github_token()
     if not token:
         print("Warning: No GitHub token found. Private repos will fail.")
         print("  Set GITHUB_TOKEN or install gh CLI.")
 
+    # 1. Auto-discover from org topic
     print(f"Discovering repos with topic '{TOPIC}' in {ORG}...")
     repos = discover_app_repos(token)
-    print(f"Found {len(repos)} repo(s).\n")
+    print(f"Found {len(repos)} org repo(s).")
+
+    # 2. Add external repos
+    external = load_external_repos()
+    if external:
+        print(f"Found {len(external)} external repo(s).")
+        # Deduplicate by full_name
+        seen = {r["full_name"] for r in repos}
+        for ext in external:
+            if ext["full_name"] not in seen:
+                repos.append(ext)
+                seen.add(ext["full_name"])
+    print()
 
     apps = {}
     for repo_info in repos:
         repo = repo_info["full_name"]
         clone_url = repo_info["clone_url"]
         branch = repo_info["default_branch"]
-        print(f"Fetching {repo} ({branch})...")
+        print(f"Fetching {repo} ({branch or 'default'})...")
 
         meta = fetch_app_metadata(repo, token, branch=branch)
         if not meta:

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:        # Manual trigger
   push:
     branches: [main]
-    paths: ['build_registry.py']
+    paths: ['build_registry.py', 'external-apps.json']
 
 jobs:
   build:

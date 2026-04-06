@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "External app repos not in the CrossPad org. Add your repo here via PR.",
+  "repos": []
+}
