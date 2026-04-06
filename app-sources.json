@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "repo": "CrossPad/crosspad-sampler",
+      "url": "https://github.com/CrossPad/crosspad-sampler.git"
+    },
+    {
+      "repo": "CrossPad/crosspad-sequencer",
+      "url": "https://github.com/CrossPad/crosspad-sequencer.git"
+    },
+    {
+      "repo": "CrossPad/crosspad-synthesizer",
+      "url": "https://github.com/CrossPad/crosspad-synthesizer.git"
+    }
+  ]
+}
