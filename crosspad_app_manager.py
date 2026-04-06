@@ -251,14 +251,19 @@ class AppManager:
         print(f"  Path: {install_path}")
         print(f"  Ref:  {ref}")
 
-        try:
-            self._git("submodule", "add", repo, install_path)
-        except subprocess.CalledProcessError:
-            print(f"Error: Failed to add submodule. Check repo URL and network.")
-            sys.exit(1)
+        full_path = self.project_dir / install_path
+        already_exists = full_path.exists() and (full_path / ".git").exists()
+
+        if already_exists:
+            print(f"  Submodule already exists at {install_path}, registering in manifest.")
+        else:
+            try:
+                self._git("submodule", "add", repo, install_path)
+            except subprocess.CalledProcessError:
+                print(f"Error: Failed to add submodule. Check repo URL and network.")
+                sys.exit(1)
 
         if ref != "main":
-            full_path = self.project_dir / install_path
             try:
                 subprocess.run(["git", "-C", str(full_path), "fetch", "origin"], check=True)
                 subprocess.run(["git", "-C", str(full_path), "checkout", ref], check=True)
@@ -366,6 +371,41 @@ class AppManager:
         if targets:
             self._print_next_steps()
 
+    def sync(self):
+        """Detect existing app submodules and sync manifest."""
+        registry = self._load_registry()
+        manifest = self._load_manifest()
+        apps = registry.get("apps", {})
+
+        synced = 0
+        for app_id, info in apps.items():
+            install_path = self._resolve_install_path(info)
+            full_path = self.project_dir / install_path
+
+            already_in_manifest = app_id in manifest.get("installed", {})
+            exists_on_disk = full_path.exists() and (full_path / ".git").exists()
+
+            if exists_on_disk and not already_in_manifest:
+                commit = self._get_submodule_commit(install_path)
+                manifest.setdefault("installed", {})[app_id] = {
+                    "version": commit,
+                    "ref": "main",
+                    "repo": info.get("repo", ""),
+                    "installed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                print(f"  + {app_id} ({install_path} @ {commit})")
+                synced += 1
+            elif not exists_on_disk and already_in_manifest:
+                del manifest["installed"][app_id]
+                print(f"  - {app_id} (removed from manifest, not on disk)")
+                synced += 1
+
+        if synced:
+            self._save_manifest(manifest)
+            print(f"\nSynced {synced} app(s).")
+        else:
+            print("Manifest is up to date.")
+
     def _print_next_steps(self):
         """Print platform-specific rebuild instructions."""
         if self.config.platform == "esp-idf":
@@ -404,6 +444,8 @@ def cli_main(config: PlatformConfig):
     update_cmd.add_argument("app", nargs="?", help="App name")
     update_cmd.add_argument("--all", action="store_true", help="Update all")
 
+    sub.add_parser("sync", help="Sync manifest with existing submodules")
+
     args = parser.parse_args()
     mgr = AppManager(os.getcwd(), config)
 
@@ -415,5 +457,7 @@ def cli_main(config: PlatformConfig):
         mgr.remove(args.app)
     elif args.command == "update":
         mgr.update(app_name=args.app, update_all=args.all)
+    elif args.command == "sync":
+        mgr.sync()
     else:
         parser.print_help()
