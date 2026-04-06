@@ -2,7 +2,7 @@
 
 Central registry of available CrossPad applications. Auto-discovered from GitHub repos with the `crosspad-app` topic, plus external repos listed in `external-apps.json`.
 
-## Available Apps
+## CrossPad Official
 
 <!-- APP_TABLE_START -->
 | App | Description | Platforms | Requires | Repo |
@@ -11,8 +11,14 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Sequencer** | MIDI step sequencer with recording, playback, overdub | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-sequencer](https://github.com/CrossPad/crosspad-sequencer) |
 | **Synthesizer** | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*3 app(s) available*
+*3 official app(s)*
 <!-- APP_TABLE_END -->
+
+## Top 10 Community Apps
+
+<!-- COMMUNITY_TOP_START -->
+*No community apps yet — [add yours!](external-apps.json)*
+<!-- COMMUNITY_TOP_END -->
 
 ## How It Works
 
