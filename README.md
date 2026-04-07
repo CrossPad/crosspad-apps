@@ -37,13 +37,181 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 *No community apps yet — [add yours!](external-apps.json)*
 <!-- COMMUNITY_TOP_END -->
 
+---
+
+## Using the App Manager
+
+The CrossPad App Manager is a shared tool that works across all platforms. It provides both a **CLI** and an **interactive TUI** for managing apps — browsing, installing, removing, updating, building, and flashing.
+
+### Supported Platforms
+
+| Platform | Status | App install dir | Build system |
+|----------|--------|----------------|--------------|
+| **ESP-IDF** | Full support | `components/` | `idf.py` |
+| **Arduino / PlatformIO** | Full support | `lib/` | `pio` |
+| **PC (Desktop)** | Coming soon | `components/` | CMake |
+
+### Prerequisites
+
+- **`gh` CLI** installed and authenticated (`gh auth login`)
+- **Git** (apps are installed as git submodules)
+- **Python 3.9+**
+
+---
+
+## ESP-IDF
+
+### CLI Commands
+
+```bash
+idf.py app-list                              # List compatible apps
+idf.py app-list --all                        # Include incompatible platform apps
+idf.py app-install --app sampler             # Install app as git submodule
+idf.py app-install --app sampler --ref v1.0  # Install specific version/branch
+idf.py app-install --app sampler --force     # Install despite platform incompatibility
+idf.py app-remove --app sampler              # Remove app submodule
+idf.py app-update --app sampler              # Update to latest
+idf.py app-update --all                      # Update all installed apps
+idf.py app-sync                              # Sync manifest with existing submodules
+idf.py app-manage                            # Launch interactive TUI
+```
+
+### Interactive TUI
+
+Launch with `idf.py app-manage` or via the VSCode toolbar button.
+
+**Dashboard** — project overview with installed apps, quick actions via hotkeys:
+- `[B]` Browse & Install — categorized app browser with `/` search
+- `[U]` Update All — update all installed apps
+- `[H]` Health Check — submodule status, manifest sync, gh auth, cache age
+- `[F]` Build & Flash — idf.py build/flash/monitor with auto-detected serial port
+- `[O]` OTA Flash — one-click OTA with build state awareness (detects stale builds)
+- `[T]` Dev Tools — force refresh registry, view raw data, clear cache
+- `[Q]` Quit
+
+**App Browser** features:
+- Categorized view (music, audio, tools)
+- Live search with `/` key
+- Color-coded status: green = installed, gray = available, red = incompatible
+- `Enter` for app details, `i` to install, `r` to remove
+
+**App Detail** shows description, platforms, dependencies, disk usage, recent git commits, changelog (fetched from GitHub), with direct actions (install/remove/update/open repo).
+
+**OTA Flash** checks build state before flashing:
+- Shows binary size, build age
+- Warns if sources have been modified since last build
+- `[Enter]` Flash, `[B]` Build first, `[R]` Build + Flash combo
+
+### VSCode Toolbar Buttons
+
+Install the [VsCode Task Buttons](https://marketplace.visualstudio.com/items?itemName=spencerwmiles.vscode-task-buttons) extension. Two buttons appear in the status bar:
+
+| Button | Action |
+|--------|--------|
+| `$(package) CP Tools` | Opens the full interactive TUI |
+| `$(zap) OTA` | One-click OTA flash via USB CDC |
+
+Configuration is in `.vscode/settings.json`:
+
+```json
+{
+    "VsCodeTaskButtons.tasks": [
+        {
+            "label": "$(package) CP Tools",
+            "task": "CrossPad: CP Tools"
+        },
+        {
+            "label": "$(zap) OTA",
+            "task": "CrossPad: OTA Flash"
+        }
+    ]
+}
+```
+
+### After Install/Remove
+
+**`idf.py fullclean && idf.py build` is required** after adding or removing apps. CMake's `file(GLOB)` runs at configure time only — plain `idf.py build` won't discover new app directories.
+
+---
+
+## Arduino / PlatformIO
+
+### CLI Commands
+
+```bash
+python3 scripts/app_manager.py list                  # List compatible apps
+python3 scripts/app_manager.py install sampler        # Install
+python3 scripts/app_manager.py remove sampler         # Remove
+python3 scripts/app_manager.py update --all           # Update all
+python3 scripts/app_manager.py sync                   # Sync manifest
+python3 scripts/app_manager.py                        # Launch TUI (no args)
+```
+
+### Interactive TUI
+
+Launch with `python3 scripts/app_manager.py` (no arguments) or via the VSCode toolbar button.
+
+Same features as ESP-IDF TUI — dashboard, browser, detail view, build & flash (using `pio` commands), OTA, health check, dev tools.
+
+### VSCode Toolbar Button
+
+Same setup as ESP-IDF — install [VsCode Task Buttons](https://marketplace.visualstudio.com/items?itemName=spencerwmiles.vscode-task-buttons), then configure in `.vscode/settings.json`:
+
+```json
+{
+    "VsCodeTaskButtons.tasks": [
+        {
+            "label": "$(package) CP Tools",
+            "task": "CrossPad: App Manager"
+        }
+    ]
+}
+```
+
+### After Install/Remove
+
+```bash
+pio run --target clean && pio run
+```
+
+---
+
+## PC (Desktop) — Coming Soon
+
+Desktop platform support is planned. The app manager core (`crosspad_app_manager.py`) already supports a `pc` platform config. Stay tuned.
+
+---
+
 ## How It Works
 
 1. Each app repo has the GitHub topic `crosspad-app` and contains a `crosspad-app.json` with metadata
-2. CI runs `build_registry.py` which:
+2. CI runs `build_registry.py` every 6 hours which:
    - Discovers all repos with the `crosspad-app` topic in the CrossPad org
    - Merges in any external repos from `external-apps.json`
-3. The result is `registry.json` — consumed by the CrossPad app manager (`idf.py app-*` commands)
+   - Generates `registry.json` + updates this README
+   - Sends Discord notifications for new apps, platform additions, and version updates
+3. The result is `registry.json` — fetched by the app manager (cached locally for 1 hour)
+4. Apps are installed as **git submodules** into the platform's library directory
+5. The build system auto-discovers installed components at configure time
+
+### Architecture
+
+```
+crosspad-apps/                    ← This repo (registry + shared core)
+  registry.json                   ← Auto-generated, consumed by app manager
+  crosspad_app_manager.py         ← Shared core (downloaded by platform wrappers)
+  build_registry.py               ← CI: discovers repos, builds registry
+  diff_registry.py                ← CI: detects changes for Discord notifications
+
+platform-idf/                     ← ESP-IDF platform repo
+  idf_ext.py                      ← Registers idf.py app-* commands
+  tools/app_manager.py            ← Thin wrapper, auto-downloads shared core
+  apps.json                       ← Local manifest of installed apps
+
+ESP32-S3/                         ← Arduino platform repo
+  scripts/app_manager.py          ← Thin wrapper, auto-downloads shared core
+  apps.json                       ← Local manifest of installed apps
+```
 
 ## Adding a CrossPad Org App
 
@@ -52,11 +220,19 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
    {
      "name": "My App",
      "id": "my-app",
+     "version": "0.1.0",
      "description": "What it does",
      "category": "music",
      "icon": "my-icon.png",
-     "requires": ["crosspad-core", "crosspad-gui"],
-     "component_path": "components/crosspad-my-app"
+     "component_path": "components/crosspad-my-app",
+     "platforms": ["esp-idf", "arduino"],
+     "requires": {
+       "crosspad-core": ">=0.3.0",
+       "crosspad-gui": ">=0.2.0"
+     },
+     "changelog": [
+       "0.1.0: Initial release"
+     ]
    }
    ```
 
@@ -81,18 +257,13 @@ For repos outside the CrossPad org, open a PR adding your repo to `external-apps
 
 Your repo must also contain a `crosspad-app.json` with valid metadata.
 
-## Usage (from platform-idf)
-
-```bash
-idf.py app-list                  # List available apps
-idf.py app-install --app sampler # Install
-idf.py app-remove --app sampler  # Remove
-idf.py app-update --app sampler  # Update
-idf.py app-update --all          # Update all
-```
-
 ## Files
 
-- `build_registry.py` — Discovers repos by topic + external list, builds registry
-- `external-apps.json` — Community/third-party app repos (add via PR)
-- `registry.json` — Auto-generated registry (consumed by app manager)
+| File | Purpose |
+|------|---------|
+| `registry.json` | Auto-generated registry (consumed by app manager) |
+| `crosspad_app_manager.py` | Shared core — all app management + TUI logic |
+| `build_registry.py` | CI: discovers repos by topic, builds registry |
+| `diff_registry.py` | CI: compares registries, outputs changes for notifications |
+| `external-apps.json` | Community/third-party app repos (add via PR) |
+| `COMMUNITY_APPS.md` | Auto-generated full list of community apps |
