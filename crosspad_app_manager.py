@@ -312,7 +312,8 @@ class AppManager:
                 break
             os.write(sys.stdout.fileno(), chunk)
         rc = proc.wait()
-        sys.stdout.write(f"\n  Exit code: {rc}\n")
+        if rc != 0:
+            sys.stdout.write(f"\n  \033[1;31mFailed (exit code {rc})\033[0m\n")
         sys.stdout.flush()
         return rc
 
