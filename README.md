@@ -80,6 +80,8 @@ idf.py app-manage                            # Launch interactive TUI
 
 Launch with `idf.py app-manage` or via the VSCode toolbar button.
 
+![TUI Dashboard](docs/tui-dashboard.png)
+
 **Dashboard** — project overview with installed apps, quick actions via hotkeys:
 - `[B]` Browse & Install — categorized app browser with `/` search
 - `[U]` Update All — update all installed apps
