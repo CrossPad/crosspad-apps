@@ -295,18 +295,26 @@ class AppManager:
                 # Source export.sh — puts idf.py + toolchain on PATH
                 export_sh = os.path.join(idf_path, "export.sh")
                 if os.path.exists(export_sh):
-                    cmd = (f"export IDF_PATH={idf_path} && "
+                    cmd = (f"export IDF_PATH={idf_path} "
+                           f"IDF_PATH_FORCE=1 && "
                            f". {export_sh} > /dev/null 2>&1 && {cmd}")
         sys.stdout.write(f"\n  Running: {cmd}\n\n")
         sys.stdout.flush()
-        sys.stderr.flush()
         _restore_terminal()
-        # os.system bypasses Python I/O — output goes directly to terminal
-        saved_dir = os.getcwd()
-        os.chdir(str(self.project_dir))
-        rc = os.system(cmd)
-        os.chdir(saved_dir)
-        return rc >> 8
+        proc = subprocess.Popen(
+            cmd, shell=True, cwd=str(self.project_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            bufsize=0,
+        )
+        while True:
+            chunk = proc.stdout.read(256)
+            if not chunk:
+                break
+            os.write(sys.stdout.fileno(), chunk)
+        rc = proc.wait()
+        sys.stdout.write(f"\n  Exit code: {rc}\n")
+        sys.stdout.flush()
+        return rc
 
     def check_gh_auth(self) -> tuple[bool, str]:
         """Check if gh CLI is authenticated. Returns (ok, username)."""
