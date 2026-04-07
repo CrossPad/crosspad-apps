@@ -362,6 +362,64 @@ class AppManager:
                 })
         return subs
 
+    def get_build_info(self) -> dict:
+        """Get firmware build status. Returns dict with binary info."""
+        # Platform-specific binary paths
+        if self.config.platform == "esp-idf":
+            candidates = [
+                self.project_dir / "build" / "CrossPad.bin",
+                # fallback: find any .bin in build/
+            ]
+        elif self.config.platform == "arduino":
+            candidates = [
+                self.project_dir / ".pio" / "build" / "esp32s3" / "firmware.bin",
+            ]
+        else:
+            return {"exists": False}
+
+        binary = None
+        for c in candidates:
+            if c.exists():
+                binary = c
+                break
+
+        if not binary:
+            return {"exists": False}
+
+        stat = binary.stat()
+        build_time = stat.st_mtime
+        size = stat.st_size
+
+        # Check if any source files are newer than the binary
+        stale = False
+        newest_src = 0
+        src_dirs = ["main", "components"]
+        src_exts = {".c", ".cpp", ".h", ".hpp", ".cmake"}
+        for src_dir in src_dirs:
+            full_dir = self.project_dir / src_dir
+            if not full_dir.exists():
+                continue
+            for dirpath, _, filenames in os.walk(full_dir):
+                for fn in filenames:
+                    if any(fn.endswith(ext) for ext in src_exts):
+                        try:
+                            mt = os.path.getmtime(os.path.join(dirpath, fn))
+                            if mt > newest_src:
+                                newest_src = mt
+                        except OSError:
+                            pass
+
+        stale = newest_src > build_time if newest_src > 0 else False
+
+        return {
+            "exists": True,
+            "path": str(binary),
+            "size": size,
+            "build_time": build_time,
+            "stale": stale,
+            "age_seconds": int(datetime.now().timestamp() - build_time),
+        }
+
     # -- commands -------------------------------------------------------------
 
     def _print_app_line(self, app_id: str, info: dict, manifest: dict):
@@ -1557,23 +1615,96 @@ class _TUI:
     # -- Quick OTA -------------------------------------------------------------
 
     def _quick_ota(self):
-        """One-click OTA flash."""
-        _clear()
-        self._header("OTA Flash")
-
+        """OTA flash with build state awareness."""
         if self.config.platform == "esp-idf":
-            cmd = "python3 tools/ota_flash.py"
+            ota_cmd = "python3 tools/ota_flash.py"
+            build_cmd = "idf.py build"
         elif self.config.platform == "arduino":
-            cmd = "python3 scripts/ota_flash.py"
+            ota_cmd = "python3 scripts/ota_flash.py"
+            build_cmd = "pio run"
         else:
-            _w(f"  {_C.GRAY}OTA not available for this platform.{_C.RST}\n")
+            _clear()
+            _w(f"  {_C.GRAY}OTA not available for "
+               f"this platform.{_C.RST}\n")
             _pause()
             return
 
-        _show_cursor()
-        self.mgr.run_command(cmd)
-        _hide_cursor()
-        _pause()
+        while True:
+            _clear()
+            self._header("OTA Flash")
+
+            build = self.mgr.get_build_info()
+
+            if not build["exists"]:
+                _w(f"\n   {_C.BRED}\u2717 No firmware binary "
+                   f"found{_C.RST}\n")
+                _w(f"   {_C.GRAY}Build the project first."
+                   f"{_C.RST}\n")
+                self._footer("[b] Build now   q back")
+                key = _read_key()
+                if key == "b":
+                    _clear()
+                    self._header("Building...")
+                    _show_cursor()
+                    self.mgr.run_command(build_cmd)
+                    _hide_cursor()
+                    _pause()
+                    continue
+                return
+
+            # Binary info
+            size_str = self._fmt_size(build["size"])
+            age_str = self._fmt_age(build["age_seconds"])
+            path_short = os.path.basename(build["path"])
+
+            _w(f"\n   {_C.GRAY}Binary{_C.RST}      "
+               f"{_C.BWHITE}{path_short}{_C.RST}  "
+               f"{_C.GRAY}({size_str}){_C.RST}\n")
+            _w(f"   {_C.GRAY}Built{_C.RST}       "
+               f"{age_str}\n")
+
+            if build["stale"]:
+                _w(f"\n   {_C.BYELLOW}\u26a0 Sources modified "
+                   f"since last build{_C.RST}\n")
+                self._footer(
+                    "[enter] Flash anyway   [b] Build first   "
+                    "[r] Build + Flash   q back")
+            else:
+                _w(f"\n   {_C.BGREEN}\u2713 Build is up to "
+                   f"date{_C.RST}\n")
+                self._footer("[enter] Flash   [b] Rebuild   q back")
+
+            key = _read_key()
+            if key in ("q", "esc"):
+                return
+            elif key == "enter":
+                _clear()
+                self._header("Flashing via OTA...")
+                _show_cursor()
+                self.mgr.run_command(ota_cmd)
+                _hide_cursor()
+                _pause()
+                return
+            elif key == "b":
+                _clear()
+                self._header("Building...")
+                _show_cursor()
+                self.mgr.run_command(build_cmd)
+                _hide_cursor()
+                _pause()
+                continue
+            elif key == "r" and build.get("stale"):
+                _clear()
+                self._header("Building + Flashing...")
+                _show_cursor()
+                rc = self.mgr.run_command(build_cmd)
+                if rc == 0:
+                    _w(f"\n  {_C.BGREEN}\u2713 Build OK"
+                       f"{_C.RST}, starting OTA...\n\n")
+                    self.mgr.run_command(ota_cmd)
+                _hide_cursor()
+                _pause()
+                return
 
     # -- Build & Flash --------------------------------------------------------
 
