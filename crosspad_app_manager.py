@@ -1113,16 +1113,19 @@ class _TUI:
                 ("B", "Browse & Install"),
                 ("U", "Update All"),
                 ("H", "Health Check"),
+            ]
+            acts2 = [
                 ("F", "Build & Flash"),
+                ("O", "OTA Flash"),
                 ("T", "Dev Tools"),
                 ("Q", "Quit"),
             ]
             row1 = "   "
-            for key, label in acts[:3]:
+            for key, label in acts:
                 row1 += (f"{_C.BCYAN}[{key}]{_C.RST} {label}    ")
             _w(row1 + "\n")
             row2 = "   "
-            for key, label in acts[3:]:
+            for key, label in acts2:
                 row2 += (f"{_C.BCYAN}[{key}]{_C.RST} {label}    ")
             _w(row2 + "\n")
 
@@ -1139,6 +1142,8 @@ class _TUI:
                 self._health()
             elif key == "f":
                 self._build_flash()
+            elif key == "o":
+                self._quick_ota()
             elif key == "t":
                 self._dev_tools()
                 self._reload()
@@ -1546,6 +1551,27 @@ class _TUI:
         _w(f"\n  Updating {len(self._installed)} app(s)...\n\n")
         _show_cursor()
         self.mgr.update(update_all=True)
+        _hide_cursor()
+        _pause()
+
+    # -- Quick OTA -------------------------------------------------------------
+
+    def _quick_ota(self):
+        """One-click OTA flash."""
+        _clear()
+        self._header("OTA Flash")
+
+        if self.config.platform == "esp-idf":
+            cmd = "python3 tools/ota_flash.py"
+        elif self.config.platform == "arduino":
+            cmd = "python3 scripts/ota_flash.py"
+        else:
+            _w(f"  {_C.GRAY}OTA not available for this platform.{_C.RST}\n")
+            _pause()
+            return
+
+        _show_cursor()
+        self.mgr.run_command(cmd)
         _hide_cursor()
         _pause()
 
