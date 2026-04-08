@@ -498,6 +498,13 @@ class AppManager:
             print(f"Available: {', '.join(apps.keys())}")
             sys.exit(1)
 
+        info = apps[app_name]
+
+        if info.get("built_in"):
+            print(f"Error: '{app_name}' is a built-in app and cannot "
+                  f"be installed or removed via the app manager.")
+            return
+
         if app_name in manifest.get("installed", {}):
             print(f"App '{app_name}' is already installed.")
             return
@@ -577,6 +584,11 @@ class AppManager:
         manifest = self._load_manifest()
         registry = self._load_registry()
         apps = registry.get("apps", {})
+
+        if apps.get(app_name, {}).get("built_in"):
+            print(f"Error: '{app_name}' is a built-in app and cannot "
+                  f"be removed.")
+            return
 
         if app_name not in manifest.get("installed", {}):
             print(f"App '{app_name}' is not installed.")
