@@ -374,6 +374,11 @@ class AppManager:
             candidates = [
                 self.project_dir / ".pio" / "build" / "esp32s3" / "firmware.bin",
             ]
+        elif self.config.platform == "pc":
+            candidates = [
+                self.project_dir / "bin" / "CrossPad",
+                self.project_dir / "bin" / "CrossPad.exe",
+            ]
         else:
             return {"exists": False}
 
@@ -393,7 +398,7 @@ class AppManager:
         # Check if any source files are newer than the binary
         stale = False
         newest_src = 0
-        src_dirs = ["main", "components"]
+        src_dirs = ["main", "components", "src"]
         src_exts = {".c", ".cpp", ".h", ".hpp", ".cmake"}
         for src_dir in src_dirs:
             full_dir = self.project_dir / src_dir
@@ -699,6 +704,8 @@ class AppManager:
             print(f"\n  Next: idf.py fullclean && idf.py build")
         elif self.config.platform == "arduino":
             print(f"\n  Next: pio run --target clean && pio run")
+        elif self.config.platform == "pc":
+            print(f"\n  Next: rm -rf build && cmake -B build -G Ninja && cmake --build build")
         else:
             print(f"\n  Next: rebuild your project")
 
@@ -1172,12 +1179,20 @@ class _TUI:
                 ("U", "Update All"),
                 ("H", "Health Check"),
             ]
-            acts2 = [
-                ("F", "Build & Flash"),
-                ("O", "OTA Flash"),
-                ("T", "Dev Tools"),
-                ("Q", "Quit"),
-            ]
+            if plat == "pc":
+                acts2 = [
+                    ("F", "Build & Run"),
+                    ("O", "Run Simulator"),
+                    ("T", "Dev Tools"),
+                    ("Q", "Quit"),
+                ]
+            else:
+                acts2 = [
+                    ("F", "Build & Flash"),
+                    ("O", "OTA Flash"),
+                    ("T", "Dev Tools"),
+                    ("Q", "Quit"),
+                ]
             row1 = "   "
             for key, label in acts:
                 row1 += (f"{_C.BCYAN}[{key}]{_C.RST} {label}    ")
@@ -1622,6 +1637,35 @@ class _TUI:
         elif self.config.platform == "arduino":
             ota_cmd = "python3 scripts/ota_flash.py"
             build_cmd = "pio run"
+        elif self.config.platform == "pc":
+            # PC: "OTA" = run simulator directly
+            _clear()
+            self._header("Run Simulator")
+            build = self.mgr.get_build_info()
+            if not build["exists"]:
+                _w(f"\n   {_C.BRED}\u2717 No binary found{_C.RST}\n")
+                _w(f"   {_C.GRAY}Build the project first.{_C.RST}\n")
+                self._footer("[b] Build now   q back")
+                key = _read_key()
+                if key == "b":
+                    _clear()
+                    self._header("Building...")
+                    _show_cursor()
+                    self.mgr.run_command(
+                        "cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug "
+                        "&& cmake --build build")
+                    _hide_cursor()
+                    _pause()
+                return
+            if build.get("stale"):
+                _w(f"\n   {_C.BYELLOW}\u26a0 Sources modified "
+                   f"since last build{_C.RST}\n")
+            _w(f"\n   Launching {build['path']}...\n")
+            _show_cursor()
+            self.mgr.run_command(build["path"])
+            _hide_cursor()
+            _pause()
+            return
         else:
             _clear()
             _w(f"  {_C.GRAY}OTA not available for "
@@ -1739,14 +1783,23 @@ class _TUI:
                 ("Upload + Monitor",
                  "pio run --target upload && pio device monitor"),
             ]
+        elif plat == "pc":
+            commands = [
+                ("Build (incremental)",
+                 "cmake --build build"),
+                ("Configure + Build",
+                 "cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build build"),
+                ("Clean + Build",
+                 "rm -rf build && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build build"),
+                ("Run Simulator",
+                 "bin/CrossPad"),
+            ]
         else:
             commands = [
                 ("Build",
                  "cmake --build build"),
                 ("Clean + Build",
                  "rm -rf build && cmake -B build && cmake --build build"),
-                ("Run",
-                 "./build/crosspad"),
             ]
 
         cursor = 0
