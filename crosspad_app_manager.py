@@ -1116,7 +1116,7 @@ class _TUI:
             box_w = max(len(inner) + 6, 50)
             if box_w > w - 4:
                 box_w = w - 4
-            pad_total = box_w - 2 - len(inner)
+            pad_total = box_w - len(inner)
             lp = pad_total // 2
             rp = pad_total - lp
 
