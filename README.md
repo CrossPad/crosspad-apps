@@ -9,9 +9,9 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- LATEST_UPDATES_START -->
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
-- **Sequencer v0.1.0** — Initial release — step sequencer with MIDI recording
 - **Synthesizer v0.1.0** — Initial release — 3 oscillators, ADSR, delay + reverb effects
 - **Serial Monitor v0.1.0** — Initial release — live UART output, input field, baud config
+- **Sequencer v0.1.0** — Initial release — step sequencer with MIDI recording
 - **Mixer v0.1.0** — Initial release — VU meters, 3x2 routing matrix, volume + mute/solo
 <!-- LATEST_UPDATES_END -->
 
@@ -20,6 +20,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- APP_TABLE_START -->
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
+| **App Store** | 0.1.0 | Browse, install, and manage CrossPad apps from the registry | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
 | **Instructions** | 0.2.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
 | **Mixer** | 0.1.0 | Audio mixer/router with VU meters, routing matrix, channel strips | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
@@ -28,7 +29,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*7 official app(s)*
+*8 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps
