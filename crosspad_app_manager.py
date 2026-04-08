@@ -353,7 +353,8 @@ class AppManager:
                 path = parts[1]
                 name = os.path.basename(path)
                 infra = name in ("crosspad-core", "crosspad-gui",
-                                 "crosspad-platform-idf")
+                                 "crosspad-platform-idf",
+                                 "FreeRTOS", "lvgl")
                 is_app = name.startswith("crosspad-") and not infra
                 subs.append({
                     "name": name, "path": path, "commit": commit,
@@ -518,10 +519,15 @@ class AppManager:
         if isinstance(requires, list):
             requires = {r: "*" for r in requires}
         for req, ver in requires.items():
-            req_path = self.project_dir / self.config.lib_dir / req
-            if not req_path.exists():
+            # Check lib_dir (apps), lib/ (shared deps), and project root
+            candidates = [
+                self.project_dir / self.config.lib_dir / req,
+                self.project_dir / "lib" / req,
+                self.project_dir / req,
+            ]
+            if not any(c.exists() for c in candidates):
                 print(f"Warning: Required component '{req}' ({ver}) "
-                      f"not found at {req_path}")
+                      f"not found")
 
         print(f"Installing {info['name']}...")
         print(f"  Repo: {repo}")
