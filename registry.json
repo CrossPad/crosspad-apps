@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "synthesizer": {
       "name": "Synthesizer",
       "version": "0.1.0",
@@ -65,6 +49,38 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.1.0",
+      "description": "Audio mixer/router with VU meters, routing matrix, channel strips",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.0",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "instructions": {
       "name": "Instructions",
       "version": "0.2.0",
@@ -76,22 +92,6 @@
       "platforms": [
         "esp-idf",
         "arduino",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.1.0",
-      "description": "Audio mixer/router with VU meters, routing matrix, channel strips",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
         "pc"
       ],
       "requires": {
@@ -117,7 +117,7 @@
     },
     "sampler": {
       "name": "Sampler",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Sample player with 16 pads, waveform editing, kit management",
       "repo": "https://github.com/CrossPad/crosspad-sampler.git",
       "component_path": "components/crosspad-sampler",
