@@ -99,22 +99,6 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "piano": {
-      "name": "Piano",
-      "version": "0.1.0",
-      "description": "Synth piano with parameter sliders, presets, octave control",
-      "repo": "https://github.com/CrossPad/crosspad-piano.git",
-      "component_path": "components/crosspad-piano",
-      "icon": "piano.png",
-      "category": "music",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "sampler": {
       "name": "Sampler",
       "version": "0.2.0",
@@ -126,6 +110,22 @@
       "platforms": [
         "esp-idf",
         "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "piano": {
+      "name": "Piano",
+      "version": "0.1.0",
+      "description": "Synth piano with parameter sliders, presets, octave control",
+      "repo": "https://github.com/CrossPad/crosspad-piano.git",
+      "component_path": "components/crosspad-piano",
+      "icon": "piano.png",
+      "category": "music",
+      "platforms": [
+        "pc"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
