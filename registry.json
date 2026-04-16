@@ -33,22 +33,6 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "serial-monitor": {
-      "name": "Serial Monitor",
-      "version": "0.1.0",
-      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
-      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
-      "component_path": "components/crosspad-serial-monitor",
-      "icon": "terminal.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "mixer": {
       "name": "Mixer",
       "version": "0.1.0",
@@ -57,6 +41,22 @@
       "component_path": "components/crosspad-mixer",
       "icon": "mixer.png",
       "category": "audio",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.0",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
+      "category": "tools",
       "platforms": [
         "pc"
       ],
