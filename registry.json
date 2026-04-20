@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "synthesizer": {
       "name": "Synthesizer",
       "version": "0.1.0",
@@ -49,6 +33,22 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.2.0",
+      "description": "MIDI step sequencer with recording, playback, overdub",
+      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "mixer": {
       "name": "Mixer",
       "version": "0.1.0",
@@ -57,6 +57,22 @@
       "component_path": "components/crosspad-mixer",
       "icon": "mixer.png",
       "category": "audio",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.0",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
       "platforms": [
         "pc"
       ],
@@ -90,22 +106,6 @@
       "component_path": "components/crosspad-piano",
       "icon": "piano.png",
       "category": "music",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
       "platforms": [
         "pc"
       ],
