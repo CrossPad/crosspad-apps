@@ -17,6 +17,22 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "sequencer": {
       "name": "Sequencer",
       "version": "0.2.0",
@@ -43,22 +59,6 @@
       "category": "tools",
       "platforms": [
         "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
