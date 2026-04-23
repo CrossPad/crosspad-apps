@@ -17,16 +17,16 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.0",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
+      "category": "tools",
       "platforms": [
-        "arduino"
+        "pc"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
@@ -49,22 +49,6 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "serial-monitor": {
-      "name": "Serial Monitor",
-      "version": "0.1.0",
-      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
-      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
-      "component_path": "components/crosspad-serial-monitor",
-      "icon": "terminal.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "mixer": {
       "name": "Mixer",
       "version": "0.1.0",
@@ -75,6 +59,22 @@
       "category": "audio",
       "platforms": [
         "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.2.0",
+      "description": "MIDI step sequencer with recording, playback, overdub",
+      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
