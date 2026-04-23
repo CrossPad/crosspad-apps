@@ -11,8 +11,8 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 - **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
 - **App Store v0.1.0** — Initial release — registry browser, install/remove/update via app manager
-- **Synthesizer v0.1.0** — Initial release — 3 oscillators, ADSR, delay + reverb effects
 - **Sequencer v0.1.0** — Initial release — step sequencer with MIDI recording
+- **Synthesizer v0.1.0** — Initial release — 3 oscillators, ADSR, delay + reverb effects
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
