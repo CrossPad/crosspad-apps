@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -33,16 +17,16 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "mixer": {
-      "name": "Mixer",
+    "synthesizer": {
+      "name": "Synthesizer",
       "version": "0.1.0",
-      "description": "Audio mixer/router with VU meters, routing matrix, channel strips",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
       "platforms": [
-        "pc"
+        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
@@ -59,6 +43,22 @@
       "category": "music",
       "platforms": [
         "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.1.0",
+      "description": "Audio mixer/router with VU meters, routing matrix, channel strips",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
