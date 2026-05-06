@@ -12,7 +12,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
 - **Synthesizer v0.1.0** — Initial release — 3 oscillators, ADSR, delay + reverb effects
 - **Serial Monitor v0.1.0** — Initial release — live UART output, input field, baud config
-- **Sequencer v0.1.0** — Initial release — step sequencer with MIDI recording
+- **App Store v0.1.0** — Initial release — registry browser, install/remove/update via app manager
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
