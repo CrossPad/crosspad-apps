@@ -8,6 +8,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 
 <!-- LATEST_UPDATES_START -->
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
+- **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
 - **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
 - **Synthesizer v0.1.0** — Initial release — 3 oscillators, ADSR, delay + reverb effects
@@ -22,7 +23,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 |-----|---------|-------------|-----------|----------|------|
 | **App Store** | 0.1.0 | Browse, install, and manage CrossPad apps from the registry | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
 | **Instructions** | 0.2.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
-| **Mixer** | 0.1.0 | Audio mixer/router with VU meters, routing matrix, channel strips | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
+| **Mixer** | 0.2.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
 | **Sampler** | 0.2.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.2.0 | MIDI step sequencer with recording, playback, overdub | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-sequencer](https://github.com/CrossPad/crosspad-sequencer) |
