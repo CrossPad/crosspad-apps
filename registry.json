@@ -1,6 +1,24 @@
 {
   "version": 1,
   "apps": {
+    "instructions": {
+      "name": "Instructions",
+      "version": "0.2.0",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "info.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "arduino",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "serial-monitor": {
       "name": "Serial Monitor",
       "version": "0.1.0",
@@ -17,35 +35,16 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "mixer": {
-      "name": "Mixer",
+    "sequencer": {
+      "name": "Sequencer",
       "version": "0.2.0",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
+      "description": "MIDI step sequencer with recording, playback, overdub",
+      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
       "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "instructions": {
-      "name": "Instructions",
-      "version": "0.2.0",
-      "description": "Markdown-based instructions and help viewer",
-      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
-      "component_path": "components/crosspad-instructions",
-      "icon": "info.png",
-      "category": "tools",
-      "platforms": [
-        "esp-idf",
-        "arduino",
-        "pc"
+        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
@@ -68,16 +67,17 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "sequencer": {
-      "name": "Sequencer",
+    "mixer": {
+      "name": "Mixer",
       "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
       "platforms": [
-        "arduino"
+        "pc",
+        "esp-idf"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
