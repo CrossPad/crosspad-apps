@@ -11,8 +11,8 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 - **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
-- **App Store v0.1.0** — Initial release — registry browser, install/remove/update via app manager
 - **Serial Monitor v0.1.0** — Initial release — live UART output, input field, baud config
+- **Instructions v0.1.0** — Initial release — markdown rendering, file auto-discovery
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
