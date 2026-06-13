@@ -1,6 +1,23 @@
 {
   "version": 1,
   "apps": {
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.2.0",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -29,23 +46,6 @@
         "esp-idf",
         "arduino",
         "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.2.0",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
