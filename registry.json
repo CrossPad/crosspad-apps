@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "instructions": {
       "name": "Instructions",
       "version": "0.2.0",
@@ -35,16 +19,16 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "synthesizer": {
-      "name": "Synthesizer",
+    "appstore": {
+      "name": "App Store",
       "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
       "platforms": [
-        "arduino"
+        "pc"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
@@ -68,6 +52,22 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.2.0",
+      "description": "MIDI step sequencer with recording, playback, overdub",
+      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "serial-monitor": {
       "name": "Serial Monitor",
       "version": "0.1.0",
@@ -84,13 +84,13 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
       "category": "music",
       "platforms": [
         "arduino"
