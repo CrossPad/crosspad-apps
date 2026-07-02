@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "crosspad": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/home/matixan/GIT/crosspad-mcp/dist/index.js"
+      ],
+      "env": {
+        "CROSSPAD_GIT_DIR": "/home/matixan/GIT"
+      }
+    }
+  }
+}
