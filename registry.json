@@ -1,23 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.2.0",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "serial-monitor": {
       "name": "Serial Monitor",
       "version": "0.1.0",
@@ -52,6 +35,39 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.2.0",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -75,22 +91,6 @@
       "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
       "component_path": "components/crosspad-sequencer",
       "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
       "category": "music",
       "platforms": [
         "arduino"
