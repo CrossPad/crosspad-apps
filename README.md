@@ -8,8 +8,8 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 
 <!-- LATEST_UPDATES_START -->
 - **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
-- **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
+- **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
 - **Mixer v0.1.0** — Initial release — VU meters, 3x2 routing matrix, volume + mute/solo
 - **Serial Monitor v0.1.0** — Initial release — live UART output, input field, baud config
