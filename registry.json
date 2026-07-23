@@ -51,22 +51,6 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "mixer": {
       "name": "Mixer",
       "version": "0.2.0",
@@ -91,6 +75,22 @@
       "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
       "component_path": "components/crosspad-serial-monitor",
       "icon": "terminal.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.0",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
       "category": "tools",
       "platforms": [
         "pc"
