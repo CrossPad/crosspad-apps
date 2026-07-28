@@ -11,7 +11,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
-- **Serial Monitor v0.1.0** — Initial release — live UART output, input field, baud config
+- **Mixer v0.1.0** — Initial release — VU meters, 3x2 routing matrix, volume + mute/solo
 - **App Store v0.1.0** — Initial release — registry browser, install/remove/update via app manager
 <!-- LATEST_UPDATES_END -->
 
