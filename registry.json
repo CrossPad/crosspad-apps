@@ -67,22 +67,6 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "mixer": {
       "name": "Mixer",
       "version": "0.2.0",
@@ -94,6 +78,22 @@
       "platforms": [
         "pc",
         "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.2.0",
+      "description": "MIDI step sequencer with recording, playback, overdub",
+      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
