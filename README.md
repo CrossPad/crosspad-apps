@@ -250,6 +250,19 @@ deviations from the header default are emitted, into
 The TUI screen `[C] Configure` renders the same catalog as a menuconfig tree
 with help text and `requires` validation.
 
+### Device telemetry
+
+```bash
+python3 <wrapper> device        # exits 2 when the device differs
+```
+
+A flashed CrossPad reports the submodules baked into its binary over CDC
+(`APP_VERSIONS`: component, registry id, commit, pin, dirty flag). The manager
+diffs that against the checkout, so "is the board actually running this code?"
+stops being guesswork. Same view on the TUI's `[D] Device` screen. A device in
+USB audio mode exposes no CDC — switch it back with the SysEx `F0 7D 1B 00 F7`
+on its own MIDI port.
+
 ### Profiles
 
 ```bash
