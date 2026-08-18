@@ -706,6 +706,21 @@ class AppManager:
                 }
                 print(f"  + {app_id} ({install_path} @ {commit}, ref={ref})")
                 synced += 1
+            elif exists_on_disk and already_in_manifest:
+                # The manifest records the commit that was installed, but every
+                # cross-repo bump (git submodule update, a manual checkout) moves
+                # the submodule without touching apps.json — so the recorded
+                # version drifts and `list` reports a commit that has not been
+                # checked out for months. Re-read it from git; that is the whole
+                # point of a sync command.
+                commit = self._get_submodule_commit(install_path)
+                inst = manifest["installed"][app_id]
+                if commit != "unknown" and commit != inst.get("version"):
+                    print(f"  ~ {app_id} ({inst.get('version', '?')} -> {commit})")
+                    inst["version"] = commit
+                    inst["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    synced += 1
+
             elif not exists_on_disk and already_in_manifest:
                 del manifest["installed"][app_id]
                 print(f"  - {app_id} (removed from manifest, not on disk)")
