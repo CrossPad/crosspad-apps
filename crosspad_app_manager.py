@@ -943,13 +943,37 @@ class AppManager:
         managed = flag.get("managed_by", {})
         return managed.get(self.config.platform)
 
+    def _managed_value(self, flag: dict) -> str | None:
+        """Read a flag whose value another build system owns.
+
+        CROSSPAD_BOARD on ESP-IDF is picked by Kconfig; showing the schema
+        default there would be a lie, and a config screen that lies is worse
+        than one that omits the row.
+        """
+        source = flag.get("managed_source", {}).get(self.config.platform)
+        if not source:
+            return None
+        path = self.project_dir / source.get("file", "")
+        if not path.exists():
+            return None
+        try:
+            text = path.read_text()
+        except OSError:
+            return None
+        for needle, value in source.get("match", {}).items():
+            if needle in text:
+                return value
+        return None
+
     def feature_values(self) -> dict:
         """Effective value per flag: schema default overlaid with config."""
         chosen = self.load_config().get("features", {})
         out = {}
         for flag in self.load_feature_schema().get("flags", []):
             name = flag["name"]
-            out[name] = chosen.get(name, flag.get("default"))
+            managed = self._managed_value(flag)
+            out[name] = (managed if managed is not None
+                         else chosen.get(name, flag.get("default")))
         return out
 
     def set_feature(self, name: str, value, local: bool = False):
@@ -1744,8 +1768,10 @@ def _config_cli(mgr: "AppManager", args):
                 print(f"\n  {groups.get(grp, grp)}")
             value = values.get(name)
             default = flag.get("default")
-            mark = " " if value == default else "*"
             managed = mgr._flag_managed_elsewhere(flag)
+            # A managed flag is never "overridden by us" — its value comes from
+            # the other build system, so the override marker would misattribute it.
+            mark = " " if value == default or managed else "*"
             note = f"   [{managed}-managed on {mgr.config.platform}]" if managed else ""
             print(f"  {mark} {name:<28} {str(value):<28}{note}")
         print("\n  * = overridden in the project config\n")
@@ -3007,6 +3033,8 @@ class _TUI:
                 col = _C.BWHITE if value != default else _C.RST
                 dim = f"{_C.DIM}(managed by {managed}){_C.RST}" if managed else (
                     f"{_C.BYELLOW}*{_C.RST}" if value != default else " ")
+                if managed:
+                    col = _C.RST
                 _w(f"  {marker} {name:<28}{col}{shown:<32}{_C.RST}{dim}\n")
 
             if 0 <= cursor < len(flags):
