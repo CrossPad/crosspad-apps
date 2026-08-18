@@ -165,6 +165,14 @@ void tick_cb(lv_timer_t*)
     }
 }
 
+// Closing the app from inside the app. Never call destroyApp() straight from
+// an event callback: it deletes the widget tree this very event belongs to.
+void back_cb(lv_event_t* e)
+{
+    auto* app = static_cast<App*>(lv_event_get_user_data(e));
+    if (app) app->destroyAppAsync();
+}
+
 void add_cb(lv_event_t*)    { spawn_fish(2); }
 void remove_cb(lv_event_t*) { remove_fish(); }
 
@@ -204,6 +212,12 @@ lv_obj_t* make_button(lv_obj_t* parent, const char* text, lv_event_cb_t cb)
 
 lv_obj_t* __APP_CLASS___create(lv_obj_t* parent, App* app)
 {
+#ifdef __APP_UPPER___USE_ENCODER
+    if (indev_encoderTop) s_prevEncGroup = lv_indev_get_group(indev_encoderTop);
+    if (!s_encGroup) s_encGroup = lv_group_create();
+    if (indev_encoderTop) lv_indev_set_group(indev_encoderTop, s_encGroup);
+#endif
+
     s_root = lv_obj_create(parent);
     lv_obj_set_size(s_root, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(s_root, lv_color_hex(0x001018), 0);
@@ -212,6 +226,39 @@ lv_obj_t* __APP_CLASS___create(lv_obj_t* parent, App* app)
     lv_obj_set_flex_flow(s_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_root, 6, 0);
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
+
+    // -- title bar with the way out --
+    // Every app needs one: the launcher sits underneath, but nothing brings it
+    // back on its own. destroyAppAsync() is the framework's close path — it
+    // defers past this event callback and clears the running-app pointer.
+    lv_obj_t* bar = lv_obj_create(s_root);
+    lv_obj_set_width(bar, LV_PCT(100));
+    lv_obj_set_height(bar, 30);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
+    lv_obj_set_style_pad_column(bar, 8, 0);
+    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* backBtn = lv_button_create(bar);
+    lv_obj_set_size(backBtn, 62, 26);
+    lv_obj_add_event_cb(backBtn, back_cb, LV_EVENT_CLICKED, app);
+    lv_obj_t* backLabel = lv_label_create(backBtn);
+    lv_label_set_text(backLabel, LV_SYMBOL_LEFT " Back");
+    lv_obj_center(backLabel);
+
+    lv_obj_t* title = lv_label_create(bar);
+    lv_label_set_text(title, "__APP_NAME__");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x7ec8e3), 0);
+
+#ifdef __APP_UPPER___USE_ENCODER
+    // Back joins the group first and keeps focus: with only an encoder, the
+    // way out has to be reachable without hunting through the UI.
+    if (s_encGroup) lv_group_add_obj(s_encGroup, backBtn);
+#endif
 
     // -- aquarium --
     s_tank = lv_obj_create(s_root);
@@ -235,12 +282,6 @@ lv_obj_t* __APP_CLASS___create(lv_obj_t* parent, App* app)
     lv_obj_set_style_pad_column(row, 6, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-#ifdef __APP_UPPER___USE_ENCODER
-    if (indev_encoderTop) s_prevEncGroup = lv_indev_get_group(indev_encoderTop);
-    if (!s_encGroup) s_encGroup = lv_group_create();
-    if (indev_encoderTop) lv_indev_set_group(indev_encoderTop, s_encGroup);
-#endif
 
     lv_obj_t* addBtn = make_button(row, "+ Fish", add_cb);
     lv_obj_t* remBtn = make_button(row, "- Fish", remove_cb);
@@ -279,6 +320,10 @@ lv_obj_t* __APP_CLASS___create(lv_obj_t* parent, App* app)
 
     for (int i = 0; i < kStartFish; ++i) spawn_fish(0);
     update_count_label();
+
+#ifdef __APP_UPPER___USE_ENCODER
+    if (s_encGroup) lv_group_focus_obj(backBtn);
+#endif
 
     s_timer = lv_timer_create(tick_cb, kTickMs, nullptr);
 
@@ -337,6 +382,6 @@ void __APP_CLASS___destroy(lv_obj_t* root)
 
 // Auto-registration: the app shows up in the launcher with no wiring anywhere
 // else. The last argument names the pad logic registered above.
-REGISTER_APP_PL(__APP_CLASS__, nullptr, "play.png",
+REGISTER_APP_PL(__APP_CLASS__, nullptr, "__APP_ID__.png",
                 __APP_CLASS___create, __APP_CLASS___destroy,
                 nullptr, nullptr, nullptr, 0, "__APP_CLASS__")

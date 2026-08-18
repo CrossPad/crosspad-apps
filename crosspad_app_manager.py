@@ -1467,10 +1467,15 @@ class AppManager:
                 rel = rel[:-len(".tmpl")]
             target = dest / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                target.write_text(substitute(path.read_text()))
-            except UnicodeDecodeError:
+            # Only text is templated; images and other binaries are copied
+            # as-is (their names still get substituted, above).
+            if path.suffix.lower() in (".png", ".jpg", ".bin"):
                 target.write_bytes(path.read_bytes())
+            else:
+                try:
+                    target.write_text(substitute(path.read_text()))
+                except UnicodeDecodeError:
+                    target.write_bytes(path.read_bytes())
             written += 1
         return written
 
