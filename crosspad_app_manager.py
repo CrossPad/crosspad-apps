@@ -35,6 +35,7 @@ LOCAL_CONFIG_FILE = "crosspad.local.json"  # personal overrides (gitignored)
 WORK_ROOT = ".crosspad"               # generated + backup working data
 BACKUP_ROOT = ".crosspad/backups"
 PROFILE_DIR = "config/profiles"
+FEATURES_SCHEMA = "features.schema.json"
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour
 
 # Per-app tracking policy. The mode is intent; the blocking flags below are
@@ -905,6 +906,251 @@ class AppManager:
                 print(f"  backup: {dest}")
         return True, f"forced over {reason}"
 
+    # -- feature flags (Marlin-style compile-time config) ----------------------
+    #
+    # crosspad-core owns the catalog (features.schema.json next to
+    # Configuration.h). The project config owns the chosen values. Nothing here
+    # ever writes into the submodule: overrides leave as -D definitions in
+    # .crosspad/build_flags.*, so a project with no overrides builds exactly
+    # like the checked-in headers say it should.
+
+    def schema_path(self) -> Path | None:
+        for base in (self.config.lib_dir, "lib", "components", "."):
+            p = (self.project_dir / base / "crosspad-core" / "include" /
+                 "crosspad" / "config" / FEATURES_SCHEMA)
+            if p.exists():
+                return p
+        return None
+
+    def load_feature_schema(self) -> dict:
+        p = self.schema_path()
+        if not p:
+            return {"flags": [], "groups": []}
+        try:
+            with open(p) as f:
+                return json.load(f)
+        except (OSError, ValueError) as e:
+            print(f"Warning: cannot read {FEATURES_SCHEMA}: {e}")
+            return {"flags": [], "groups": []}
+
+    def _flag_managed_elsewhere(self, flag: dict) -> str | None:
+        """Some flags are owned by another build system on some platforms.
+
+        CROSSPAD_BOARD on ESP-IDF is the case that matters: Kconfig picks the
+        board revision and CMake bridges it to CROSSPAD_BOARD, so emitting a
+        second -D here would fight the BSP pinout selection.
+        """
+        managed = flag.get("managed_by", {})
+        return managed.get(self.config.platform)
+
+    def feature_values(self) -> dict:
+        """Effective value per flag: schema default overlaid with config."""
+        chosen = self.load_config().get("features", {})
+        out = {}
+        for flag in self.load_feature_schema().get("flags", []):
+            name = flag["name"]
+            out[name] = chosen.get(name, flag.get("default"))
+        return out
+
+    def set_feature(self, name: str, value, local: bool = False):
+        target = self._load_local_config() if local else self._load_config_raw()
+        target.setdefault("version", 1)
+        schema = {f["name"]: f for f in self.load_feature_schema().get("flags", [])}
+        features = target.setdefault("features", {})
+        if name in schema and value == schema[name].get("default"):
+            features.pop(name, None)   # back to default: stop overriding
+        else:
+            features[name] = value
+        self.save_config(target, local=local)
+
+    def validate_features(self) -> list[str]:
+        """Check `requires` expressions. The compiler is still the authority."""
+        values = self.feature_values()
+        problems = []
+        for flag in self.load_feature_schema().get("flags", []):
+            name = flag["name"]
+            if not values.get(name):
+                continue
+            for req in flag.get("requires", []):
+                if "==" not in req:
+                    continue
+                dep, want = (x.strip() for x in req.split("==", 1))
+                have = values.get(dep)
+                if str(have) != want:
+                    problems.append(
+                        f"{name} requires {dep}=={want} (is {have})")
+        return problems
+
+    def feature_overrides(self) -> list[str]:
+        """-D definitions for every flag that deviates from its default."""
+        values = self.feature_values()
+        defs = []
+        for flag in self.load_feature_schema().get("flags", []):
+            name = flag["name"]
+            if self._flag_managed_elsewhere(flag):
+                continue
+            value = values.get(name)
+            if value == flag.get("default"):
+                continue
+            if flag.get("type") == "bool":
+                defs.append(f"{name}={1 if value else 0}")
+            else:
+                defs.append(f"{name}={value}")
+        return defs
+
+    def flags_hash(self) -> str:
+        import hashlib
+        defs = sorted(self.feature_overrides())
+        return hashlib.sha256("\n".join(defs).encode()).hexdigest()[:12]
+
+    def generate_build_flags(self) -> dict:
+        """Emit the -D overrides for the platform's build system."""
+        defs = self.feature_overrides()
+        work = self.project_dir / WORK_ROOT
+        work.mkdir(parents=True, exist_ok=True)
+        digest = self.flags_hash()
+        header = ("# Generated by the CrossPad app manager from "
+                  f"{CONFIG_FILE}. Do not edit.\n"
+                  f"# Flag set: {digest}\n")
+
+        cmake_path = work / "build_flags.cmake"
+        body = header + f'set(CROSSPAD_FLAGS_HASH "{digest}")\n'
+        if defs:
+            body += "add_compile_definitions(\n"
+            body += "".join(f"    {d}\n" for d in defs)
+            body += ")\n"
+        cmake_path.write_text(body)
+
+        ini_path = work / "build_flags.ini"
+        ini = header.replace("#", ";") + "[crosspad_flags]\nbuild_flags ="
+        ini += "".join(f" -D{d}" for d in defs) + "\n"
+        ini_path.write_text(ini)
+
+        (work / "flags.hash").write_text(digest + "\n")
+        return {"defs": defs, "hash": digest,
+                "cmake": str(cmake_path), "ini": str(ini_path)}
+
+    def build_flags_stale(self) -> bool:
+        """True when the last build used a different flag set."""
+        marker = self.project_dir / WORK_ROOT / "built.hash"
+        if not marker.exists():
+            return bool(self.feature_overrides())
+        return marker.read_text().strip() != self.flags_hash()
+
+    def mark_build_flags_built(self):
+        work = self.project_dir / WORK_ROOT
+        work.mkdir(parents=True, exist_ok=True)
+        (work / "built.hash").write_text(self.flags_hash() + "\n")
+
+    # -- profiles -------------------------------------------------------------
+
+    def profile_dir(self) -> Path:
+        return self.project_dir / PROFILE_DIR
+
+    def list_profiles(self) -> list[str]:
+        d = self.profile_dir()
+        if not d.exists():
+            return []
+        return sorted(p.stem for p in d.glob("*.json"))
+
+    def load_profile(self, name: str) -> dict | None:
+        p = self.profile_dir() / f"{name}.json"
+        if not p.exists():
+            return None
+        try:
+            with open(p) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def save_profile(self, name: str, description: str = "") -> str:
+        cfg = self.load_config()
+        prof = {
+            "name": name,
+            "description": description,
+            "platform": self.config.platform,
+            "features": dict(cfg.get("features", {})),
+            "apps": dict(cfg.get("apps", {})),
+        }
+        d = self.profile_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{name}.json"
+        with open(path, "w") as f:
+            json.dump(prof, f, indent=2)
+            f.write("\n")
+        return str(path)
+
+    def profile_plan(self, name: str) -> dict | None:
+        """Diff the current project against a profile. Changes nothing."""
+        prof = self.load_profile(name)
+        if prof is None:
+            return None
+        cfg = self.load_config()
+        values = self.feature_values()
+        manifest = self._load_manifest().get("installed", {})
+
+        feature_changes = []
+        for flag, want in prof.get("features", {}).items():
+            if values.get(flag) != want:
+                feature_changes.append((flag, values.get(flag), want))
+
+        want_apps = prof.get("apps", {})
+        install, remove, retrack, protected = [], [], [], []
+        for app_id, entry in want_apps.items():
+            if app_id not in manifest:
+                install.append((app_id, entry.get("ref", "main")))
+            else:
+                cur = self.app_policy(app_id)
+                if cur.get("track") != entry.get("track", TRACK_REGISTRY):
+                    retrack.append((app_id, cur.get("track"),
+                                    entry.get("track", TRACK_REGISTRY)))
+        for app_id in manifest:
+            if app_id in want_apps:
+                continue
+            st = self.app_status(app_id)
+            # A profile that does not mention an app is not a licence to delete
+            # someone's work-in-progress fork of it.
+            if st["protected"] or st["blocking"]:
+                protected.append((app_id, ", ".join(st["blocking"]) or
+                                  f"track={st['policy']['track']}"))
+            else:
+                remove.append(app_id)
+        return {"profile": prof, "features": feature_changes,
+                "install": install, "remove": remove,
+                "retrack": retrack, "protected": protected}
+
+    def apply_profile(self, name: str, remove_extra: bool = False) -> bool:
+        plan = self.profile_plan(name)
+        if plan is None:
+            print(f"No profile '{name}'. Available: "
+                  f"{', '.join(self.list_profiles()) or 'none'}")
+            return False
+
+        for flag, _old, new in plan["features"]:
+            self.set_feature(flag, new)
+        for app_id, ref in plan["install"]:
+            self.install(app_id, ref=ref)
+        for app_id, _old, new in plan["retrack"]:
+            entry = plan["profile"]["apps"][app_id]
+            self.set_app_policy(app_id, new, ref=entry.get("ref"),
+                                commit=entry.get("commit"))
+        if remove_extra:
+            for app_id in plan["remove"]:
+                self.remove(app_id)
+        elif plan["remove"]:
+            print(f"  not in profile (kept): {', '.join(plan['remove'])}")
+        for app_id, reason in plan["protected"]:
+            print(f"  kept (protected): {app_id} — {reason}")
+
+        gen = self.generate_build_flags()
+        print(f"  build flags: {len(gen['defs'])} override(s), "
+              f"set {gen['hash']}")
+        problems = self.validate_features()
+        for p in problems:
+            print(f"  warning: {p}")
+        self._print_next_steps()
+        return True
+
     # -- commands -------------------------------------------------------------
 
     def _print_app_line(self, app_id: str, info: dict, manifest: dict):
@@ -1386,6 +1632,24 @@ def cli_main(config: PlatformConfig):
 
     sub.add_parser("config-init",
                    help=f"Create {CONFIG_FILE} from the current state")
+
+    cfg_cmd = sub.add_parser("config", help="Show or set compile-time features")
+    cfg_cmd.add_argument("flag", nargs="?", help="Flag name")
+    cfg_cmd.add_argument("value", nargs="?",
+                         help="New value (on/off or enum value)")
+    cfg_cmd.add_argument("--local", action="store_true",
+                         help=f"Write to {LOCAL_CONFIG_FILE}")
+    cfg_cmd.add_argument("--gen", action="store_true",
+                         help="Regenerate .crosspad/build_flags.*")
+
+    prof_cmd = sub.add_parser("profile", help="Named build recipes")
+    prof_cmd.add_argument("action",
+                          choices=["list", "show", "apply", "save"])
+    prof_cmd.add_argument("name", nargs="?", help="Profile name")
+    prof_cmd.add_argument("--remove-extra", action="store_true",
+                          help="Remove installed apps the profile omits")
+    prof_cmd.add_argument("--description", default="",
+                          help="Description when saving")
     sub.add_parser("sync", help="Sync manifest with existing submodules")
     sub.add_parser("tui", help="Interactive terminal UI")
 
@@ -1423,6 +1687,10 @@ def cli_main(config: PlatformConfig):
             mgr.restore_backup(args.app, args.stamp)
     elif args.command == "config-init":
         mgr.ensure_config()
+    elif args.command == "config":
+        _config_cli(mgr, args)
+    elif args.command == "profile":
+        _profile_cli(mgr, args)
     elif args.command == "sync":
         mgr.sync()
         mgr.ensure_config(quiet=True)
@@ -1436,6 +1704,105 @@ def cli_main(config: PlatformConfig):
             sys.exit(1)
     else:
         parser.print_help()
+
+
+def _config_cli(mgr: "AppManager", args):
+    schema = mgr.load_feature_schema()
+    flags = {f["name"]: f for f in schema.get("flags", [])}
+
+    if args.flag:
+        if args.flag not in flags:
+            print(f"Unknown flag '{args.flag}'. Known: {', '.join(flags)}")
+            sys.exit(1)
+        if args.value is None:
+            print(f"{args.flag} = {mgr.feature_values().get(args.flag)}")
+            return
+        flag = flags[args.flag]
+        if flag.get("type") == "bool":
+            value = args.value.lower() in ("1", "on", "true", "yes", "y")
+        else:
+            allowed = [v["value"] for v in flag.get("values", [])]
+            if allowed and args.value not in allowed:
+                print(f"Invalid value. Allowed: {', '.join(allowed)}")
+                sys.exit(1)
+            value = args.value
+        mgr.ensure_config(quiet=True)
+        mgr.set_feature(args.flag, value, local=args.local)
+        print(f"{args.flag} = {value}")
+    else:
+        values = mgr.feature_values()
+        if not flags:
+            print(f"No {FEATURES_SCHEMA} found "
+                  f"(is crosspad-core checked out?)")
+            return
+        groups = {g["id"]: g["title"] for g in schema.get("groups", [])}
+        current_group = None
+        for name, flag in flags.items():
+            grp = flag.get("group", "other")
+            if grp != current_group:
+                current_group = grp
+                print(f"\n  {groups.get(grp, grp)}")
+            value = values.get(name)
+            default = flag.get("default")
+            mark = " " if value == default else "*"
+            managed = mgr._flag_managed_elsewhere(flag)
+            note = f"   [{managed}-managed on {mgr.config.platform}]" if managed else ""
+            print(f"  {mark} {name:<28} {str(value):<28}{note}")
+        print("\n  * = overridden in the project config\n")
+
+    for problem in mgr.validate_features():
+        print(f"  warning: {problem}")
+    if args.gen or args.flag:
+        gen = mgr.generate_build_flags()
+        print(f"  wrote {gen['cmake']} ({len(gen['defs'])} override(s), "
+              f"set {gen['hash']})")
+
+
+def _profile_cli(mgr: "AppManager", args):
+    if args.action == "list":
+        names = mgr.list_profiles()
+        if not names:
+            print(f"No profiles in {PROFILE_DIR}/.")
+            return
+        for name in names:
+            prof = mgr.load_profile(name) or {}
+            print(f"  {name:<18} {prof.get('description', '')}")
+        return
+
+    if not args.name:
+        print("Specify a profile name.")
+        sys.exit(1)
+
+    if args.action == "save":
+        path = mgr.save_profile(args.name, args.description)
+        print(f"Saved {path}")
+        return
+
+    plan = mgr.profile_plan(args.name)
+    if plan is None:
+        print(f"No profile '{args.name}'. Available: "
+              f"{', '.join(mgr.list_profiles()) or 'none'}")
+        sys.exit(1)
+
+    print(f"\nProfile '{args.name}': {plan['profile'].get('description', '')}")
+    for flag, old, new in plan["features"]:
+        print(f"  flag    {flag}: {old} -> {new}")
+    for app_id, ref in plan["install"]:
+        print(f"  install {app_id} ({ref})")
+    for app_id, old, new in plan["retrack"]:
+        print(f"  track   {app_id}: {old} -> {new}")
+    for app_id in plan["remove"]:
+        print(f"  extra   {app_id} "
+              f"{'(will be removed)' if args.remove_extra else '(kept)'}")
+    for app_id, reason in plan["protected"]:
+        print(f"  keep    {app_id} — {reason}")
+    if not any((plan["features"], plan["install"], plan["retrack"],
+                plan["remove"])):
+        print("  already matches this profile")
+
+    if args.action == "apply":
+        print()
+        mgr.apply_profile(args.name, remove_extra=args.remove_extra)
 
 
 # =============================================================================
@@ -1898,12 +2265,14 @@ class _TUI:
                 ("B", "Browse & Install"),
                 ("U", "Update All"),
                 ("W", "Workspace"),
-                ("H", "Health Check"),
+                ("C", "Configure"),
+                ("P", "Profiles"),
             ]
             if plat == "pc":
                 acts2 = [
                     ("F", "Build & Run"),
                     ("O", "Run Simulator"),
+                    ("H", "Health"),
                     ("T", "Dev Tools"),
                     ("Q", "Quit"),
                 ]
@@ -1911,6 +2280,7 @@ class _TUI:
                 acts2 = [
                     ("F", "Build & Flash"),
                     ("O", "OTA Flash"),
+                    ("H", "Health"),
                     ("T", "Dev Tools"),
                     ("Q", "Quit"),
                 ]
@@ -1934,6 +2304,11 @@ class _TUI:
                 self._reload()
             elif key == "w":
                 self._workspace()
+                self._reload()
+            elif key == "c":
+                self._configure()
+            elif key == "p":
+                self._profiles()
                 self._reload()
             elif key == "h":
                 self._health()
@@ -2579,6 +2954,204 @@ class _TUI:
                 self.mgr.park_wip(app)
                 _pause()
             st = self.mgr.app_status(app)
+
+    # -- Configure (compile-time features) ------------------------------------
+
+    def _configure(self):
+        """menuconfig-style feature tree driven by features.schema.json."""
+        schema = self.mgr.load_feature_schema()
+        flags = schema.get("flags", [])
+        if not flags:
+            _clear()
+            _w(f"\n  {_C.GRAY}No {FEATURES_SCHEMA} found — is crosspad-core "
+               f"checked out?{_C.RST}\n")
+            _pause()
+            return
+
+        titles = {g["id"]: g["title"] for g in schema.get("groups", [])}
+        cursor = 0
+
+        while True:
+            values = self.mgr.feature_values()
+            problems = self.mgr.validate_features()
+            gen_defs = self.mgr.feature_overrides()
+
+            _clear()
+            self._header("Configure — compile-time features",
+                         f"{len(gen_defs)} override(s)  ·  "
+                         f"set {self.mgr.flags_hash()}")
+            _w("\n")
+
+            group = None
+            for i, flag in enumerate(flags):
+                grp = flag.get("group", "other")
+                if grp != group:
+                    group = grp
+                    _w(f"\n   {_C.GRAY}── {titles.get(grp, grp)}{_C.RST}\n")
+                name = flag["name"]
+                value = values.get(name)
+                default = flag.get("default")
+                managed = self.mgr._flag_managed_elsewhere(flag)
+
+                if flag.get("type") == "bool":
+                    shown = f"[{'*' if value else ' '}]"
+                else:
+                    label = name
+                    shown = str(value)
+                    for v in flag.get("values", []):
+                        if v["value"] == value:
+                            shown = v.get("label", value)
+                            break
+
+                marker = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                col = _C.BWHITE if value != default else _C.RST
+                dim = f"{_C.DIM}(managed by {managed}){_C.RST}" if managed else (
+                    f"{_C.BYELLOW}*{_C.RST}" if value != default else " ")
+                _w(f"  {marker} {name:<28}{col}{shown:<32}{_C.RST}{dim}\n")
+
+            if 0 <= cursor < len(flags):
+                help_text = flags[cursor].get("help", "")
+                if help_text:
+                    _w(f"\n   {_C.GRAY}{help_text}{_C.RST}\n")
+
+            if problems:
+                _w("\n")
+                for p in problems:
+                    _w(f"   {_C.BYELLOW}⚠ {p}{_C.RST}\n")
+
+            self._footer("↑↓ navigate   space/enter toggle   "
+                         "[d] default   [g] generate flags   "
+                         "[s] save as profile   q back")
+
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                self.mgr.generate_build_flags()
+                return
+            elif key == "up":
+                cursor = (cursor - 1) % len(flags)
+            elif key == "down":
+                cursor = (cursor + 1) % len(flags)
+            elif key in ("enter", " "):
+                self._toggle_flag(flags[cursor], values)
+            elif key == "d":
+                flag = flags[cursor]
+                self.mgr.ensure_config(quiet=True)
+                self.mgr.set_feature(flag["name"], flag.get("default"))
+            elif key == "g":
+                _clear()
+                gen = self.mgr.generate_build_flags()
+                _w(f"\n  {gen['cmake']}\n  {gen['ini']}\n\n"
+                   f"  {len(gen['defs'])} override(s), set {gen['hash']}\n")
+                for d in gen["defs"]:
+                    _w(f"    -D{d}\n")
+                if self.config.platform == "esp-idf":
+                    _w(f"\n  {_C.GRAY}A changed flag set needs "
+                       f"idf.py fullclean.{_C.RST}\n")
+                _pause()
+            elif key == "s":
+                self._save_profile_flow()
+
+    def _toggle_flag(self, flag: dict, values: dict):
+        name = flag["name"]
+        if self.mgr._flag_managed_elsewhere(flag):
+            _clear()
+            _w(f"\n  {name} is managed by "
+               f"{self.mgr._flag_managed_elsewhere(flag)} on "
+               f"{self.config.platform} — change it there.\n")
+            _pause()
+            return
+        self.mgr.ensure_config(quiet=True)
+        if flag.get("type") == "bool":
+            self.mgr.set_feature(name, not values.get(name))
+            return
+        options = flag.get("values", [])
+        if not options:
+            return
+        labels = [v.get("label", v["value"]) for v in options]
+        idx = _menu_select(name, labels, [v["value"] for v in options])
+        if idx >= 0:
+            self.mgr.set_feature(name, options[idx]["value"])
+
+    # -- Profiles -------------------------------------------------------------
+
+    def _profiles(self):
+        while True:
+            names = self.mgr.list_profiles()
+            _clear()
+            self._header("Profiles", f"{PROFILE_DIR}/")
+            if not names:
+                _w(f"\n  {_C.GRAY}No profiles yet. A profile is a recipe: "
+                   f"board, feature flags and the app set.{_C.RST}\n")
+                self._footer("[s] save current state as a profile   q back")
+                key = _read_key()
+                if key == "s":
+                    self._save_profile_flow()
+                    continue
+                return
+
+            items, descs = [], []
+            for name in names:
+                prof = self.mgr.load_profile(name) or {}
+                items.append(name)
+                descs.append(f"{prof.get('description', '')}   "
+                             f"{len(prof.get('apps', {}))} app(s), "
+                             f"{len(prof.get('features', {}))} flag(s)")
+            idx = _menu_select("Profiles", items, descs)
+            if idx < 0:
+                return
+            self._profile_detail(names[idx])
+
+    def _profile_detail(self, name: str):
+        plan = self.mgr.profile_plan(name)
+        if plan is None:
+            return
+        _clear()
+        self._header(f"Profile — {name}")
+        prof = plan["profile"]
+        _w(f"\n   {_C.GRAY}{prof.get('description', '')}{_C.RST}\n\n")
+
+        empty = True
+        for flag, old, new in plan["features"]:
+            _w(f"   {_C.BYELLOW}flag{_C.RST}     {flag}: {old} → {new}\n")
+            empty = False
+        for app_id, ref in plan["install"]:
+            _w(f"   {_C.BGREEN}install{_C.RST}  {app_id} ({ref})\n")
+            empty = False
+        for app_id, old, new in plan["retrack"]:
+            _w(f"   {_C.BCYAN}track{_C.RST}    {app_id}: {old} → {new}\n")
+            empty = False
+        for app_id in plan["remove"]:
+            _w(f"   {_C.GRAY}extra{_C.RST}    {app_id} (kept unless you "
+               f"confirm removal)\n")
+            empty = False
+        for app_id, reason in plan["protected"]:
+            _w(f"   {_C.BCYAN}✋{_C.RST}       {app_id} — {reason}\n")
+        if empty:
+            _w(f"   {_C.GRAY}Project already matches this profile.{_C.RST}\n")
+
+        self._footer("[a] apply   [x] apply + remove extras   q back")
+        key = _read_key()
+        if key not in ("a", "x"):
+            return
+        _clear()
+        _show_cursor()
+        self.mgr.apply_profile(name, remove_extra=(key == "x"))
+        _hide_cursor()
+        _pause()
+        self._reload()
+
+    def _save_profile_flow(self):
+        _clear()
+        _show_cursor()
+        name = _text_input("Profile name", "")
+        desc = _text_input("Description", "") if name else None
+        _hide_cursor()
+        if not name:
+            return
+        path = self.mgr.save_profile(name, desc or "")
+        _clear()
+        _w(f"\n  Saved {path}\n")
+        _pause()
 
     # -- Quick OTA -------------------------------------------------------------
 
