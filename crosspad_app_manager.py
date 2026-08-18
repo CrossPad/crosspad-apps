@@ -118,6 +118,25 @@ class AppManager:
             return line.lstrip(" -+").split()[0][:8]
         return "unknown"
 
+    def _get_submodule_branch(self, path: str) -> str | None:
+        """Branch a submodule is actually checked out on, or None if detached.
+
+        `git submodule status` appends the described ref, e.g.
+        "(heads/master)". That is the branch a later `update` must follow —
+        the manifest's recorded ref is only what was asked for at install time
+        and drifts as soon as anyone checks out something else.
+        """
+        result = self._git("submodule", "status", path, check=False, capture=True)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        line = result.stdout.strip()
+        if "(" not in line or not line.endswith(")"):
+            return None
+        described = line[line.rindex("(") + 1:-1]
+        if described.startswith("heads/"):
+            return described[len("heads/"):]
+        return None
+
     def _get_default_branch(self, path: str) -> str:
         """Detect the default branch of a submodule (main or master)."""
         full_path = self.project_dir / path
@@ -714,10 +733,22 @@ class AppManager:
                 # checked out for months. Re-read it from git; that is the whole
                 # point of a sync command.
                 commit = self._get_submodule_commit(install_path)
+                branch = self._get_submodule_branch(install_path)
                 inst = manifest["installed"][app_id]
+                changed = False
                 if commit != "unknown" and commit != inst.get("version"):
                     print(f"  ~ {app_id} ({inst.get('version', '?')} -> {commit})")
                     inst["version"] = commit
+                    changed = True
+                # A stale ref is worse than a stale version: `update` checks out
+                # origin/<ref>, so a manifest still claiming "main" for an app
+                # living on master fails outright, and for an app parked on a
+                # feature branch it silently drags the build onto main.
+                if branch and branch != inst.get("ref"):
+                    print(f"  ~ {app_id} ref {inst.get('ref', '?')} -> {branch}")
+                    inst["ref"] = branch
+                    changed = True
+                if changed:
                     inst["updated_at"] = datetime.now(timezone.utc).isoformat()
                     synced += 1
 
