@@ -3689,6 +3689,33 @@ class _TUI:
                        f"      {len(missing)} missing: "
                        f"{', '.join(missing)}\n")
 
+            # intent vs state: a policy that no longer matches the worktree is
+            # the thing that silently breaks the next update
+            drift = []
+            for aid in self._installed:
+                st = self.mgr.app_status(aid)
+                if st["blocking"]:
+                    drift.append(f"{aid} ({', '.join(st['blocking'])})")
+            if drift:
+                _w(f"   {_C.BYELLOW}⚠{_C.RST} Ownership"
+                   f"     {len(drift)} protected: {', '.join(drift)}\n")
+            else:
+                _w(f"   {_C.BGREEN}✓{_C.RST} Ownership"
+                   f"     no local work in the way\n")
+
+            # feature flags vs what the last build used
+            overrides = self.mgr.feature_overrides()
+            if not overrides:
+                _w(f"   {_C.BGREEN}✓{_C.RST} Features"
+                   f"      stock (checked-in defaults)\n")
+            elif self.mgr.build_flags_stale():
+                _w(f"   {_C.BYELLOW}⚠{_C.RST} Features"
+                   f"      {len(overrides)} override(s), build predates them\n")
+            else:
+                _w(f"   {_C.BGREEN}✓{_C.RST} Features"
+                   f"      {len(overrides)} override(s), "
+                   f"set {self.mgr.flags_hash()}\n")
+
             # cache age
             cache_age = self.mgr.get_cache_age()
             if cache_age < 0:
