@@ -53,8 +53,8 @@
     },
     "mixer": {
       "name": "Mixer",
-      "version": "0.2.0",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "version": "0.2.1",
+      "description": "Audio mixer/router — dynamic IAudioNode channels, multi-output routing",
       "repo": "https://github.com/CrossPad/crosspad-mixer.git",
       "component_path": "components/crosspad-mixer",
       "icon": "mixer.png",
