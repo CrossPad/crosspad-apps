@@ -1432,9 +1432,15 @@ class AppManager:
                 text = text.replace(key, value)
             return text
 
+        skip_names = {"app-registry.json", "apps.json", "crosspad.config.json",
+                      "crosspad.local.json", ".DS_Store"}
         written = 0
         for path in sorted(src.rglob("*")):
             if path.is_dir() or "/.git/" in str(path):
+                continue
+            # Never ship working data that happened to land in the template
+            # directory — a generated app must contain only the template.
+            if path.name in skip_names or ".crosspad" in path.parts:
                 continue
             rel = substitute(str(path.relative_to(src)))
             if rel.endswith(".tmpl"):
@@ -1450,7 +1456,8 @@ class AppManager:
 
     def new_app(self, app_id: str, name: str = "", description: str = "",
                 category: str = "tools", visibility: str = None,
-                owner: str = "", install: bool = True) -> dict:
+                owner: str = "", install: bool = True,
+                progress=None) -> dict:
         """Scaffold an app, optionally publish it, optionally install it here.
 
         visibility: None keeps it local (a plain directory in this project),
@@ -1458,6 +1465,12 @@ class AppManager:
         submodule so the project references a real remote.
         """
         result = {"ok": False, "error": "", "path": None, "repo": None}
+
+        def step(message: str):
+            if progress:
+                progress(message)
+            else:
+                print(f"  {message}")
 
         if not self.valid_app_id(app_id):
             result["error"] = (f"'{app_id}' is not a valid app id "
@@ -1504,7 +1517,8 @@ class AppManager:
                 result["error"] = f"git {args[0]} failed: {r.stderr.strip()}"
                 return result
 
-        print(f"  {files} file(s) generated in {staging}")
+        step(f"{files} file(s) generated")
+        step("git repository initialised")
 
         repo_url = ""
         if visibility in ("private", "public"):
@@ -1526,7 +1540,7 @@ class AppManager:
                 return result
             repo_url = f"https://github.com/{slug}.git"
             result["repo"] = repo_url
-            print(f"  pushed to {slug} ({visibility})")
+            step(f"pushed to {slug} ({visibility})")
 
         if not install:
             result["ok"] = True
@@ -1543,10 +1557,12 @@ class AppManager:
                 result["error"] = f"submodule add failed: {r.stderr.strip()}"
                 return result
             track, ref = TRACK_BRANCH, self._get_default_branch(install_path)
+            step(f"added as a submodule at {install_path}")
         else:
             import shutil
             shutil.move(str(staging), str(self.project_dir / install_path))
-            track, ref = TRACK_LOCAL, "in-tree"
+            track, ref = TRACK_LOCAL, "local"
+            step(f"placed at {install_path} (no remote)")
 
         manifest.setdefault("installed", {})[app_id] = {
             "version": self._get_submodule_commit(install_path)
@@ -1774,20 +1790,33 @@ class AppManager:
                 print(f"  local work found ({', '.join(st['flags']) or 'untracked'})")
                 print(f"  backup: {dest}")
 
-        try:
-            self._git("submodule", "deinit", "-f", install_path)
-            self._git("rm", "-f", install_path)
-        except subprocess.CalledProcessError:
-            print("Warning: git submodule removal had issues, "
-                  "cleaning up manually.")
+        import shutil
+        full_path = self.project_dir / install_path
+        is_submodule = bool(self._get_submodule_branch(install_path)) or \
+            (self.project_dir / ".gitmodules").exists() and \
+            install_path in (self.project_dir / ".gitmodules").read_text()
 
-        modules_path = self.project_dir / ".git" / "modules" / install_path
-        if modules_path.exists():
-            import shutil
-            shutil.rmtree(modules_path)
+        if is_submodule:
+            try:
+                self._git("submodule", "deinit", "-f", install_path)
+                self._git("rm", "-f", install_path)
+            except subprocess.CalledProcessError:
+                print("Warning: git submodule removal had issues, "
+                      "cleaning up manually.")
+            modules_path = self.project_dir / ".git" / "modules" / install_path
+            if modules_path.exists():
+                shutil.rmtree(modules_path)
+        # An app generated locally is a plain directory, not a submodule: the
+        # submodule commands fail on it and used to leave the files behind.
+        if full_path.exists():
+            shutil.rmtree(full_path, ignore_errors=True)
 
         del manifest["installed"][app_name]
         self._save_manifest(manifest)
+
+        cfg = self._load_config_raw()
+        if cfg.get("apps", {}).pop(app_name, None) is not None:
+            self.save_config(cfg)
 
         print(f"\n  {info.get('name', app_name)} removed.")
         self._print_next_steps()
@@ -2358,20 +2387,34 @@ def _show_cursor():
 
 # Terminal state management — raw mode breaks subprocess output
 _saved_termios = None
+_raw_mode = False
 
 
 def _save_terminal():
-    """Save terminal attributes before entering TUI."""
-    global _saved_termios
+    """Enter raw mode for the whole TUI session.
+
+    Cbreak (not raw) is held for the whole session. Toggling termios between
+    every keypress hands anything still in the input queue back to the line
+    discipline, so typing faster than the redraw — or pasting — silently loses
+    characters. Cbreak rather than raw because raw also turns off output
+    post-processing, and every screen here ends its lines with a bare \n.
+    """
+    global _saved_termios, _raw_mode
     try:
         import termios
-        _saved_termios = termios.tcgetattr(sys.stdin.fileno())
+        import tty
+        fd = sys.stdin.fileno()
+        _saved_termios = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        _raw_mode = True
     except (ImportError, OSError):
         pass
 
 
 def _restore_terminal():
     """Restore terminal to normal (cooked) mode for subprocess output."""
+    global _raw_mode
+    _raw_mode = False
     if _saved_termios is not None:
         try:
             import termios
@@ -2420,8 +2463,50 @@ def _read_within(timeout: float) -> str | None:
         return _read_raw_char()
 
 
+def _decode_key(ch: str) -> str:
+    """Turn one raw character (and any escape tail) into a key name."""
+    if ch == "\x1b":
+        # Escape starts both a bare Esc keypress and every arrow / navigation
+        # sequence. Reading a fixed two more bytes blocked forever on a lone
+        # Esc — which the menus advertise as "cancel" — so wait briefly for a
+        # continuation instead and treat a silent terminal as the bare key.
+        nxt = _read_within(0.05)
+        if nxt is None:
+            return "esc"
+        # CSI ("\x1b[") and SS3 ("\x1bO", application cursor mode) both
+        # prefix the cursor keys.
+        if nxt not in ("[", "O"):
+            return "esc"
+        code = _read_within(0.05)
+        if code is None:
+            return "esc"
+        simple = {"A": "up", "B": "down", "C": "right", "D": "left",
+                  "H": "home", "F": "end"}
+        if code in simple:
+            return simple[code]
+        if code.isdigit():
+            # Numeric CSI forms: 5~ PgUp, 6~ PgDn, 1~/7~ Home, 4~/8~ End.
+            tail = _read_within(0.05)
+            while tail is not None and tail.isdigit():
+                code += tail
+                tail = _read_within(0.05)
+            numeric = {"5": "pgup", "6": "pgdn", "1": "home",
+                       "7": "home", "4": "end", "8": "end"}
+            return numeric.get(code, "esc")
+        return "esc"
+    if ch in ("\r", "\n"): return "enter"
+    if ch in ("\x7f", "\x08"): return "backspace"
+    if ch == "\t": return "tab"
+    if ch == "\x03": return "ctrl-c"
+    return ch
+
+
 def _read_key() -> str:
     """Read a single keypress, return normalized key name."""
+    if _raw_mode:
+        # The session already holds raw mode — just read.
+        return _decode_key(_read_raw_char())
+
     try:
         import termios
         import tty
@@ -2429,42 +2514,7 @@ def _read_key() -> str:
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
-            ch = _read_raw_char()
-            if ch == "\x1b":
-                # Escape starts both a bare Esc keypress and every arrow /
-                # navigation sequence. Reading a fixed two more bytes blocked
-                # forever on a lone Esc — which the menus advertise as "cancel"
-                # — so wait briefly for a continuation instead and treat a
-                # silent terminal as the bare key.
-                nxt = _read_within(0.05)
-                if nxt is None:
-                    return "esc"
-                # CSI ("\x1b[") and SS3 ("\x1bO", application cursor mode)
-                # both prefix the cursor keys.
-                if nxt not in ("[", "O"):
-                    return "esc"
-                code = _read_within(0.05)
-                if code is None:
-                    return "esc"
-                simple = {"A": "up", "B": "down", "C": "right", "D": "left",
-                          "H": "home", "F": "end"}
-                if code in simple:
-                    return simple[code]
-                if code.isdigit():
-                    # Numeric CSI forms: 5~ PgUp, 6~ PgDn, 1~/7~ Home, 4~/8~ End.
-                    tail = _read_within(0.05)
-                    while tail is not None and tail.isdigit():
-                        code += tail
-                        tail = _read_within(0.05)
-                    numeric = {"5": "pgup", "6": "pgdn", "1": "home",
-                               "7": "home", "4": "end", "8": "end"}
-                    return numeric.get(code, "esc")
-                return "esc"
-            if ch in ("\r", "\n"): return "enter"
-            if ch in ("\x7f", "\x08"): return "backspace"
-            if ch == "\t": return "tab"
-            if ch == "\x03": return "ctrl-c"
-            return ch
+            return _decode_key(_read_raw_char())
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
     except (ImportError, OSError):
@@ -2826,73 +2876,194 @@ class _TUI:
     # -- New app --------------------------------------------------------------
 
     def _new_app_flow(self):
-        """Scaffold an app, optionally publish it to the user's GitHub."""
-        _clear()
-        self._header("New App", "from the CrossPad template")
-        _w(f"\n   {_C.GRAY}Generates a working app — pad handler, LVGL "
-           f"buttons, a slider and an\n   animation timer — then installs it "
-           f"into this project.{_C.RST}\n\n")
+        """Form for scaffolding an app, with a preview of what it will create."""
+        fields = {
+            "id": "",
+            "name": "",
+            "description": "",
+            "category": "tools",
+        }
+        publish_modes = [
+            (None, "local only", "a directory here, tracked as local"),
+            ("private", "private GitHub repo",
+             "created under your account, installed back as a submodule"),
+            ("public", "public GitHub repo",
+             "same, but open from the start"),
+        ]
+        publish_idx = 0
+        rows = ["id", "name", "description", "category", "publish", "create"]
+        cursor = 0
+        error = ""
 
-        _show_cursor()
-        app_id = _text_input("App id (lowercase-with-dashes)", "")
-        if not app_id:
-            _hide_cursor()
-            return
-        if not self.mgr.valid_app_id(app_id):
-            _hide_cursor()
-            _w(f"\n  {_C.BYELLOW}'{app_id}' is not a valid id — lowercase "
-               f"letters, digits and dashes.{_C.RST}\n")
-            _pause()
-            return
-        if app_id in self._installed:
-            _hide_cursor()
-            _w(f"\n  {_C.BYELLOW}'{app_id}' is already installed.{_C.RST}\n")
-            _pause()
-            return
+        while True:
+            app_id = fields["id"]
+            cls = self.mgr.app_id_to_class(app_id) if app_id else ""
+            component = f"{self.config.lib_prefix}{app_id}" if app_id else ""
+            install_path = (f"{self.config.lib_dir}/{component}"
+                            if component else "")
+            visibility, publish_label, publish_help = publish_modes[publish_idx]
 
-        default_name = self.mgr.app_id_to_class(app_id)
-        name = _text_input("Display name", default_name) or default_name
-        description = _text_input("Description", f"{name} — a CrossPad app")
-        category = _text_input("Category (music/audio/tools/other)", "tools")
-        _hide_cursor()
+            _clear()
+            self._header("New App", "from the CrossPad template")
+            _w("\n")
 
-        choice = _menu_select(
-            f"Where does {app_id} live?",
-            ["Local only — a directory in this project",
-             "Private GitHub repo — created and pushed",
-             "Public GitHub repo — created and pushed"],
-            ["No remote. Publish later with: gh repo create",
-             "Yours alone; the project references it as a submodule",
-             "Open from the start; add it to external-apps.json to list it"])
-        if choice < 0:
-            return
-        visibility = (None, "private", "public")[choice]
+            shown = {
+                "id": ("App id", app_id or
+                       f"{_C.DIM}lowercase-with-dashes{_C.RST}"),
+                "name": ("Name", fields["name"] or
+                         (f"{_C.DIM}{cls}{_C.RST}" if cls else
+                          f"{_C.DIM}—{_C.RST}")),
+                "description": ("Description", fields["description"] or
+                                f"{_C.DIM}{(fields['name'] or cls) + ' — a CrossPad app' if cls else '—'}{_C.RST}"),
+                "category": ("Category", fields["category"]),
+                "publish": ("Publish", publish_label),
+            }
+            for i, key in enumerate(rows):
+                marker = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                if key == "create":
+                    ready = self.mgr.valid_app_id(app_id)
+                    col = _C.BGREEN if ready else _C.DIM
+                    _w(f"\n  {marker} {col}Create{_C.RST}"
+                       f"{'' if ready else f'{_C.DIM}   (needs a valid id){_C.RST}'}\n")
+                    continue
+                label, value = shown[key]
+                _w(f"  {marker} {_C.GRAY}{label:<14}{_C.RST}{value}\n")
 
-        _clear()
-        _show_cursor()
-        _w(f"\n  Creating {app_id}...\n\n")
-        result = self.mgr.new_app(app_id, name=name, description=description,
-                                  category=category or "tools",
-                                  visibility=visibility)
-        _hide_cursor()
+            if cursor < len(rows) - 1:
+                hint = {"id": "letters, digits and dashes — becomes "
+                              "crosspad-<id>",
+                        "name": "shown in the launcher",
+                        "description": "one line, lands in crosspad-app.json",
+                        "category": "music · audio · tools · other",
+                        "publish": publish_help}[rows[cursor]]
+                _w(f"\n   {_C.GRAY}{hint}{_C.RST}\n")
 
+            # -- preview --
+            if app_id and self.mgr.valid_app_id(app_id):
+                self._section("Will create")
+                _w(f"   {_C.BWHITE}{install_path}/{_C.RST}\n")
+                _w(f"   {_C.GRAY}src/{cls}App.cpp{_C.RST}          "
+                   f"LVGL buttons, slider, animation timer\n")
+                _w(f"   {_C.GRAY}src/{cls}PadLogic.cpp{_C.RST}      "
+                   f"pad handler, off the LVGL thread\n")
+                _w(f"   {_C.GRAY}CMakeLists.txt · crosspad-app.json · "
+                   f"library.json · README{_C.RST}\n")
+                _w(f"\n   registered as {_C.BWHITE}"
+                   f"REGISTER_APP_PL({cls}, …){_C.RST}"
+                   f"{_C.GRAY} — appears in the launcher{_C.RST}\n")
+                if visibility:
+                    owner = self._gh_owner()
+                    _w(f"   github.com/{owner or '<your account>'}/{component}"
+                       f" {_C.GRAY}({visibility}){_C.RST}\n")
+            elif app_id:
+                _w(f"\n   {_C.BYELLOW}'{app_id}' is not a valid id{_C.RST}\n")
+
+            if error:
+                _w(f"\n   {_C.BYELLOW}{error}{_C.RST}\n")
+
+            self._footer("↑↓ field   enter edit   space cycle publish   "
+                         "[c] create   q cancel")
+
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            elif key == "up":
+                cursor = (cursor - 1) % len(rows)
+            elif key == "down":
+                cursor = (cursor + 1) % len(rows)
+            elif key == " " and rows[cursor] == "publish":
+                publish_idx = (publish_idx + 1) % len(publish_modes)
+            elif key == "enter" and rows[cursor] in fields:
+                field = rows[cursor]
+                _w("\n")
+                _show_cursor()
+                value = _text_input(f"  {field}", fields[field])
+                _hide_cursor()
+                if value is not None:
+                    fields[field] = value.strip()
+                error = ""
+            elif key in ("enter", "c") and (rows[cursor] == "create"
+                                            or key == "c"):
+                if not self.mgr.valid_app_id(app_id):
+                    error = "Enter a valid app id first."
+                    continue
+                if app_id in self._installed:
+                    error = f"'{app_id}' is already installed."
+                    continue
+                self._create_app(app_id, fields, cls, visibility)
+                return
+
+    def _gh_owner(self) -> str:
+        if getattr(self, "_gh_owner_cache", None) is None:
+            r = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                               capture_output=True, text=True, check=False)
+            self._gh_owner_cache = (r.stdout.strip()
+                                    if r.returncode == 0 else "")
+        return self._gh_owner_cache
+
+    def _create_app(self, app_id: str, fields: dict, cls: str,
+                    visibility: str | None):
+        """Run the scaffold, showing each step as it completes."""
+        steps: list[str] = []
+
+        def render(busy: str = ""):
+            _clear()
+            self._header(f"Creating {app_id}", "from the CrossPad template")
+            _w("\n")
+            for done in steps:
+                _w(f"   {_C.BGREEN}✓{_C.RST} {done}\n")
+            if busy:
+                _w(f"   {_C.BYELLOW}·{_C.RST} {busy}...\n")
+
+        def on_step(message: str):
+            steps.append(message)
+            render()
+
+        render("generating" if not visibility else
+               "generating and publishing")
+        result = self.mgr.new_app(
+            app_id, name=fields["name"], description=fields["description"],
+            category=fields["category"] or "tools", visibility=visibility,
+            progress=on_step)
+
+        render()
         if not result["ok"]:
-            _w(f"\n  {_C.BYELLOW}{result['error']}{_C.RST}\n")
-            _pause()
+            _w(f"\n   {_C.BYELLOW}⚠ {result['error']}{_C.RST}\n")
+            self._footer("q back")
+            while _read_key() not in ("q", "esc", "enter", "ctrl-c"):
+                pass
             return
 
-        _w(f"\n  {_C.BGREEN}✓{_C.RST} {app_id} at {result['path']}\n")
-        if result.get("repo"):
-            _w(f"    {result['repo']}\n")
-        if result.get("track") == TRACK_LOCAL:
-            _w(f"    {_C.GRAY}tracked as local — the manager will not touch "
-               f"it{_C.RST}\n")
-        if self.config.platform == "esp-idf":
-            _w(f"\n  {_C.GRAY}New component directories are only discovered at "
-               f"configure time:\n  run idf.py fullclean && idf.py build "
-               f"once.{_C.RST}\n")
-        _pause()
         self._reload()
+        _w(f"\n   {_C.BWHITE}{result['path']}{_C.RST}\n")
+        if result.get("repo"):
+            _w(f"   {result['repo']}\n")
+        _w(f"\n   {_C.GRAY}Rewrite src/{cls}App.cpp and "
+           f"src/{cls}PadLogic.cpp — that is the point of it.{_C.RST}\n")
+
+        build_cmd = self._clean_build_command()
+        _w(f"\n   {_C.GRAY}A new app directory is only discovered at configure "
+           f"time:{_C.RST}\n   {_C.BWHITE}{build_cmd}{_C.RST}\n")
+        self._footer("[b] build now   q back")
+
+        while True:
+            key = _read_key()
+            if key in ("q", "esc", "enter", "ctrl-c"):
+                return
+            if key == "b":
+                _clear()
+                _show_cursor()
+                self.mgr.run_command(build_cmd)
+                _hide_cursor()
+                _pause()
+                return
+
+    def _clean_build_command(self) -> str:
+        if self.config.platform == "esp-idf":
+            return "idf.py fullclean && idf.py build"
+        if self.config.platform == "arduino":
+            return "pio run --target clean && pio run"
+        return "rm -rf build && cmake -B build -G Ninja && cmake --build build"
 
     # -- Device ---------------------------------------------------------------
 
@@ -3448,8 +3619,8 @@ class _TUI:
                f"{_C.BYELLOW}●{_C.RST} local work (updates blocked)   "
                f"{_C.BCYAN}✋{_C.RST} protected by policy\n")
 
-            self._footer("↑↓ navigate   [m] track mode   "
-                         "[b] backup   [r] restore   [p] park WIP   "
+            self._footer("↑↓ navigate   [m] track mode   [b] backup   "
+                         "[r] restore   [p] park WIP   [x] remove   "
                          "[enter] details   q back")
 
             key = _read_key()
@@ -3481,9 +3652,48 @@ class _TUI:
                                else f"{app}: nothing to park" if ok
                                else f"{app}: could not park WIP")
                 refresh()
+            elif key == "x":
+                if self._remove_app_flow(statuses[cursor]):
+                    self._reload()
+                    refresh()
+                    cursor = min(cursor, max(len(statuses) - 1, 0))
             elif key == "enter":
                 self._workspace_detail(statuses[cursor])
                 refresh()
+
+    def _remove_app_flow(self, st: dict) -> bool:
+        """Uninstall an app, saying up front what happens to local work."""
+        app = st["app"]
+        _clear()
+        self._header(f"Remove {app}")
+        _w(f"\n   {_C.GRAY}{st['path']}{_C.RST}\n")
+        _w(f"   {_C.GRAY}track={st['policy']['track']}   "
+           f"{self.mgr.describe_status(st)}{_C.RST}\n")
+
+        risky = st["blocking"] or st["git"]["untracked"] or st["git"]["stashes"]
+        if risky:
+            _w(f"\n   {_C.BYELLOW}This app carries local work"
+               f"{(' (' + ', '.join(st['blocking']) + ')') if st['blocking'] else ''}"
+               f".{_C.RST}\n")
+            _w(f"   {_C.GRAY}It will be backed up to .crosspad/backups/{app}/ "
+               f"before removal.{_C.RST}\n")
+        if not st["git"]["origin"]:
+            _w(f"\n   {_C.BYELLOW}No remote — once removed, the backup is the "
+               f"only copy.{_C.RST}\n")
+
+        _w("\n")
+        _show_cursor()
+        confirmed = _confirm(f"Remove {app}?")
+        _hide_cursor()
+        if not confirmed:
+            return False
+
+        _clear()
+        _show_cursor()
+        self.mgr.remove(app)
+        _hide_cursor()
+        _pause()
+        return True
 
     def _track_mode_flow(self, st: dict):
         app = st["app"]
