@@ -1868,7 +1868,8 @@ def cli_main(config: PlatformConfig):
         if not report.get("ok"):
             print(f"Device: {report.get('error')}")
             sys.exit(1)
-        print(f"\n  Device on {report['port']}\n")
+        origin = ("built binary" if config.platform == "pc" else "device")
+        print(f"\n  From {origin}: {report['port']}\n")
         print(f"  {'component':<24}{'device':<12}{'repo':<12}ref")
         for row in report["rows"]:
             mark = " " if row["match"] else "!"
@@ -2549,7 +2550,10 @@ class _TUI:
         report = None
         while True:
             _clear()
-            self._header("Device", "APP_VERSIONS over CDC")
+            source = ("--versions on the built binary"
+                      if self.config.platform == "pc"
+                      else "APP_VERSIONS over CDC")
+            self._header("Device", source)
 
             if report is None:
                 _w(f"\n   {_C.GRAY}Querying device...{_C.RST}\n")
@@ -2564,7 +2568,8 @@ class _TUI:
                        f"F0 7D 1B 00 F7 on its own MIDI port.{_C.RST}\n")
                 self._footer("[r] retry   q back")
             else:
-                _w(f"\n   {_C.GRAY}Port{_C.RST}   {report['port']}\n\n")
+                label = "Binary" if self.config.platform == "pc" else "Port"
+                _w(f"\n   {_C.GRAY}{label}{_C.RST}   {report['port']}\n\n")
                 _w(f"   {_C.GRAY}{'component':<24}{'device':<12}"
                    f"{'repo':<12}{'ref':<16}{_C.RST}\n")
                 for row in report["rows"]:
