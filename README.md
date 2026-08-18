@@ -179,6 +179,92 @@ pio run --target clean && pio run
 
 ---
 
+## Workspace, Config and Profiles
+
+The manager treats installed apps as **owned**, not as registry property, and
+doubles as the project's compile-time config tool.
+
+### Intent vs state
+
+| File | Written by | Checked in | Holds |
+|------|-----------|-----------|-------|
+| `apps.json` | manager | yes | State: what is on disk |
+| `crosspad.config.json` | you / TUI | yes | Intent: track policy per app, feature flags |
+| `crosspad.local.json` | you / TUI | no | Personal overrides (own branches, dev flags) |
+| `config/profiles/*.json` | you | yes | Named recipes: flags + app set |
+| `.crosspad/` | manager | no | Backups, generated build flags |
+
+### Track policy
+
+```bash
+python3 <wrapper> track sampler local              # hands off, this one is mine
+python3 <wrapper> track mixer branch --ref my-work # follow my branch, ff-only
+python3 <wrapper> track piano pinned               # freeze at the current commit
+python3 <wrapper> status                           # policy vs actual git state
+```
+
+| mode | `update` does |
+|------|---------------|
+| `registry` (default) | follows the registry ref, fast-forward only |
+| `branch` | follows the named branch; never switches branch |
+| `pinned` | nothing; reports when newer exists |
+| `local` | nothing at all; the worktree is yours |
+
+The declared mode is intent. Observed git state overrides it: an app that is
+dirty, ahead of origin, on an unexpected branch, or pointing at a fork is
+blocked whatever its mode. `update --all` updates the clean apps and prints a
+skip table for the rest; `--force` proceeds but snapshots first.
+
+### Backups
+
+```bash
+python3 <wrapper> backup sampler          # snapshot local work
+python3 <wrapper> restore sampler --list  # what is available
+python3 <wrapper> restore sampler         # replay the newest
+```
+
+A backup lands in `.crosspad/backups/<app>/<ts>/` and holds tracked changes as a
+patch, untracked files as a tarball, commits that exist nowhere on origin as a
+git bundle, and every stash as its own patch. Restore replays patches and files
+in place and fetches the bundle into `refs/crosspad-backup/<ts>/*` — rebuilding
+history stays your call. `remove` always backs up first when local work exists.
+
+### Compile-time features
+
+Flags come from `crosspad-core/include/crosspad/config/features.schema.json`,
+the machine-readable twin of the Marlin-style `Configuration.h`.
+
+```bash
+python3 <wrapper> config                              # show flags, * = overridden
+python3 <wrapper> config FEAT_PAD_EDITOR off          # set one
+python3 <wrapper> config --gen                        # regenerate build flags
+```
+
+Chosen values live in `crosspad.config.json`, never in the submodule header, so
+configuring a build does not dirty `crosspad-core` for everyone else. Only
+deviations from the header default are emitted, into
+`.crosspad/build_flags.cmake` (ESP-IDF, PC — `include()`d by the top-level
+`CMakeLists.txt`) and `.crosspad/build_flags.ini` (PlatformIO, applied by a
+`pre:` extra script). An untouched project builds exactly as the headers say.
+
+The TUI screen `[C] Configure` renders the same catalog as a menuconfig tree
+with help text and `requires` validation.
+
+### Profiles
+
+```bash
+python3 <wrapper> profile list
+python3 <wrapper> profile show lite       # dry-run diff against the project
+python3 <wrapper> profile apply lite
+```
+
+A profile is a recipe — feature flags plus the app set with track modes. Apply
+shows the plan first; apps the profile omits are kept unless you pass
+`--remove-extra`, and apps that are protected or carry local work are never
+removed.
+
+---
+
 ## PC (Desktop) — Coming Soon
 
 Desktop platform support is planned. The app manager core (`crosspad_app_manager.py`) already supports a `pc` platform config. Stay tuned.
@@ -265,6 +351,8 @@ Your repo must also contain a `crosspad-app.json` with valid metadata.
 | File | Purpose |
 |------|---------|
 | `registry.json` | Auto-generated registry (consumed by app manager) |
+| `crosspad.config.json` | (in each project) Track policy + feature flags — intent |
+| `config/profiles/*.json` | (in each project) Named build recipes |
 | `crosspad_app_manager.py` | Shared core — all app management + TUI logic |
 | `build_registry.py` | CI: discovers repos by topic, builds registry |
 | `diff_registry.py` | CI: compares registries, outputs changes for notifications |
