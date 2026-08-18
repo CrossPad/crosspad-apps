@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1175,6 +1176,116 @@ class AppManager:
         self._print_next_steps()
         return True
 
+    # -- device telemetry -----------------------------------------------------
+    #
+    # A flashed CrossPad reports the submodules that went into its binary
+    # (APP_VERSIONS over CDC). Comparing that against the project's own pins
+    # answers the question the manifest cannot: is the thing on the desk
+    # actually running what this checkout describes?
+
+    CROSSPAD_USB_VID = 0x303A
+
+    def device_port(self) -> str | None:
+        """CDC port of a CrossPad running in default (CDC+MIDI) USB mode."""
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            return None
+        for p in list_ports.comports():
+            if p.vid == self.CROSSPAD_USB_VID:
+                return p.device
+        return None
+
+    def query_device_versions(self, timeout: float = 3.0) -> dict:
+        """Ask a connected device what it was built from.
+
+        Returns {"ok": bool, "error": str, "entries": [ {...} ]}. Never raises:
+        a missing pyserial, a device in USB-audio mode (no CDC) and an older
+        firmware without the command are all normal states to report, not
+        failures to crash on.
+        """
+        out = {"ok": False, "error": "", "entries": [], "port": None}
+        try:
+            import serial
+        except ImportError:
+            out["error"] = "pyserial not installed (pip install pyserial)"
+            return out
+
+        port = self.device_port()
+        if not port:
+            out["error"] = ("no CrossPad CDC port — device unplugged, or in "
+                            "USB audio mode (no CDC there)")
+            return out
+        out["port"] = port
+
+        try:
+            with serial.Serial(port, 115200, timeout=0.5) as ser:
+                ser.reset_input_buffer()
+                ser.write(b"APP_VERSIONS\r\n")
+                deadline = time.time() + timeout
+                buf = ""
+                while time.time() < deadline:
+                    chunk = ser.read(512).decode("utf-8", "replace")
+                    if chunk:
+                        buf += chunk
+                        if "APPVER: end" in buf:
+                            break
+        except Exception as e:                      # noqa: BLE001 - report it
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
+
+        for line in buf.splitlines():
+            line = line.strip()
+            if not line.startswith("APPVER:") or line.startswith("APPVER: end"):
+                continue
+            body = line[len("APPVER:"):].strip()
+            parts = body.split()
+            entry = {"component": parts[0] if parts else "?"}
+            for token in parts[1:]:
+                if "=" in token:
+                    k, v = token.split("=", 1)
+                    entry[k] = v
+            out["entries"].append(entry)
+
+        if not out["entries"]:
+            out["error"] = ("no APPVER reply — firmware predates APP_VERSIONS, "
+                            "or the port is busy")
+            return out
+        out["ok"] = True
+        return out
+
+    def device_diff(self) -> dict:
+        """Device inventory vs what this checkout has, component by component."""
+        report = self.query_device_versions()
+        if not report["ok"]:
+            return report
+
+        rows = []
+        for entry in report["entries"]:
+            component = entry.get("component", "?")
+            path = f"{self.config.lib_dir}/{component}"
+            local = self.app_git_state(path)
+            local_commit = local["head"] or ""
+            dev_commit = entry.get("commit", "")
+            # The device reports a short SHA of whatever length its git printed;
+            # compare on the shorter of the two so a 7-vs-8 char difference is
+            # not read as a mismatch.
+            n = min(len(local_commit), len(dev_commit)) or 1
+            match = bool(local_commit) and local_commit[:n] == dev_commit[:n]
+            rows.append({
+                "component": component,
+                "app_id": entry.get("id", "-"),
+                "device_commit": dev_commit,
+                "device_ref": entry.get("ref", "-"),
+                "device_dirty": entry.get("dirty") == "1",
+                "local_commit": local_commit or "?",
+                "local_present": local["exists"],
+                "match": match,
+            })
+        report["rows"] = rows
+        report["stale"] = [r for r in rows if not r["match"]]
+        return report
+
     # -- commands -------------------------------------------------------------
 
     def _print_app_line(self, app_id: str, info: dict, manifest: dict):
@@ -1654,6 +1765,8 @@ def cli_main(config: PlatformConfig):
     restore_cmd.add_argument("--list", action="store_true",
                              help="List available backups")
 
+    sub.add_parser("device",
+                   help="Ask a connected CrossPad what it was built from")
     sub.add_parser("config-init",
                    help=f"Create {CONFIG_FILE} from the current state")
 
@@ -1709,6 +1822,24 @@ def cli_main(config: PlatformConfig):
                   else f"No backups for '{args.app}'.")
         else:
             mgr.restore_backup(args.app, args.stamp)
+    elif args.command == "device":
+        report = mgr.device_diff()
+        if not report.get("ok"):
+            print(f"Device: {report.get('error')}")
+            sys.exit(1)
+        print(f"\n  Device on {report['port']}\n")
+        print(f"  {'component':<24}{'device':<12}{'repo':<12}ref")
+        for row in report["rows"]:
+            mark = " " if row["match"] else "!"
+            dirty = " *" if row["device_dirty"] else ""
+            print(f"{mark} {row['component']:<24}{row['device_commit']:<12}"
+                  f"{row['local_commit']:<12}{row['device_ref']}{dirty}")
+        stale = report.get("stale", [])
+        if stale:
+            print(f"\n  ! {len(stale)} component(s) differ from this "
+                  f"checkout — the device is not running it\n")
+            sys.exit(2)
+        print("\n  Device matches this checkout.\n")
     elif args.command == "config-init":
         mgr.ensure_config()
     elif args.command == "config":
@@ -2116,6 +2247,7 @@ class _TUI:
         self.config = config
         self.mgr = AppManager(os.getcwd(), config)
         self._serial_port = ""
+        self._toast = ""
         self._reload()
 
     def _reload(self):
@@ -2232,7 +2364,7 @@ class _TUI:
             plat = self.config.platform
 
             # -- title box --
-            inner = f"CrossPad App Manager   \u00b7   {plat}"
+            inner = f"CrossPad App Manager   ·   {plat}"
             box_w = max(len(inner) + 6, 50)
             if box_w > w - 4:
                 box_w = w - 4
@@ -2240,20 +2372,40 @@ class _TUI:
             lp = pad_total // 2
             rp = pad_total - lp
 
-            _w(f"\n  {_C.BCYAN}\u256d{'─' * box_w}\u256e{_C.RST}\n")
-            _w(f"  {_C.BCYAN}\u2502{_C.RST}"
+            _w(f"\n  {_C.BCYAN}╭{'─' * box_w}╮{_C.RST}\n")
+            _w(f"  {_C.BCYAN}│{_C.RST}"
                f"{' ' * lp}{_C.BWHITE}CrossPad App Manager{_C.RST}"
-               f"   {_C.GRAY}\u00b7{_C.RST}   "
+               f"   {_C.GRAY}·{_C.RST}   "
                f"{_C.BCYAN}{plat}{_C.RST}"
-               f"{' ' * rp}{_C.BCYAN}\u2502{_C.RST}\n")
-            _w(f"  {_C.BCYAN}\u2570{'─' * box_w}\u256f{_C.RST}\n")
+               f"{' ' * rp}{_C.BCYAN}│{_C.RST}\n")
+            _w(f"  {_C.BCYAN}╰{'─' * box_w}╯{_C.RST}\n")
 
-            # -- stats --
+            if self._toast:
+                _w(f"\n   {_C.BGREEN}✓{_C.RST} {self._toast}\n")
+                self._toast = ""
+
+            # -- stats: project, registry, feature flags, build --
             inst_c, total_c = self._compatible_count()
             cache_age = self.mgr.get_cache_age()
             cache_str = self._fmt_age(cache_age) if cache_age >= 0 else "none"
             proj = self.mgr.project_dir.name
             plat_label = plat.upper().replace("-", " ")
+
+            overrides = self.mgr.feature_overrides()
+            flags_str = (f"{len(overrides)} override(s) "
+                         f"· {self.mgr.flags_hash()}" if overrides
+                         else "stock")
+            build = self.mgr.get_build_info()
+            if not build.get("exists"):
+                build_str = f"{_C.GRAY}not built{_C.RST}"
+            elif self.mgr.build_flags_stale():
+                build_str = f"{_C.BYELLOW}flags changed{_C.RST}"
+            elif build.get("stale"):
+                build_str = f"{_C.BYELLOW}sources newer{_C.RST}"
+            else:
+                build_str = (f"{_C.BGREEN}current{_C.RST} "
+                             f"{_C.GRAY}({self._fmt_age(build['age_seconds'])})"
+                             f"{_C.RST}")
 
             _w(f"\n   {_C.GRAY}Platform{_C.RST}    "
                f"{_C.BWHITE}{plat_label}{_C.RST}")
@@ -2264,60 +2416,56 @@ class _TUI:
                f"{_C.GRAY}/{total_c} compatible{_C.RST}")
             _w(f"{'':>4}{_C.GRAY}Registry{_C.RST}   "
                f"{_C.BWHITE}{cache_str}{_C.RST}\n")
+            _w(f"   {_C.GRAY}Features{_C.RST}    "
+               f"{_C.BWHITE}{flags_str}{_C.RST}")
+            pad = max(20 - len(flags_str), 2)
+            _w(f"{'':>{pad}}{_C.GRAY}Build{_C.RST}      {build_str}\n")
 
-            # -- installed apps --
+            # -- installed apps, with ownership state --
             if self._installed:
+                blocked = 0
                 self._section("Installed Apps")
-                for app_id, inst in self._installed.items():
+                for app_id in self._installed:
+                    st = self.mgr.app_status(app_id)
                     info = self._apps.get(app_id, {})
-                    ver = info.get("version", "?")
                     name = info.get("name", app_id)
-                    ref = inst.get("ref", "?")
-                    commit = inst.get("version", "?")
-                    cat = info.get("category", "")
-                    _w(f"   {_C.BGREEN}\u25cf{_C.RST} "
-                       f"{name:<18} "
-                       f"{_C.GRAY}v{ver:<8}{_C.RST} "
-                       f"{_C.DIM}{ref} @ {commit}{_C.RST}   "
-                       f"{_C.DIM}{cat}{_C.RST}\n")
+                    track = st["policy"]["track"]
+                    if st["blocking"]:
+                        dot, col = "●", _C.BYELLOW
+                        blocked += 1
+                    elif st["protected"]:
+                        dot, col = "✋", _C.BCYAN
+                    else:
+                        dot, col = "●", _C.BGREEN
+                    _w(f"   {col}{dot}{_C.RST} "
+                       f"{name:<16} "
+                       f"{_C.GRAY}{track:<9}{_C.RST}"
+                       f"{_C.DIM}{self.mgr.describe_status(st)}{_C.RST}\n")
+                if blocked:
+                    _w(f"\n   {_C.BYELLOW}{blocked} app(s) carry local work — "
+                       f"updates skip them.{_C.RST}\n")
             else:
                 _w(f"\n   {_C.GRAY}No apps installed yet. "
                    f"Press {_C.BYELLOW}b{_C.RST}{_C.GRAY} to browse."
                    f"{_C.RST}\n")
 
-            # -- quick actions --
+            # -- quick actions, grouped so the row stays readable --
             self._section("Quick Actions")
-            acts = [
-                ("B", "Browse & Install"),
-                ("U", "Update All"),
-                ("W", "Workspace"),
-                ("C", "Configure"),
-                ("P", "Profiles"),
+            groups = [
+                ("apps", [("B", "Browse"), ("U", "Update"),
+                          ("W", "Workspace")]),
+                ("build", [("C", "Configure"), ("P", "Profiles"),
+                           ("F", "Build & Run" if plat == "pc"
+                            else "Build & Flash")]),
+                ("device", [("O", "Run Sim" if plat == "pc" else "OTA Flash"),
+                            ("D", "Device"), ("H", "Health"),
+                            ("T", "Tools"), ("Q", "Quit")]),
             ]
-            if plat == "pc":
-                acts2 = [
-                    ("F", "Build & Run"),
-                    ("O", "Run Simulator"),
-                    ("H", "Health"),
-                    ("T", "Dev Tools"),
-                    ("Q", "Quit"),
-                ]
-            else:
-                acts2 = [
-                    ("F", "Build & Flash"),
-                    ("O", "OTA Flash"),
-                    ("H", "Health"),
-                    ("T", "Dev Tools"),
-                    ("Q", "Quit"),
-                ]
-            row1 = "   "
-            for key, label in acts:
-                row1 += (f"{_C.BCYAN}[{key}]{_C.RST} {label}    ")
-            _w(row1 + "\n")
-            row2 = "   "
-            for key, label in acts2:
-                row2 += (f"{_C.BCYAN}[{key}]{_C.RST} {label}    ")
-            _w(row2 + "\n")
+            for label, entries in groups:
+                row = f"   {_C.GRAY}{label:<7}{_C.RST}"
+                for key, text in entries:
+                    row += f"{_C.BCYAN}[{key}]{_C.RST} {text:<14}"
+                _w(row + "\n")
 
             key = _read_key()
             if key in ("q", "ctrl-c", "esc"):
@@ -2336,6 +2484,8 @@ class _TUI:
             elif key == "p":
                 self._profiles()
                 self._reload()
+            elif key == "d":
+                self._device()
             elif key == "h":
                 self._health()
             elif key == "f":
@@ -2345,6 +2495,66 @@ class _TUI:
             elif key == "t":
                 self._dev_tools()
                 self._reload()
+
+    # -- Device ---------------------------------------------------------------
+
+    def _device(self):
+        """What the connected CrossPad reports it was built from, vs this repo.
+
+        The manifest says what should be installed; this says what is actually
+        running on the desk. When the two disagree, the firmware is older than
+        the checkout — the single most common source of "but I fixed that".
+        """
+        report = None
+        while True:
+            _clear()
+            self._header("Device", "APP_VERSIONS over CDC")
+
+            if report is None:
+                _w(f"\n   {_C.GRAY}Querying device...{_C.RST}\n")
+                report = self.mgr.device_diff()
+                continue
+
+            if not report.get("ok"):
+                _w(f"\n   {_C.BYELLOW}⚠{_C.RST} {report.get('error')}\n")
+                if self.config.platform != "pc":
+                    _w(f"\n   {_C.GRAY}A device in USB audio mode exposes no "
+                       f"CDC. Switch it back with\n   the SysEx "
+                       f"F0 7D 1B 00 F7 on its own MIDI port.{_C.RST}\n")
+                self._footer("[r] retry   q back")
+            else:
+                _w(f"\n   {_C.GRAY}Port{_C.RST}   {report['port']}\n\n")
+                _w(f"   {_C.GRAY}{'component':<24}{'device':<12}"
+                   f"{'repo':<12}{'ref':<16}{_C.RST}\n")
+                for row in report["rows"]:
+                    if row["match"]:
+                        mark, col = "✓", _C.BGREEN
+                    else:
+                        mark, col = "≠", _C.BYELLOW
+                    dirty = f"{_C.BYELLOW}*{_C.RST}" if row["device_dirty"] else ""
+                    _w(f" {col}{mark}{_C.RST} {row['component']:<24}"
+                       f"{row['device_commit']:<12}"
+                       f"{row['local_commit']:<12}"
+                       f"{_C.GRAY}{row['device_ref']:<16}{_C.RST}{dirty}\n")
+
+                stale = report.get("stale", [])
+                if stale:
+                    _w(f"\n   {_C.BYELLOW}{len(stale)} component(s) differ — "
+                       f"the device is not running this checkout.{_C.RST}\n")
+                    _w(f"   {_C.GRAY}Reflash: press o (OTA) from the "
+                       f"dashboard.{_C.RST}\n")
+                else:
+                    _w(f"\n   {_C.BGREEN}Device matches this checkout.{_C.RST}\n")
+                if any(r["device_dirty"] for r in report["rows"]):
+                    _w(f"   {_C.GRAY}* built from a dirty worktree — the commit "
+                       f"alone does not describe that binary.{_C.RST}\n")
+                self._footer("[r] refresh   q back")
+
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            if key == "r":
+                report = None
 
     # -- Browse ---------------------------------------------------------------
 
@@ -2807,6 +3017,9 @@ class _TUI:
             self._header("Workspace",
                          f"{len(statuses)} app(s)   ·   "
                          f"{CONFIG_FILE}")
+            if self._toast:
+                _w(f"\n   {_C.BGREEN}✓{_C.RST} {self._toast}\n")
+                self._toast = ""
             _w("\n")
 
             for i, st in enumerate(statuses):
@@ -2848,24 +3061,23 @@ class _TUI:
                 self._track_mode_flow(statuses[cursor])
                 refresh()
             elif key == "b":
-                _clear()
-                _show_cursor()
-                dest = self.mgr.backup_app(statuses[cursor]["app"])
-                _w(f"\n  {'Backup: ' + dest if dest else 'Nothing to back up.'}\n")
-                _hide_cursor()
-                _pause()
+                app = statuses[cursor]["app"]
+                dest = self.mgr.backup_app(app)
+                self._toast = (f"{app}: backed up to "
+                               f"{Path(dest).relative_to(self.mgr.project_dir)}"
+                               if dest else f"{app}: nothing to back up")
                 refresh()
             elif key == "r":
                 self._restore_flow(statuses[cursor]["app"])
                 refresh()
             elif key == "p":
-                _clear()
-                _show_cursor()
                 app = statuses[cursor]["app"]
-                _w(f"\n  Parking {app} WIP on a wip/ branch...\n\n")
-                self.mgr.park_wip(app)
-                _hide_cursor()
-                _pause()
+                before = statuses[cursor]["git"]["branch"]
+                ok = self.mgr.park_wip(app)
+                after = self.mgr.app_status(app)["git"]["branch"]
+                self._toast = (f"{app}: parked on {after}" if ok and after != before
+                               else f"{app}: nothing to park" if ok
+                               else f"{app}: could not park WIP")
                 refresh()
             elif key == "enter":
                 self._workspace_detail(statuses[cursor])
