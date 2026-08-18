@@ -1196,6 +1196,54 @@ class AppManager:
                 return p.device
         return None
 
+    def _parse_appver_lines(self, text: str) -> list[dict]:
+        entries = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("APPVER:") or line.startswith("APPVER: end"):
+                continue
+            parts = line[len("APPVER:"):].strip().split()
+            entry = {"component": parts[0] if parts else "?"}
+            for token in parts[1:]:
+                if "=" in token:
+                    k, v = token.split("=", 1)
+                    entry[k] = v
+            entries.append(entry)
+        return entries
+
+    def _query_binary_versions(self, timeout: float) -> dict:
+        """PC build: the simulator answers the same question via --versions."""
+        out = {"ok": False, "error": "", "entries": [], "port": None}
+        build = self.get_build_info()
+        if not build.get("exists"):
+            out["error"] = "simulator not built yet"
+            return out
+        binary = build["path"]
+        out["port"] = binary
+        try:
+            r = subprocess.run([binary, "--versions"], capture_output=True,
+                               text=True, timeout=timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
+        out["entries"] = self._parse_appver_lines(r.stdout)
+        if not out["entries"]:
+            out["error"] = ("no APPVER output — simulator predates the "
+                            "--versions flag")
+            return out
+        out["ok"] = True
+        return out
+
+    def component_path(self, component: str) -> str | None:
+        """Locate a component on disk. Apps and shared submodules do not share
+        a directory on every platform — PC keeps apps in src/apps and core/gui
+        in lib — so the reported component name is resolved, not assumed."""
+        for base in (self.config.lib_dir, "lib", "components", "."):
+            candidate = self.project_dir / base / component
+            if candidate.exists():
+                return f"{base}/{component}" if base != "." else component
+        return None
+
     def query_device_versions(self, timeout: float = 3.0) -> dict:
         """Ask a connected device what it was built from.
 
@@ -1204,6 +1252,9 @@ class AppManager:
         firmware without the command are all normal states to report, not
         failures to crash on.
         """
+        if self.config.platform == "pc":
+            return self._query_binary_versions(timeout)
+
         out = {"ok": False, "error": "", "entries": [], "port": None}
         try:
             import serial
@@ -1234,18 +1285,7 @@ class AppManager:
             out["error"] = f"{type(e).__name__}: {e}"
             return out
 
-        for line in buf.splitlines():
-            line = line.strip()
-            if not line.startswith("APPVER:") or line.startswith("APPVER: end"):
-                continue
-            body = line[len("APPVER:"):].strip()
-            parts = body.split()
-            entry = {"component": parts[0] if parts else "?"}
-            for token in parts[1:]:
-                if "=" in token:
-                    k, v = token.split("=", 1)
-                    entry[k] = v
-            out["entries"].append(entry)
+        out["entries"] = self._parse_appver_lines(buf)
 
         if not out["entries"]:
             out["error"] = ("no APPVER reply — firmware predates APP_VERSIONS, "
@@ -1263,8 +1303,9 @@ class AppManager:
         rows = []
         for entry in report["entries"]:
             component = entry.get("component", "?")
-            path = f"{self.config.lib_dir}/{component}"
-            local = self.app_git_state(path)
+            path = self.component_path(component)
+            local = self.app_git_state(path) if path else {
+                "exists": False, "head": None}
             local_commit = local["head"] or ""
             dev_commit = entry.get("commit", "")
             # The device reports a short SHA of whatever length its git printed;
@@ -1279,7 +1320,7 @@ class AppManager:
                 "device_ref": entry.get("ref", "-"),
                 "device_dirty": entry.get("dirty") == "1",
                 "local_commit": local_commit or "?",
-                "local_present": local["exists"],
+                "local_present": local.get("exists", False),
                 "match": match,
             })
         report["rows"] = rows

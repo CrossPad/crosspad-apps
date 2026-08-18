@@ -256,12 +256,21 @@ with help text and `requires` validation.
 python3 <wrapper> device        # exits 2 when the device differs
 ```
 
-A flashed CrossPad reports the submodules baked into its binary over CDC
-(`APP_VERSIONS`: component, registry id, commit, pin, dirty flag). The manager
-diffs that against the checkout, so "is the board actually running this code?"
-stops being guesswork. Same view on the TUI's `[D] Device` screen. A device in
-USB audio mode exposes no CDC — switch it back with the SysEx `F0 7D 1B 00 F7`
-on its own MIDI port.
+Every build bakes in the submodules it was made of — component, registry id,
+commit, manifest pin, dirty flag — and reports them in the same `APPVER:` format
+on all three platforms:
+
+| Platform | How it answers |
+|----------|----------------|
+| ESP-IDF | `APP_VERSIONS` over CDC |
+| Arduino | `APP_VERSIONS` on the serial console |
+| PC | `./bin/CrossPad --versions` |
+
+The manager diffs that against the checkout, so "is this actually running my
+code?" stops being guesswork. Same view on the TUI's `[D] Device` screen. A
+board in USB audio mode exposes no CDC — switch it back with the SysEx
+`F0 7D 1B 00 F7` on its own MIDI port. An app kept in-tree rather than as a
+submodule reports `ref=in-tree`, because its commit is the parent repo's.
 
 ### Profiles
 
