@@ -181,6 +181,16 @@ pio run --target clean && pio run
 
 ## Creating a New App
 
+Easiest from the TUI — `[N] New app` on the dashboard. It is a form: fill the
+id, name and description, cycle **Publish** with space between *local only*,
+*private GitHub repo* and *public GitHub repo*, and the panel below previews
+exactly what will be created — the directory, the two sources you are meant to
+rewrite, the `REGISTER_APP_PL` line, and the repo slug if publishing. Creation
+shows each step as it happens and ends on the build command, with `[b]` to run
+it right there.
+
+The same thing from the shell:
+
 ```bash
 python3 <wrapper> new fishtank --name "Fish Tank" --private
 ```
@@ -205,7 +215,6 @@ The template deliberately shows the one rule that is easy to get wrong: pad
 callbacks arrive on the pad thread, LVGL is not thread-safe, so the pad handler
 only records events and the LVGL timer draws them.
 
-The TUI has the same flow under `[N] New app`.
 
 ## Workspace, Config and Profiles
 
