@@ -29,8 +29,24 @@ from pathlib import Path
 REMOTE_REGISTRY_REPO = "CrossPad/crosspad-apps"
 REMOTE_REGISTRY_PATH = "registry.json"
 LOCAL_REGISTRY_FILE = "app-registry.json"
-MANIFEST_FILE = "apps.json"
+MANIFEST_FILE = "apps.json"           # state: what is on disk (machine-written)
+CONFIG_FILE = "crosspad.config.json"  # intent: apps, track policy, features
+LOCAL_CONFIG_FILE = "crosspad.local.json"  # personal overrides (gitignored)
+WORK_ROOT = ".crosspad"               # generated + backup working data
+BACKUP_ROOT = ".crosspad/backups"
+PROFILE_DIR = "config/profiles"
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour
+
+# Per-app tracking policy. The mode is intent; the blocking flags below are
+# observed reality and override it — a registry-tracked app that carries
+# uncommitted work is still protected.
+TRACK_REGISTRY = "registry"   # follow the registry/manifest ref, ff-only
+TRACK_BRANCH = "branch"       # follow the user's branch, never switch away
+TRACK_PINNED = "pinned"       # never moves
+TRACK_LOCAL = "local"         # manager does not touch the worktree at all
+TRACK_MODES = (TRACK_REGISTRY, TRACK_BRANCH, TRACK_PINNED, TRACK_LOCAL)
+
+BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "fork")
 
 
 @dataclass
@@ -47,6 +63,8 @@ class AppManager:
         self.config = config
         self.local_registry_path = self.project_dir / LOCAL_REGISTRY_FILE
         self.manifest_path = self.project_dir / MANIFEST_FILE
+        self.config_path = self.project_dir / CONFIG_FILE
+        self.local_config_path = self.project_dir / LOCAL_CONFIG_FILE
 
     # -- registry loading -----------------------------------------------------
 
@@ -445,6 +463,448 @@ class AppManager:
             "age_seconds": int(datetime.now().timestamp() - build_time),
         }
 
+    # -- project config: intent vs state --------------------------------------
+    #
+    # apps.json records what is ON DISK (state, machine-written). The project
+    # config records what the user WANTS (intent, hand- or TUI-edited): which
+    # apps, how each one is tracked, which board and feature flags. Keeping the
+    # two apart is what makes it safe to say "this submodule is mine, hands off"
+    # without the manager overwriting the statement on the next sync.
+
+    def _load_config_raw(self) -> dict:
+        if self.config_path.exists():
+            with open(self.config_path) as f:
+                return json.load(f)
+        return {}
+
+    def _load_local_config(self) -> dict:
+        if self.local_config_path.exists():
+            with open(self.local_config_path) as f:
+                return json.load(f)
+        return {}
+
+    def load_config(self) -> dict:
+        """Merged intent: crosspad.config.json overlaid with crosspad.local.json.
+
+        The local file is gitignored, so a developer can park an app on their
+        own branch without that showing up as a repo change for everyone else.
+        """
+        cfg = self._load_config_raw()
+        local = self._load_local_config()
+        for key, value in local.items():
+            if key in ("apps", "features") and isinstance(value, dict):
+                merged = dict(cfg.get(key, {}))
+                merged.update(value)
+                cfg[key] = merged
+            else:
+                cfg[key] = value
+        return cfg
+
+    def save_config(self, cfg: dict, local: bool = False):
+        path = self.local_config_path if local else self.config_path
+        with open(path, "w") as f:
+            json.dump(cfg, f, indent=2)
+            f.write("\n")
+
+    def app_policy(self, app_id: str) -> dict:
+        """Track policy for one app. Defaults to registry-tracked."""
+        entry = self.load_config().get("apps", {}).get(app_id)
+        if not isinstance(entry, dict):
+            return {"track": TRACK_REGISTRY}
+        track = entry.get("track", TRACK_REGISTRY)
+        if track not in TRACK_MODES:
+            track = TRACK_REGISTRY
+        out = {"track": track}
+        if entry.get("ref"):
+            out["ref"] = entry["ref"]
+        if entry.get("commit"):
+            out["commit"] = entry["commit"]
+        return out
+
+    def set_app_policy(self, app_id: str, track: str, ref: str = None,
+                       commit: str = None, local: bool = False):
+        if track not in TRACK_MODES:
+            raise ValueError(f"unknown track mode '{track}'")
+        target = self._load_local_config() if local else self._load_config_raw()
+        target.setdefault("version", 1)
+        entry = {"track": track}
+        if ref:
+            entry["ref"] = ref
+        if commit:
+            entry["commit"] = commit
+        target.setdefault("apps", {})[app_id] = entry
+        self.save_config(target, local=local)
+
+    def ensure_config(self, quiet: bool = False) -> dict:
+        """Create crosspad.config.json from the current state if absent.
+
+        Migration is deliberately conservative: everything becomes
+        registry-tracked except submodules already sitting on a non-default
+        branch, which become branch-tracked on the branch they are on. That
+        preserves e.g. a mixer parked on crosspad_v20 instead of quietly
+        dragging it back to main on the next update.
+        """
+        if self.config_path.exists():
+            return self._load_config_raw()
+
+        manifest = self._load_manifest()
+        registry = self._load_registry()
+        apps_reg = registry.get("apps", {})
+        cfg = {"version": 1, "platform": self.config.platform,
+               "features": {}, "apps": {}}
+
+        for app_id in manifest.get("installed", {}):
+            info = apps_reg.get(app_id, {})
+            path = (self._resolve_install_path(info) if info else
+                    f"{self.config.lib_dir}/{self.config.lib_prefix}{app_id}")
+            branch = self._get_submodule_branch(path)
+            default = self._get_default_branch(path) if branch else None
+            if branch and branch != default:
+                cfg["apps"][app_id] = {"track": TRACK_BRANCH, "ref": branch}
+            else:
+                cfg["apps"][app_id] = {"track": TRACK_REGISTRY}
+
+        self.save_config(cfg)
+        if not quiet:
+            print(f"Created {CONFIG_FILE} from current state "
+                  f"({len(cfg['apps'])} app(s)).")
+        return cfg
+
+    # -- observed git state ---------------------------------------------------
+
+    def _sub_git(self, path: str, *args, timeout: int = 20):
+        return subprocess.run(
+            ["git", "-C", str(self.project_dir / path)] + list(args),
+            capture_output=True, text=True, check=False, timeout=timeout)
+
+    def app_git_state(self, path: str) -> dict:
+        """Raw git facts about a submodule worktree. No policy applied."""
+        full = self.project_dir / path
+        state = {"exists": full.exists(), "branch": None, "head": None,
+                 "upstream": None, "ahead": 0, "behind": 0, "dirty": 0,
+                 "untracked": 0, "stashes": 0, "detached": False,
+                 "origin": "", "fork": False}
+        if not full.exists() or not (full / ".git").exists():
+            return state
+
+        r = self._sub_git(path, "rev-parse", "--abbrev-ref", "HEAD")
+        branch = r.stdout.strip() if r.returncode == 0 else ""
+        if branch == "HEAD" or not branch:
+            state["detached"] = True
+        else:
+            state["branch"] = branch
+
+        r = self._sub_git(path, "rev-parse", "--short", "HEAD")
+        if r.returncode == 0:
+            state["head"] = r.stdout.strip()
+
+        r = self._sub_git(path, "rev-parse", "--abbrev-ref",
+                          "--symbolic-full-name", "@{u}")
+        if r.returncode == 0 and r.stdout.strip():
+            state["upstream"] = r.stdout.strip()
+            c = self._sub_git(path, "rev-list", "--left-right", "--count",
+                              "@{u}...HEAD")
+            if c.returncode == 0 and c.stdout.split():
+                parts = c.stdout.split()
+                state["behind"] = int(parts[0])
+                state["ahead"] = int(parts[1]) if len(parts) > 1 else 0
+
+        # Commits that exist nowhere on origin count as local work even when
+        # there is no upstream to compare against (detached submodule with
+        # hand-made commits on top is the common case).
+        if not state["upstream"]:
+            c = self._sub_git(path, "rev-list", "--count", "HEAD",
+                              "--not", "--remotes=origin")
+            if c.returncode == 0 and c.stdout.strip().isdigit():
+                state["ahead"] = int(c.stdout.strip())
+
+        r = self._sub_git(path, "status", "--porcelain")
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                if line.startswith("??"):
+                    state["untracked"] += 1
+                elif line.strip():
+                    state["dirty"] += 1
+
+        r = self._sub_git(path, "stash", "list")
+        if r.returncode == 0:
+            state["stashes"] = len([l for l in r.stdout.splitlines() if l.strip()])
+
+        r = self._sub_git(path, "remote", "get-url", "origin")
+        if r.returncode == 0:
+            state["origin"] = r.stdout.strip()
+            state["fork"] = bool(state["origin"]) and \
+                f"/{self.config.official_org}/".lower() not in \
+                state["origin"].lower().replace(":", "/")
+        return state
+
+    def app_status(self, app_id: str) -> dict:
+        """Policy + observed state + a verdict for mutating operations."""
+        registry = self._load_registry()
+        info = registry.get("apps", {}).get(app_id, {})
+        path = (self._resolve_install_path(info) if info else
+                f"{self.config.lib_dir}/{self.config.lib_prefix}{app_id}")
+        policy = self.app_policy(app_id)
+        git = self.app_git_state(path)
+
+        flags = []
+        if git["dirty"]:
+            flags.append("dirty")
+        if git["ahead"]:
+            flags.append("ahead")
+        if git["stashes"]:
+            flags.append("stashed")
+        if git["fork"]:
+            flags.append("fork")
+
+        # Which ref this app is supposed to follow. For registry tracking that
+        # is the manifest ref (what install/sync recorded); for branch tracking
+        # it is the branch named in the config.
+        manifest = self._load_manifest()
+        inst = manifest.get("installed", {}).get(app_id, {})
+        want_ref = policy.get("ref") or inst.get("ref") or "main"
+        if git["branch"] and git["branch"] != want_ref:
+            flags.append("branch-mismatch")
+
+        blocking = [f for f in flags if f in BLOCKING_FLAGS]
+        return {
+            "app": app_id, "path": path, "policy": policy, "git": git,
+            "want_ref": want_ref, "flags": flags, "blocking": blocking,
+            "protected": policy["track"] in (TRACK_LOCAL, TRACK_PINNED),
+        }
+
+    @staticmethod
+    def describe_status(st: dict) -> str:
+        git = st["git"]
+        if not git["exists"]:
+            return "missing"
+        bits = []
+        bits.append(git["branch"] or f"detached@{git['head']}")
+        if git["ahead"]:
+            bits.append(f"↑{git['ahead']}")
+        if git["behind"]:
+            bits.append(f"↓{git['behind']}")
+        if git["dirty"]:
+            bits.append(f"✎{git['dirty']}")
+        if git["untracked"]:
+            bits.append(f"+{git['untracked']}?")
+        if git["stashes"]:
+            bits.append(f"stash:{git['stashes']}")
+        if git["fork"]:
+            bits.append("fork")
+        return " ".join(bits)
+
+    # -- backup / restore -----------------------------------------------------
+
+    def backup_dir(self, app_id: str) -> Path:
+        return self.project_dir / BACKUP_ROOT / app_id
+
+    def list_backups(self, app_id: str) -> list[str]:
+        root = self.backup_dir(app_id)
+        if not root.exists():
+            return []
+        return sorted((d.name for d in root.iterdir() if d.is_dir()),
+                      reverse=True)
+
+    def backup_app(self, app_id: str, prune_keep: int = 10) -> str | None:
+        """Snapshot every scrap of local work in an app submodule.
+
+        Captures, in this order: tracked modifications as a patch, untracked
+        files as a tarball, commits that exist nowhere on origin as a git
+        bundle, and every stash as its own patch. Enough to reconstruct the
+        worktree after a destructive checkout.
+        """
+        st = self.app_status(app_id)
+        path, git = st["path"], st["git"]
+        if not git["exists"]:
+            return None
+
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dest = self.backup_dir(app_id) / ts
+        dest.mkdir(parents=True, exist_ok=True)
+
+        if git["dirty"]:
+            r = self._sub_git(path, "diff", "HEAD")
+            (dest / "tracked.patch").write_text(r.stdout)
+
+        if git["untracked"]:
+            full = self.project_dir / path
+            files = self._sub_git(path, "ls-files", "--others",
+                                  "--exclude-standard")
+            names = [f for f in files.stdout.splitlines() if f.strip()]
+            if names:
+                import tarfile
+                with tarfile.open(dest / "untracked.tgz", "w:gz") as tar:
+                    for name in names:
+                        src = full / name
+                        if src.exists():
+                            tar.add(src, arcname=name)
+
+        if git["ahead"]:
+            bundle = dest / "local-commits.bundle"
+            # Bundle the branch by name when there is one; a bundle whose only
+            # ref is "HEAD" restores into nothing useful, because the fetch
+            # refspec has no branch name to map.
+            refs = ["HEAD"] if git["detached"] else [f"refs/heads/{git['branch']}"]
+            r = self._sub_git(path, "bundle", "create", str(bundle),
+                              *refs, "--not", "--remotes=origin")
+            if r.returncode != 0 and bundle.exists():
+                bundle.unlink()
+
+        if git["stashes"]:
+            sdir = dest / "stashes"
+            sdir.mkdir(exist_ok=True)
+            listing = self._sub_git(path, "stash", "list")
+            for i, line in enumerate(listing.stdout.splitlines()):
+                if not line.strip():
+                    continue
+                p = self._sub_git(path, "stash", "show", "-p", f"stash@{{{i}}}")
+                (sdir / f"stash{i}.patch").write_text(p.stdout)
+            (sdir / "list.txt").write_text(listing.stdout)
+
+        meta = {
+            "app": app_id, "path": path, "timestamp": ts,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "branch": git["branch"], "head": git["head"],
+            "upstream": git["upstream"], "origin": git["origin"],
+            "flags": st["flags"], "policy": st["policy"],
+        }
+        (dest / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+        # Keep the backup tree bounded; it is gitignored working data, not history.
+        backups = self.list_backups(app_id)
+        if len(backups) > prune_keep:
+            import shutil
+            for old in backups[prune_keep:]:
+                shutil.rmtree(self.backup_dir(app_id) / old, ignore_errors=True)
+
+        return str(dest)
+
+    def restore_backup(self, app_id: str, stamp: str = None) -> bool:
+        """Replay a backup onto the current worktree.
+
+        Patches and untracked files land back in place; local commits are
+        fetched into refs/crosspad-backup/<ts>/* rather than being replayed
+        onto whatever is checked out now — reconstructing history is the
+        user's call, not ours.
+        """
+        backups = self.list_backups(app_id)
+        if not backups:
+            print(f"No backups for '{app_id}'.")
+            return False
+        stamp = stamp or backups[0]
+        src = self.backup_dir(app_id) / stamp
+        if not src.exists():
+            print(f"No backup '{stamp}' for '{app_id}'.")
+            return False
+
+        st = self.app_status(app_id)
+        path = st["path"]
+        if not st["git"]["exists"]:
+            print(f"'{app_id}' is not on disk; install it first.")
+            return False
+
+        print(f"Restoring {app_id} from {stamp}...")
+        ok = True
+
+        untracked = src / "untracked.tgz"
+        if untracked.exists():
+            import tarfile
+            with tarfile.open(untracked) as tar:
+                tar.extractall(self.project_dir / path)
+            print("  untracked files restored")
+
+        patch = src / "tracked.patch"
+        if patch.exists() and patch.stat().st_size:
+            r = self._sub_git(path, "apply", "--3way", str(patch))
+            if r.returncode != 0:
+                r = self._sub_git(path, "apply", str(patch))
+            if r.returncode == 0:
+                print("  tracked changes applied")
+            else:
+                ok = False
+                print(f"  patch did NOT apply: {r.stderr.strip().splitlines()[:1]}")
+                print(f"  patch kept at {patch}")
+
+        bundle = src / "local-commits.bundle"
+        if bundle.exists():
+            # Enumerate what the bundle actually carries instead of assuming a
+            # refspec: a detached-HEAD backup stores "HEAD", a branch backup
+            # stores refs/heads/<name>, and a wildcard fetch silently matches
+            # neither of those in the wrong case.
+            heads = self._sub_git(path, "bundle", "list-heads", str(bundle))
+            specs, names = [], []
+            for line in heads.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                name = parts[1].rsplit("/", 1)[-1]
+                dst = f"refs/crosspad-backup/{stamp}/{name}"
+                specs.append(f"{parts[1]}:{dst}")
+                names.append(dst)
+            if specs:
+                r = self._sub_git(path, "fetch", str(bundle), *specs)
+                if r.returncode == 0:
+                    print(f"  local commits fetched into "
+                          f"{', '.join(names)}")
+                    print(f"    inspect: git -C {path} log "
+                          f"{names[0]}")
+                else:
+                    ok = False
+                    print(f"  bundle fetch failed: {r.stderr.strip()}")
+            else:
+                ok = False
+                print(f"  bundle carries no refs: {bundle}")
+
+        stashes = src / "stashes"
+        if stashes.exists():
+            print(f"  stash patches left at {stashes} (apply manually)")
+        return ok
+
+    def park_wip(self, app_id: str) -> bool:
+        """Commit the worktree onto a wip/ branch so the app reads as clean."""
+        st = self.app_status(app_id)
+        path, git = st["path"], st["git"]
+        if not (git["dirty"] or git["untracked"]):
+            return True
+        branch = f"wip/{datetime.now().strftime('%Y%m%d-%H%M%S')}-{app_id}"
+        r = self._sub_git(path, "checkout", "-b", branch)
+        if r.returncode != 0:
+            print(f"  could not create {branch}: {r.stderr.strip()}")
+            return False
+        self._sub_git(path, "add", "-A")
+        r = self._sub_git(path, "commit", "-m",
+                          f"wip({app_id}): parked by crosspad app manager")
+        if r.returncode != 0:
+            print(f"  commit failed: {r.stderr.strip()}")
+            return False
+        print(f"  parked on {branch}")
+        return True
+
+    # -- guard ----------------------------------------------------------------
+
+    def guard(self, app_id: str, force: bool = False,
+              backup: bool = True) -> tuple[bool, str]:
+        """Preflight before a destructive operation.
+
+        Returns (may_proceed, reason). A protected app never proceeds; an app
+        carrying local work proceeds only under --force, and even then a backup
+        is taken first.
+        """
+        st = self.app_status(app_id)
+        if st["protected"]:
+            return False, f"track={st['policy']['track']}"
+        if not st["blocking"]:
+            return True, ""
+        reason = ", ".join(st["blocking"])
+        if not force:
+            return False, reason
+        if backup:
+            dest = self.backup_app(app_id)
+            if dest:
+                print(f"  backup: {dest}")
+        return True, f"forced over {reason}"
+
     # -- commands -------------------------------------------------------------
 
     def _print_app_line(self, app_id: str, info: dict, manifest: dict):
@@ -596,6 +1056,17 @@ class AppManager:
         }
         self._save_manifest(manifest)
 
+        # Record intent alongside state: a non-default ref means the user asked
+        # for a specific branch, so track it as such instead of dragging the app
+        # back to the registry ref on the next update.
+        if self.config_path.exists() or self._load_manifest().get("installed"):
+            self.ensure_config(quiet=True)
+            default = self._get_default_branch(install_path)
+            if ref and ref != default:
+                self.set_app_policy(app_name, TRACK_BRANCH, ref=ref)
+            else:
+                self.set_app_policy(app_name, TRACK_REGISTRY)
+
         print(f"\n  {info['name']} installed successfully.")
         self._print_next_steps()
 
@@ -620,6 +1091,16 @@ class AppManager:
 
         print(f"Removing {info.get('name', app_name)}...")
 
+        # Removal deinits the submodule, which throws away anything not pushed.
+        # Always snapshot first when there is local work — no prompt, no flag:
+        # a backup costs a few kB, losing a branch costs an afternoon.
+        st = self.app_status(app_name)
+        if st["blocking"] or st["git"]["untracked"] or st["git"]["stashes"]:
+            dest = self.backup_app(app_name)
+            if dest:
+                print(f"  local work found ({', '.join(st['flags']) or 'untracked'})")
+                print(f"  backup: {dest}")
+
         try:
             self._git("submodule", "deinit", "-f", install_path)
             self._git("rm", "-f", install_path)
@@ -638,7 +1119,14 @@ class AppManager:
         print(f"\n  {info.get('name', app_name)} removed.")
         self._print_next_steps()
 
-    def update(self, app_name: str = None, update_all: bool = False):
+    def update(self, app_name: str = None, update_all: bool = False,
+               force: bool = False, dry_run: bool = False):
+        """Update app submodules, honouring track policy and local work.
+
+        Never stops on a blocked app: clean ones are updated, the rest are
+        reported in a skip table with the reason. --force takes a backup and
+        proceeds anyway.
+        """
         manifest = self._load_manifest()
         registry = self._load_registry()
         apps = registry.get("apps", {})
@@ -658,46 +1146,108 @@ class AppManager:
             print("No apps installed.")
             return
 
+        skipped = []
+        updated = 0
+
         for name in targets:
             info = apps.get(name, {})
             inst = manifest["installed"][name]
-            install_path = (self._resolve_install_path(info) if info else
-                            f"{self.config.lib_dir}/{self.config.lib_prefix}"
-                            f"{name}")
-            ref = inst.get("ref", "main")
+            st = self.app_status(name)
+            install_path = st["path"]
             full_path = self.project_dir / install_path
+            track = st["policy"]["track"]
 
             if not full_path.exists():
-                print(f"  {name}: path missing, skipping.")
+                skipped.append((name, "path missing"))
                 continue
 
-            print(f"Updating {info.get('name', name)} ({ref})...")
+            if track == TRACK_LOCAL:
+                skipped.append((name, "track=local (yours)"))
+                continue
+            if track == TRACK_PINNED:
+                pin = st["policy"].get("commit", inst.get("version", "?"))
+                skipped.append((name, f"track=pinned @ {pin}"))
+                continue
 
-            try:
-                subprocess.run(
-                    ["git", "-C", str(full_path), "fetch", "origin"],
-                    check=True)
+            ok, reason = self.guard(name, force=force)
+            if not ok:
+                skipped.append((name, f"{reason} — backup & --force to override"))
+                continue
+            if reason:
+                print(f"  {name}: {reason}")
+
+            ref = st["want_ref"]
+            print(f"Updating {info.get('name', name)} ({track} → {ref})...")
+            if dry_run:
+                updated += 1
+                continue
+
+            r = self._sub_git(install_path, "fetch", "origin")
+            if r.returncode != 0:
+                skipped.append((name, "fetch failed"))
+                continue
+
+            if track == TRACK_BRANCH:
+                # Follow the branch the user parked this app on: fast-forward
+                # in place, never check something else out.
+                if st["git"]["branch"] != ref:
+                    skipped.append((name, f"on {st['git']['branch']}, "
+                                          f"config says {ref}"))
+                    continue
+                r = self._sub_git(install_path, "merge", "--ff-only",
+                                  f"origin/{ref}")
+                if r.returncode != 0:
+                    skipped.append((name, "not fast-forwardable "
+                                          "(diverged from origin)"))
+                    continue
+            else:
                 checkout_ref = (f"origin/{ref}"
                                 if not ref.startswith(("origin/", "refs/"))
                                 and len(ref) < 12
                                 else ref)
-                subprocess.run(
-                    ["git", "-C", str(full_path), "checkout", checkout_ref],
-                    check=True)
-                self._git("add", install_path)
-            except subprocess.CalledProcessError:
-                print(f"  Error updating {name}.")
-                continue
+                r = self._sub_git(install_path, "checkout", checkout_ref)
+                if r.returncode != 0:
+                    skipped.append((name, f"checkout {checkout_ref} failed"))
+                    continue
 
+            self._git("add", install_path, check=False)
             commit = self._get_submodule_commit(install_path)
             old_commit = inst.get("version", "?")
             inst["version"] = commit
+            inst["ref"] = ref
             inst["updated_at"] = datetime.now(timezone.utc).isoformat()
             print(f"  {old_commit} -> {commit}")
+            updated += 1
 
-        self._save_manifest(manifest)
-        if targets:
+        if not dry_run:
+            self._save_manifest(manifest)
+
+        if skipped:
+            print("\n  Skipped:")
+            for name, reason in skipped:
+                print(f"    {name:<16} {reason}")
+        if updated and not dry_run:
             self._print_next_steps()
+
+    def status(self, app_name: str = None):
+        """Report intent vs observed state for installed apps."""
+        manifest = self._load_manifest()
+        targets = ([app_name] if app_name
+                   else list(manifest.get("installed", {}).keys()))
+        if not targets:
+            print("No apps installed.")
+            return
+
+        print(f"\n  {'app':<16} {'track':<9} {'state':<34} backups")
+        print("  " + "-" * 72)
+        for name in targets:
+            st = self.app_status(name)
+            n_backups = len(self.list_backups(name))
+            mark = "!" if st["blocking"] else ("~" if st["protected"] else " ")
+            print(f"{mark} {name:<16} {st['policy']['track']:<9} "
+                  f"{self.describe_status(st):<34} "
+                  f"{n_backups if n_backups else ''}")
+        print("\n  ! = blocked for updates   ~ = protected by policy\n")
 
     def sync(self):
         """Detect existing app submodules and sync manifest."""
@@ -805,7 +1355,37 @@ def cli_main(config: PlatformConfig):
     update_cmd = sub.add_parser("update", help="Update app(s)")
     update_cmd.add_argument("app", nargs="?", help="App name")
     update_cmd.add_argument("--all", action="store_true", help="Update all")
+    update_cmd.add_argument("--force", action="store_true",
+                            help="Update despite local work (backs up first)")
+    update_cmd.add_argument("--dry-run", action="store_true",
+                            help="Show what would happen, change nothing")
 
+    status_cmd = sub.add_parser("status",
+                                help="Show track policy vs git state per app")
+    status_cmd.add_argument("app", nargs="?", help="App name")
+
+    track_cmd = sub.add_parser("track", help="Set an app's track policy")
+    track_cmd.add_argument("app", help="App name")
+    track_cmd.add_argument("mode", choices=list(TRACK_MODES))
+    track_cmd.add_argument("--ref", default=None,
+                           help="Branch for track=branch")
+    track_cmd.add_argument("--commit", default=None,
+                           help="Commit for track=pinned")
+    track_cmd.add_argument("--local", action="store_true",
+                           help="Write to crosspad.local.json (not shared)")
+
+    backup_cmd = sub.add_parser("backup", help="Snapshot an app's local work")
+    backup_cmd.add_argument("app", help="App name")
+
+    restore_cmd = sub.add_parser("restore", help="Restore a backup")
+    restore_cmd.add_argument("app", help="App name")
+    restore_cmd.add_argument("stamp", nargs="?",
+                             help="Backup timestamp (default: newest)")
+    restore_cmd.add_argument("--list", action="store_true",
+                             help="List available backups")
+
+    sub.add_parser("config-init",
+                   help=f"Create {CONFIG_FILE} from the current state")
     sub.add_parser("sync", help="Sync manifest with existing submodules")
     sub.add_parser("tui", help="Interactive terminal UI")
 
@@ -820,9 +1400,32 @@ def cli_main(config: PlatformConfig):
     elif args.command == "remove":
         mgr.remove(args.app)
     elif args.command == "update":
-        mgr.update(app_name=args.app, update_all=args.all)
+        mgr.update(app_name=args.app, update_all=args.all,
+                   force=args.force, dry_run=args.dry_run)
+    elif args.command == "status":
+        mgr.status(args.app)
+    elif args.command == "track":
+        mgr.ensure_config(quiet=True)
+        mgr.set_app_policy(args.app, args.mode, ref=args.ref,
+                           commit=args.commit, local=args.local)
+        where = LOCAL_CONFIG_FILE if args.local else CONFIG_FILE
+        print(f"{args.app}: track={args.mode}"
+              f"{' ref=' + args.ref if args.ref else ''} -> {where}")
+    elif args.command == "backup":
+        dest = mgr.backup_app(args.app)
+        print(f"Backup: {dest}" if dest else f"Nothing to back up for '{args.app}'.")
+    elif args.command == "restore":
+        if args.list:
+            stamps = mgr.list_backups(args.app)
+            print("\n".join(f"  {t}" for t in stamps) if stamps
+                  else f"No backups for '{args.app}'.")
+        else:
+            mgr.restore_backup(args.app, args.stamp)
+    elif args.command == "config-init":
+        mgr.ensure_config()
     elif args.command == "sync":
         mgr.sync()
+        mgr.ensure_config(quiet=True)
     elif args.command == "tui" or args.command is None:
         if _is_interactive():
             tui_main(config)
@@ -1294,6 +1897,7 @@ class _TUI:
             acts = [
                 ("B", "Browse & Install"),
                 ("U", "Update All"),
+                ("W", "Workspace"),
                 ("H", "Health Check"),
             ]
             if plat == "pc":
@@ -1327,6 +1931,9 @@ class _TUI:
                 self._reload()
             elif key == "u":
                 self._update_flow()
+                self._reload()
+            elif key == "w":
+                self._workspace()
                 self._reload()
             elif key == "h":
                 self._health()
@@ -1738,11 +2345,240 @@ class _TUI:
             return
 
         self._header("Update Apps")
-        _w(f"\n  Updating {len(self._installed)} app(s)...\n\n")
+        _w(f"\n  Checking {len(self._installed)} app(s)...\n\n")
+
+        # Show what the guard will do before touching anything — an update that
+        # silently skips half the apps is worse than one that says so up front.
+        blocked = []
+        for app_id in self._installed:
+            st = self.mgr.app_status(app_id)
+            if st["protected"]:
+                _w(f"   {_C.BCYAN}\u270b{_C.RST} {app_id:<16}"
+                   f"{_C.GRAY}protected: track="
+                   f"{st['policy']['track']}{_C.RST}\n")
+            elif st["blocking"]:
+                blocked.append(app_id)
+                _w(f"   {_C.BYELLOW}\u25cf{_C.RST} {app_id:<16}"
+                   f"{_C.YELLOW}local work: "
+                   f"{', '.join(st['blocking'])}{_C.RST}\n")
+            else:
+                _w(f"   {_C.BGREEN}\u25cf{_C.RST} {app_id:<16}"
+                   f"{_C.GRAY}ready{_C.RST}\n")
+
+        force = False
+        if blocked:
+            _w(f"\n  {len(blocked)} app(s) carry local work.\n")
+            _show_cursor()
+            force = _confirm("Back them up and update anyway?")
+            _hide_cursor()
+
+        _w("\n")
         _show_cursor()
-        self.mgr.update(update_all=True)
+        self.mgr.update(update_all=True, force=force)
         _hide_cursor()
         _pause()
+
+    # -- Workspace ------------------------------------------------------------
+
+    def _workspace(self):
+        """Per-app ownership: track policy, git state, backup / restore.
+
+        This is the screen that answers "is this app mine or the registry's?"
+        before anything destructive runs.
+        """
+        cursor = 0
+        statuses = []
+
+        def refresh():
+            nonlocal statuses
+            statuses = [self.mgr.app_status(a) for a in self._installed]
+
+        refresh()
+
+        while True:
+            if not statuses:
+                _clear()
+                _w(f"\n  {_C.GRAY}No apps installed.{_C.RST}\n")
+                _pause()
+                return
+
+            _clear()
+            self._header("Workspace",
+                         f"{len(statuses)} app(s)   ·   "
+                         f"{CONFIG_FILE}")
+            _w("\n")
+
+            for i, st in enumerate(statuses):
+                name = st["app"]
+                track = st["policy"]["track"]
+                if st["blocking"]:
+                    dot, col = "●", _C.BYELLOW
+                elif st["protected"]:
+                    dot, col = "✋", _C.BCYAN
+                else:
+                    dot, col = "●", _C.BGREEN
+                marker = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                nb = len(self.mgr.list_backups(name))
+                _w(f"  {marker} {col}{dot}{_C.RST} {name:<16}"
+                   f"{_C.GRAY}track={_C.RST}{track:<9} "
+                   f"{self.mgr.describe_status(st):<30} "
+                   f"{_C.DIM}{('bk:' + str(nb)) if nb else ''}{_C.RST}\n")
+                if i == cursor and st["blocking"]:
+                    _w(f"      {_C.YELLOW}blocked: "
+                       f"{', '.join(st['blocking'])}{_C.RST}\n")
+
+            self._section("Legend")
+            _w(f"   {_C.BGREEN}●{_C.RST} clean   "
+               f"{_C.BYELLOW}●{_C.RST} local work (updates blocked)   "
+               f"{_C.BCYAN}✋{_C.RST} protected by policy\n")
+
+            self._footer("↑↓ navigate   [m] track mode   "
+                         "[b] backup   [r] restore   [p] park WIP   "
+                         "[enter] details   q back")
+
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            elif key == "up":
+                cursor = (cursor - 1) % len(statuses)
+            elif key == "down":
+                cursor = (cursor + 1) % len(statuses)
+            elif key == "m":
+                self._track_mode_flow(statuses[cursor])
+                refresh()
+            elif key == "b":
+                _clear()
+                _show_cursor()
+                dest = self.mgr.backup_app(statuses[cursor]["app"])
+                _w(f"\n  {'Backup: ' + dest if dest else 'Nothing to back up.'}\n")
+                _hide_cursor()
+                _pause()
+                refresh()
+            elif key == "r":
+                self._restore_flow(statuses[cursor]["app"])
+                refresh()
+            elif key == "p":
+                _clear()
+                _show_cursor()
+                app = statuses[cursor]["app"]
+                _w(f"\n  Parking {app} WIP on a wip/ branch...\n\n")
+                self.mgr.park_wip(app)
+                _hide_cursor()
+                _pause()
+                refresh()
+            elif key == "enter":
+                self._workspace_detail(statuses[cursor])
+                refresh()
+
+    def _track_mode_flow(self, st: dict):
+        app = st["app"]
+        modes = [
+            (TRACK_REGISTRY, "Follow the registry ref (fast-forward only)"),
+            (TRACK_BRANCH, "Follow a branch of yours; never switched away"),
+            (TRACK_PINNED, "Freeze at the current commit"),
+            (TRACK_LOCAL, "Hands off — the manager never touches it"),
+        ]
+        cur = st["policy"]["track"]
+        labels = [f"{m}{'  (current)' if m == cur else ''}" for m, _ in modes]
+        idx = _menu_select(f"Track mode — {app}", labels,
+                           [d for _, d in modes])
+        if idx < 0:
+            return
+        mode = modes[idx][0]
+        ref = commit = None
+        if mode == TRACK_BRANCH:
+            _show_cursor()
+            ref = _text_input("Branch",
+                              st["git"]["branch"] or st["want_ref"])
+            _hide_cursor()
+            if not ref:
+                return
+        elif mode == TRACK_PINNED:
+            commit = st["git"]["head"]
+        self.mgr.ensure_config(quiet=True)
+        self.mgr.set_app_policy(app, mode, ref=ref, commit=commit)
+        _clear()
+        _w(f"\n  {app}: track={mode}"
+           f"{' ref=' + ref if ref else ''}"
+           f"{' @ ' + commit if commit else ''}\n"
+           f"  written to {CONFIG_FILE}\n")
+        _pause()
+
+    def _restore_flow(self, app: str):
+        stamps = self.mgr.list_backups(app)
+        if not stamps:
+            _clear()
+            _w(f"\n  {_C.GRAY}No backups for {app}.{_C.RST}\n")
+            _pause()
+            return
+        descs = []
+        for s in stamps:
+            meta_path = self.mgr.backup_dir(app) / s / "meta.json"
+            try:
+                meta = json.loads(meta_path.read_text())
+                descs.append(f"{meta.get('branch') or 'detached'} @ "
+                             f"{meta.get('head')}   "
+                             f"{', '.join(meta.get('flags', []))}")
+            except (OSError, ValueError):
+                descs.append("")
+        idx = _menu_select(f"Restore backup — {app}", stamps, descs)
+        if idx < 0:
+            return
+        _clear()
+        _show_cursor()
+        self.mgr.restore_backup(app, stamps[idx])
+        _hide_cursor()
+        _pause()
+
+    def _workspace_detail(self, st: dict):
+        app = st["app"]
+        while True:
+            _clear()
+            self._header(f"Workspace — {app}")
+            git = st["git"]
+            rows = [
+                ("Track", st["policy"]["track"]),
+                ("Wanted ref", st["want_ref"]),
+                ("Branch", git["branch"] or f"detached @ {git['head']}"),
+                ("HEAD", git["head"] or "?"),
+                ("Upstream", git["upstream"] or "none"),
+                ("Ahead / behind", f"{git['ahead']} / {git['behind']}"),
+                ("Dirty files", str(git["dirty"])),
+                ("Untracked", str(git["untracked"])),
+                ("Stashes", str(git["stashes"])),
+                ("Origin", git["origin"] or "?"),
+                ("Flags", ", ".join(st["flags"]) or "clean"),
+                ("Backups", str(len(self.mgr.list_backups(app)))),
+            ]
+            _w("\n")
+            for label, value in rows:
+                _w(f"   {_C.GRAY}{label:<16}{_C.RST}{value}\n")
+
+            log = self.mgr.get_app_git_log(st["path"], 5)
+            if log:
+                self._section("Recent commits")
+                for line in log:
+                    _w(f"   {_C.DIM}{line}{_C.RST}\n")
+
+            self._footer("[m] track mode   [b] backup   [r] restore   "
+                         "[p] park WIP   q back")
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            elif key == "m":
+                self._track_mode_flow(st)
+            elif key == "b":
+                _clear()
+                dest = self.mgr.backup_app(app)
+                _w(f"\n  {'Backup: ' + dest if dest else 'Nothing to back up.'}\n")
+                _pause()
+            elif key == "r":
+                self._restore_flow(app)
+            elif key == "p":
+                _clear()
+                self.mgr.park_wip(app)
+                _pause()
+            st = self.mgr.app_status(app)
 
     # -- Quick OTA -------------------------------------------------------------
 
