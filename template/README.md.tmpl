@@ -1,0 +1,42 @@
+# __APP_NAME__
+
+__APP_DESC__
+
+Generated from the [CrossPad app template](https://github.com/CrossPad/crosspad-apps).
+
+## What is in here
+
+| Path | Purpose |
+|------|---------|
+| `src/__APP_CLASS__App.cpp` | UI, animation timer, LVGL buttons + slider, `REGISTER_APP_PL` |
+| `src/__APP_CLASS__PadLogic.cpp` | Pad handler — records events for the GUI thread |
+| `CMakeLists.txt` | ESP-IDF component; the PC simulator globs `src/` itself |
+| `crosspad-app.json` | Registry metadata (name, id, platforms, requirements) |
+
+## Install into a project
+
+```bash
+# ESP-IDF
+idf.py app-install --app __APP_ID__ --origin <this repo URL>
+idf.py fullclean && idf.py build
+
+# PC simulator
+python3 scripts/app_manager.py install __APP_ID__ --origin <this repo URL>
+```
+
+New app directories are only discovered at configure time, so the clean build
+is required once after installing.
+
+## Making it yours
+
+1. Rewrite `__APP_CLASS___create()` — it is a plain LVGL widget tree.
+2. Rewrite `__APP_CLASS__PadLogic` — `onPadPress` is the pad callback.
+3. Keep the split: pad callbacks run on the pad thread and must not touch LVGL.
+   Record what happened, let the LVGL timer draw it.
+
+## Publishing
+
+To list it in the public registry, add the repo to `external-apps.json` in
+[CrossPad/crosspad-apps](https://github.com/CrossPad/crosspad-apps) and give the
+repo the `crosspad-app` topic. A private repo works fine without that — it just
+stays yours.

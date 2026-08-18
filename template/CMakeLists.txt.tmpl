@@ -1,0 +1,20 @@
+# __APP_NAME__ — ESP-IDF component.
+#
+# The PC simulator does not read this file: it globs src/*.cpp and adds
+# include/ itself, so one source tree serves both platforms.
+
+file(GLOB __APP_UPPER___SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+
+idf_component_register(
+    SRCS ${__APP_UPPER___SRCS}
+    INCLUDE_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    REQUIRES
+        crosspad-core
+        crosspad-gui
+        lvgl
+)
+
+# WHOLE_ARCHIVE keeps the REGISTER_APP-generated _register___APP_CLASS___app()
+# symbol alive through linking — main calls it via AppRegistry_InitAll().
+set_property(TARGET ${COMPONENT_LIB} PROPERTY WHOLE_ARCHIVE ON)

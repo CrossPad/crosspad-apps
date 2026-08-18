@@ -1,0 +1,342 @@
+/**
+ * @file __APP_CLASS__App.cpp
+ * @brief __APP_NAME__ — generated from the CrossPad app template.
+ *
+ * A deliberately small but complete app, meant to be read and then rewritten:
+ *
+ *   - an aquarium of ASCII fish animated by an lv_timer,
+ *   - LVGL buttons and a slider driving it,
+ *   - a pad handler that spawns fish, wired declaratively via REGISTER_APP_PL.
+ *
+ * The one rule worth copying: pad callbacks run on the pad thread, LVGL does
+ * not tolerate that, so __APP_CLASS__PadLogic only records events and the LVGL
+ * timer below does every drawing call.
+ */
+
+#include "crosspad-__APP_ID__/__APP_CLASS__App.hpp"
+#include "crosspad-__APP_ID__/__APP_CLASS__PadLogic.hpp"
+
+// `class App` lives in a different header per platform, but both derive from
+// crosspad_gui::AppBase<App>, so the lifecycle calls used here are identical.
+#if __has_include("pc_stubs/PcApp.hpp")
+  #include "pc_stubs/PcApp.hpp"
+#else
+  #include "crosspad-gui/app/App.hpp"
+#endif
+
+#include "crosspad/app/AppRegistrar.hpp"
+#include "crosspad/pad/PadManager.hpp"
+#include "crosspad/platform/PlatformServices.hpp"
+
+#include "lvgl.h"
+
+#include <cstdio>
+#include <memory>
+
+// Encoder navigation is an embedded-only concern — the simulator drives the UI
+// with a pointer. Snapshot whichever group was active before the app opened and
+// restore that, rather than a global launcher group that goes stale whenever the
+// launcher is rebuilt.
+#ifdef ESP_PLATFORM
+extern "C" {
+  extern lv_indev_t* indev_encoderTop;
+}
+#define __APP_UPPER___USE_ENCODER 1
+#endif
+
+namespace {
+
+constexpr int kMaxFish = 12;
+constexpr int kStartFish = 5;
+constexpr uint32_t kTickMs = 33;          // ~30 fps
+constexpr const char* kFishRight = "><>";
+constexpr const char* kFishLeft = "<><";
+
+struct Fish {
+    lv_obj_t* label = nullptr;
+    int32_t x10 = 0;      // position in tenths of a pixel — integer math only
+    int32_t y = 0;
+    int32_t vx10 = 10;    // tenths of a pixel per tick, sign = direction
+    int32_t phase = 0;    // bobbing phase
+};
+
+Fish s_fish[kMaxFish];
+int s_fishCount = 0;
+
+lv_obj_t* s_root = nullptr;
+lv_obj_t* s_tank = nullptr;
+lv_obj_t* s_countLabel = nullptr;
+lv_timer_t* s_timer = nullptr;
+int32_t s_speedPct = 50;
+
+std::shared_ptr<__APP_CLASS__PadLogic> s_padLogic;
+
+#ifdef __APP_UPPER___USE_ENCODER
+lv_group_t* s_encGroup = nullptr;
+lv_group_t* s_prevEncGroup = nullptr;
+#endif
+
+const lv_color_t kFishColors[] = {
+    lv_color_hex(0xffb347), lv_color_hex(0x7ec8e3), lv_color_hex(0xf78fb3),
+    lv_color_hex(0xa0e7a0), lv_color_hex(0xffe066), lv_color_hex(0xc3a6ff),
+};
+constexpr int kFishColorCount = sizeof(kFishColors) / sizeof(kFishColors[0]);
+
+int32_t tank_w() { return s_tank ? lv_obj_get_width(s_tank) : 300; }
+int32_t tank_h() { return s_tank ? lv_obj_get_height(s_tank) : 120; }
+
+void update_count_label()
+{
+    if (!s_countLabel) return;
+    lv_label_set_text_fmt(s_countLabel, "%d fish", s_fishCount);
+}
+
+void spawn_fish(int32_t speedBias)
+{
+    if (!s_tank || s_fishCount >= kMaxFish) return;
+
+    Fish& f = s_fish[s_fishCount];
+    f.label = lv_label_create(s_tank);
+    lv_obj_set_style_text_color(f.label, kFishColors[s_fishCount % kFishColorCount], 0);
+
+    const bool toRight = (s_fishCount % 2) == 0;
+    lv_label_set_text(f.label, toRight ? kFishRight : kFishLeft);
+
+    const int32_t h = tank_h();
+    const int32_t w = tank_w();
+    // Stagger both axes so a fresh tank does not look like a single school
+    // swimming in formation.
+    f.x10 = (toRight ? 0 : w * 10) + (s_fishCount * 37 % (w > 40 ? w : 40)) * 10
+            * (toRight ? 1 : -1);
+    f.y = h > 24 ? (s_fishCount * 19) % (h - 16) : 0;
+    f.vx10 = (toRight ? 1 : -1) * (6 + speedBias);
+    f.phase = s_fishCount * 40;
+
+    lv_obj_set_pos(f.label, f.x10 / 10, f.y);
+    ++s_fishCount;
+    update_count_label();
+}
+
+void remove_fish()
+{
+    if (s_fishCount <= 0) return;
+    --s_fishCount;
+    if (s_fish[s_fishCount].label) {
+        lv_obj_delete(s_fish[s_fishCount].label);
+        s_fish[s_fishCount].label = nullptr;
+    }
+    update_count_label();
+}
+
+// Triangle-wave bob: no float, no trig table, and close enough to a swim.
+int32_t bob(int32_t phase)
+{
+    const int32_t p = phase % 120;
+    return (p < 60 ? p : 120 - p) / 15;   // 0..4 px
+}
+
+void tick_cb(lv_timer_t*)
+{
+    // Drain pad presses recorded on the pad thread.
+    if (s_padLogic) {
+        int pending = s_padLogic->takePendingSpawns();
+        const int32_t bias = s_padLogic->lastVelocity() / 24;   // 0..5
+        while (pending-- > 0) spawn_fish(bias);
+    }
+
+    const int32_t w = tank_w();
+    for (int i = 0; i < s_fishCount; ++i) {
+        Fish& f = s_fish[i];
+        if (!f.label) continue;
+
+        f.x10 += (f.vx10 * s_speedPct) / 50;
+        f.phase += 3;
+
+        // Wrap around and flip the fish so it always faces where it swims.
+        if (f.vx10 > 0 && f.x10 / 10 > w) {
+            f.x10 = -30 * 10;
+            lv_label_set_text(f.label, kFishRight);
+        } else if (f.vx10 < 0 && f.x10 / 10 < -30) {
+            f.x10 = (w + 10) * 10;
+            lv_label_set_text(f.label, kFishLeft);
+        }
+
+        lv_obj_set_pos(f.label, f.x10 / 10, f.y + bob(f.phase));
+    }
+}
+
+void add_cb(lv_event_t*)    { spawn_fish(2); }
+void remove_cb(lv_event_t*) { remove_fish(); }
+
+// "Feed" makes every fish dart and flashes the pads — one call into the
+// portable PadManager, so it behaves the same on hardware and in the simulator.
+void feed_cb(lv_event_t*)
+{
+    for (int i = 0; i < s_fishCount; ++i) {
+        s_fish[i].vx10 += (s_fish[i].vx10 > 0 ? 6 : -6);
+    }
+    auto& pads = crosspad::getPadManager();
+    for (uint8_t i = 0; i < 16; ++i) {
+        pads.setPadColor(i, 255, 200, 40);
+    }
+}
+
+void speed_cb(lv_event_t* e)
+{
+    auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    s_speedPct = lv_slider_get_value(slider);
+}
+
+lv_obj_t* make_button(lv_obj_t* parent, const char* text, lv_event_cb_t cb)
+{
+    lv_obj_t* btn = lv_button_create(parent);
+    lv_obj_set_height(btn, 30);
+    lv_obj_set_flex_grow(btn, 1);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t* label = lv_label_create(btn);
+    lv_label_set_text(label, text);
+    lv_obj_center(label);
+    return btn;
+}
+
+} // namespace
+
+lv_obj_t* __APP_CLASS___create(lv_obj_t* parent, App* app)
+{
+    s_root = lv_obj_create(parent);
+    lv_obj_set_size(s_root, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_root, lv_color_hex(0x001018), 0);
+    lv_obj_set_style_border_width(s_root, 0, 0);
+    lv_obj_set_style_pad_all(s_root, 6, 0);
+    lv_obj_set_flex_flow(s_root, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_root, 6, 0);
+    lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
+
+    // -- aquarium --
+    s_tank = lv_obj_create(s_root);
+    lv_obj_set_width(s_tank, LV_PCT(100));
+    lv_obj_set_flex_grow(s_tank, 1);
+    lv_obj_set_style_bg_color(s_tank, lv_color_hex(0x022b3a), 0);
+    lv_obj_set_style_border_color(s_tank, lv_color_hex(0x0a4d68), 0);
+    lv_obj_set_style_pad_all(s_tank, 0, 0);
+    lv_obj_remove_flag(s_tank, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_countLabel = lv_label_create(s_root);
+    lv_obj_set_style_text_color(s_countLabel, lv_color_hex(0x7ec8e3), 0);
+
+    // -- buttons --
+    lv_obj_t* row = lv_obj_create(s_root);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, 38);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+#ifdef __APP_UPPER___USE_ENCODER
+    if (indev_encoderTop) s_prevEncGroup = lv_indev_get_group(indev_encoderTop);
+    if (!s_encGroup) s_encGroup = lv_group_create();
+    if (indev_encoderTop) lv_indev_set_group(indev_encoderTop, s_encGroup);
+#endif
+
+    lv_obj_t* addBtn = make_button(row, "+ Fish", add_cb);
+    lv_obj_t* remBtn = make_button(row, "- Fish", remove_cb);
+    lv_obj_t* feedBtn = make_button(row, "Feed", feed_cb);
+#ifdef __APP_UPPER___USE_ENCODER
+    if (s_encGroup) {
+        lv_group_add_obj(s_encGroup, addBtn);
+        lv_group_add_obj(s_encGroup, remBtn);
+        lv_group_add_obj(s_encGroup, feedBtn);
+    }
+#endif
+
+    // -- speed slider --
+    lv_obj_t* slider = lv_slider_create(s_root);
+    lv_obj_set_width(slider, LV_PCT(100));
+    lv_slider_set_range(slider, 10, 200);
+    lv_slider_set_value(slider, s_speedPct, LV_ANIM_OFF);
+    lv_obj_add_event_cb(slider, speed_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+#ifdef __APP_UPPER___USE_ENCODER
+    if (s_encGroup) lv_group_add_obj(s_encGroup, slider);
+#endif
+
+    // -- pad logic --
+    // Registration only. Activation is framework-owned: AppBase::start() pushes
+    // the pad logic named in REGISTER_APP_PL and destroyApp() pops it, so this
+    // app must never call setActivePadLogic() itself.
+    if (!s_padLogic) {
+        s_padLogic = std::make_shared<__APP_CLASS__PadLogic>();
+        crosspad::getPadManager().registerPadLogic("__APP_CLASS__", s_padLogic);
+    }
+
+    // Flex has not run yet, so the tank still reports a size of zero and every
+    // fish would spawn stacked in the top-left corner. Force the layout pass
+    // before asking for its dimensions.
+    lv_obj_update_layout(s_root);
+
+    for (int i = 0; i < kStartFish; ++i) spawn_fish(0);
+    update_count_label();
+
+    s_timer = lv_timer_create(tick_cb, kTickMs, nullptr);
+
+    // Animation costs nothing while the app is hidden.
+    if (app) {
+        app->setOnShow([](lv_obj_t*) {
+            if (s_timer) lv_timer_resume(s_timer);
+#ifdef __APP_UPPER___USE_ENCODER
+            if (indev_encoderTop && s_encGroup) {
+                lv_indev_set_group(indev_encoderTop, s_encGroup);
+            }
+#endif
+        });
+        app->setOnHide([](lv_obj_t*) {
+            if (s_timer) lv_timer_pause(s_timer);
+#ifdef __APP_UPPER___USE_ENCODER
+            if (indev_encoderTop && s_prevEncGroup) {
+                lv_indev_set_group(indev_encoderTop, s_prevEncGroup);
+            }
+#endif
+        });
+    }
+
+    return s_root;
+}
+
+void __APP_CLASS___destroy(lv_obj_t* root)
+{
+    if (s_timer) {
+        lv_timer_delete(s_timer);
+        s_timer = nullptr;
+    }
+    // The fish are children of the tank, which is a child of root: deleting
+    // root takes them with it. Only the bookkeeping needs clearing.
+    for (auto& f : s_fish) f.label = nullptr;
+    s_fishCount = 0;
+    s_tank = nullptr;
+    s_countLabel = nullptr;
+    s_root = nullptr;
+
+#ifdef __APP_UPPER___USE_ENCODER
+    // Hand navigation back before the group dies, or the launcher comes back
+    // unnavigable and only a reboot fixes it.
+    if (indev_encoderTop && s_prevEncGroup) {
+        lv_indev_set_group(indev_encoderTop, s_prevEncGroup);
+    }
+    if (s_encGroup) {
+        lv_group_delete(s_encGroup);
+        s_encGroup = nullptr;
+    }
+    s_prevEncGroup = nullptr;
+#endif
+
+    lv_obj_delete_async(root);
+}
+
+// Auto-registration: the app shows up in the launcher with no wiring anywhere
+// else. The last argument names the pad logic registered above.
+REGISTER_APP_PL(__APP_CLASS__, nullptr, "play.png",
+                __APP_CLASS___create, __APP_CLASS___destroy,
+                nullptr, nullptr, nullptr, 0, "__APP_CLASS__")

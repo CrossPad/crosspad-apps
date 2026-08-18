@@ -179,6 +179,34 @@ pio run --target clean && pio run
 
 ---
 
+## Creating a New App
+
+```bash
+python3 <wrapper> new fishtank --name "Fish Tank" --private
+```
+
+Generates a complete, working app from [`template/`](template/) and installs it
+into the project: a pad handler, LVGL buttons and a slider, an animation timer,
+and `REGISTER_APP_PL` registration, so it shows up in the launcher after one
+clean build. Then rewrite the two source files — that is the point of it.
+
+| Flag | Effect |
+|------|--------|
+| *(none)* | Stays local: a plain directory in this project, tracked as `local` |
+| `--private` | Creates a private GitHub repo under your account, pushes, installs it back as a submodule |
+| `--public` | Same, public |
+| `--owner` | Publish under an org instead of your account |
+| `--no-install` | Generate only, leave the project alone |
+
+Publishing needs `gh auth login`. A private repo is a fine place to start — the
+registry only lists apps you deliberately add to `external-apps.json`.
+
+The template deliberately shows the one rule that is easy to get wrong: pad
+callbacks arrive on the pad thread, LVGL is not thread-safe, so the pad handler
+only records events and the LVGL timer draws them.
+
+The TUI has the same flow under `[N] New app`.
+
 ## Workspace, Config and Profiles
 
 The manager treats installed apps as **owned**, not as registry property, and

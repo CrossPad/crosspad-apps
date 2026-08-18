@@ -1327,6 +1327,224 @@ class AppManager:
         report["stale"] = [r for r in rows if not r["match"]]
         return report
 
+    # -- new app from template ------------------------------------------------
+    #
+    # Everything a CrossPad app needs is four files and a registration macro, so
+    # the barrier to a new one should be a prompt, not an afternoon of copying
+    # someone else's app and deleting the parts you did not want.
+
+    TEMPLATE_REPO_PATH = "template"
+
+    def _template_dir(self) -> Path | None:
+        """Template source: the checked-out registry repo, or a cached copy.
+
+        Platform wrappers only cache the manager itself, so a project that never
+        cloned crosspad-apps fetches the template on demand and keeps it under
+        .crosspad/, next to the other generated working data.
+        """
+        local = Path(__file__).resolve().parent / self.TEMPLATE_REPO_PATH
+        if (local / "src").is_dir():
+            return local
+
+        cache = self.project_dir / WORK_ROOT / "template"
+        if (cache / "src").is_dir():
+            age = time.time() - cache.stat().st_mtime
+            if age < CACHE_MAX_AGE_SECONDS:
+                return cache
+
+        if self._download_template(cache):
+            return cache
+        return cache if (cache / "src").is_dir() else None
+
+    def _download_template(self, dest: Path) -> bool:
+        """Pull template/ out of the registry repo with the gh CLI."""
+        def fetch_dir(remote_path: str, local_dir: Path) -> bool:
+            r = subprocess.run(
+                ["gh", "api",
+                 f"repos/{REMOTE_REGISTRY_REPO}/contents/{remote_path}",
+                 "--jq", ".[] | [.type, .name, .path] | @tsv"],
+                capture_output=True, text=True, check=False, timeout=30)
+            if r.returncode != 0:
+                return False
+            local_dir.mkdir(parents=True, exist_ok=True)
+            for line in r.stdout.splitlines():
+                parts = line.split("\t")
+                if len(parts) != 3:
+                    continue
+                kind, name, path = parts
+                if kind == "dir":
+                    if not fetch_dir(path, local_dir / name):
+                        return False
+                elif kind == "file":
+                    f = subprocess.run(
+                        ["gh", "api",
+                         f"repos/{REMOTE_REGISTRY_REPO}/contents/{path}",
+                         "--jq", ".content"],
+                        capture_output=True, text=True, check=False, timeout=30)
+                    if f.returncode != 0:
+                        return False
+                    import base64
+                    (local_dir / name).write_bytes(
+                        base64.b64decode(f.stdout.strip()))
+            return True
+
+        try:
+            return fetch_dir(self.TEMPLATE_REPO_PATH, dest)
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @staticmethod
+    def app_id_to_class(app_id: str) -> str:
+        return "".join(part.capitalize() for part in app_id.split("-") if part)
+
+    @staticmethod
+    def valid_app_id(app_id: str) -> bool:
+        import re
+        return bool(re.fullmatch(r"[a-z][a-z0-9]*(-[a-z0-9]+)*", app_id or ""))
+
+    def _render_template(self, dest: Path, subs: dict) -> int:
+        src = self._template_dir()
+        if not src:
+            raise RuntimeError("app template unavailable (no crosspad-apps "
+                               "checkout and gh could not fetch it)")
+
+        def substitute(text: str) -> str:
+            for key, value in subs.items():
+                text = text.replace(key, value)
+            return text
+
+        written = 0
+        for path in sorted(src.rglob("*")):
+            if path.is_dir() or "/.git/" in str(path):
+                continue
+            rel = substitute(str(path.relative_to(src)))
+            if rel.endswith(".tmpl"):
+                rel = rel[:-len(".tmpl")]
+            target = dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                target.write_text(substitute(path.read_text()))
+            except UnicodeDecodeError:
+                target.write_bytes(path.read_bytes())
+            written += 1
+        return written
+
+    def new_app(self, app_id: str, name: str = "", description: str = "",
+                category: str = "tools", visibility: str = None,
+                owner: str = "", install: bool = True) -> dict:
+        """Scaffold an app, optionally publish it, optionally install it here.
+
+        visibility: None keeps it local (a plain directory in this project),
+        "private"/"public" creates the GitHub repo and installs it back as a
+        submodule so the project references a real remote.
+        """
+        result = {"ok": False, "error": "", "path": None, "repo": None}
+
+        if not self.valid_app_id(app_id):
+            result["error"] = (f"'{app_id}' is not a valid app id "
+                               f"(lowercase, digits and dashes)")
+            return result
+
+        component = f"{self.config.lib_prefix}{app_id}"
+        install_path = f"{self.config.lib_dir}/{component}"
+        if (self.project_dir / install_path).exists():
+            result["error"] = f"{install_path} already exists"
+            return result
+
+        cls = self.app_id_to_class(app_id)
+        subs = {
+            "__APP_ID__": app_id,
+            "__APP_CLASS__": cls,
+            "__APP_UPPER__": app_id.upper().replace("-", "_"),
+            "__APP_NAME__": name or cls,
+            "__APP_DESC__": description or f"{name or cls} — a CrossPad app",
+            "__APP_CATEGORY__": category,
+        }
+
+        # Build in a staging dir: when a remote is created the app has to exist
+        # as its own repository before `git submodule add` can point at it.
+        staging = self.project_dir / WORK_ROOT / "new" / component
+        if staging.exists():
+            import shutil
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True)
+
+        try:
+            files = self._render_template(staging, subs)
+        except RuntimeError as e:
+            result["error"] = str(e)
+            return result
+
+        for args in (["init", "-q"],
+                     ["add", "-A"],
+                     ["-c", "commit.gpgsign=false", "commit", "-q", "-m",
+                      f"feat: {subs['__APP_NAME__']} from the CrossPad app template"]):
+            r = subprocess.run(["git", "-C", str(staging), *args],
+                               capture_output=True, text=True, check=False)
+            if r.returncode != 0 and args[0] in ("init", "add"):
+                result["error"] = f"git {args[0]} failed: {r.stderr.strip()}"
+                return result
+
+        print(f"  {files} file(s) generated in {staging}")
+
+        repo_url = ""
+        if visibility in ("private", "public"):
+            if not owner:
+                who = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                                     capture_output=True, text=True, check=False)
+                owner = who.stdout.strip() if who.returncode == 0 else ""
+            if not owner:
+                result["error"] = "gh is not authenticated (gh auth login)"
+                return result
+            slug = f"{owner}/{component}"
+            r = subprocess.run(
+                ["gh", "repo", "create", slug, f"--{visibility}",
+                 "--source", str(staging), "--remote", "origin", "--push",
+                 "--description", subs["__APP_DESC__"]],
+                capture_output=True, text=True, check=False, timeout=120)
+            if r.returncode != 0:
+                result["error"] = f"gh repo create failed: {r.stderr.strip()}"
+                return result
+            repo_url = f"https://github.com/{slug}.git"
+            result["repo"] = repo_url
+            print(f"  pushed to {slug} ({visibility})")
+
+        if not install:
+            result["ok"] = True
+            result["path"] = str(staging)
+            return result
+
+        manifest = self._load_manifest()
+        if repo_url:
+            # Real remote: install it the way every other app is installed, so
+            # the project records a submodule rather than a pile of files.
+            r = self._git("submodule", "add", repo_url, install_path,
+                          check=False, capture=True)
+            if r.returncode != 0:
+                result["error"] = f"submodule add failed: {r.stderr.strip()}"
+                return result
+            track, ref = TRACK_BRANCH, self._get_default_branch(install_path)
+        else:
+            import shutil
+            shutil.move(str(staging), str(self.project_dir / install_path))
+            track, ref = TRACK_LOCAL, "in-tree"
+
+        manifest.setdefault("installed", {})[app_id] = {
+            "version": self._get_submodule_commit(install_path)
+                       if repo_url else "in-tree",
+            "ref": ref,
+            "repo": repo_url,
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._save_manifest(manifest)
+        self.ensure_config(quiet=True)
+        self.set_app_policy(app_id, track, ref=ref if track == TRACK_BRANCH else None)
+
+        result["ok"] = True
+        result["path"] = install_path
+        result["track"] = track
+        return result
+
     # -- commands -------------------------------------------------------------
 
     def _print_app_line(self, app_id: str, info: dict, manifest: dict):
@@ -1806,6 +2024,21 @@ def cli_main(config: PlatformConfig):
     restore_cmd.add_argument("--list", action="store_true",
                              help="List available backups")
 
+    new_cmd = sub.add_parser("new", help="Scaffold a new app from the template")
+    new_cmd.add_argument("app_id", help="App id (lowercase-with-dashes)")
+    new_cmd.add_argument("--name", default="", help="Display name")
+    new_cmd.add_argument("--description", default="", help="One-line description")
+    new_cmd.add_argument("--category", default="tools",
+                         help="music | audio | tools | other")
+    new_cmd.add_argument("--private", action="store_true",
+                         help="Create a private GitHub repo and push")
+    new_cmd.add_argument("--public", action="store_true",
+                         help="Create a public GitHub repo and push")
+    new_cmd.add_argument("--owner", default="",
+                         help="GitHub owner (default: the gh account)")
+    new_cmd.add_argument("--no-install", action="store_true",
+                         help="Only generate; do not add it to this project")
+
     sub.add_parser("device",
                    help="Ask a connected CrossPad what it was built from")
     sub.add_parser("config-init",
@@ -1863,6 +2096,23 @@ def cli_main(config: PlatformConfig):
                   else f"No backups for '{args.app}'.")
         else:
             mgr.restore_backup(args.app, args.stamp)
+    elif args.command == "new":
+        visibility = ("private" if args.private else
+                      "public" if args.public else None)
+        res = mgr.new_app(args.app_id, name=args.name,
+                          description=args.description,
+                          category=args.category, visibility=visibility,
+                          owner=args.owner, install=not args.no_install)
+        if not res["ok"]:
+            print(f"Error: {res['error']}")
+            sys.exit(1)
+        print(f"\n  {args.app_id} ready at {res['path']}")
+        if res.get("repo"):
+            print(f"  repo: {res['repo']}")
+        if res.get("track") == TRACK_LOCAL:
+            print(f"  tracked as local — the manager will not touch it, and it "
+                  f"reports ref=in-tree in build telemetry")
+        mgr._print_next_steps()
     elif args.command == "device":
         report = mgr.device_diff()
         if not report.get("ok"):
@@ -2494,8 +2744,8 @@ class _TUI:
             # -- quick actions, grouped so the row stays readable --
             self._section("Quick Actions")
             groups = [
-                ("apps", [("B", "Browse"), ("U", "Update"),
-                          ("W", "Workspace")]),
+                ("apps", [("B", "Browse"), ("N", "New app"),
+                          ("U", "Update"), ("W", "Workspace")]),
                 ("build", [("C", "Configure"), ("P", "Profiles"),
                            ("F", "Build & Run" if plat == "pc"
                             else "Build & Flash")]),
@@ -2518,6 +2768,8 @@ class _TUI:
             elif key == "u":
                 self._update_flow()
                 self._reload()
+            elif key == "n":
+                self._new_app_flow()
             elif key == "w":
                 self._workspace()
                 self._reload()
@@ -2537,6 +2789,77 @@ class _TUI:
             elif key == "t":
                 self._dev_tools()
                 self._reload()
+
+    # -- New app --------------------------------------------------------------
+
+    def _new_app_flow(self):
+        """Scaffold an app, optionally publish it to the user's GitHub."""
+        _clear()
+        self._header("New App", "from the CrossPad template")
+        _w(f"\n   {_C.GRAY}Generates a working app — pad handler, LVGL "
+           f"buttons, a slider and an\n   animation timer — then installs it "
+           f"into this project.{_C.RST}\n\n")
+
+        _show_cursor()
+        app_id = _text_input("App id (lowercase-with-dashes)", "")
+        if not app_id:
+            _hide_cursor()
+            return
+        if not self.mgr.valid_app_id(app_id):
+            _hide_cursor()
+            _w(f"\n  {_C.BYELLOW}'{app_id}' is not a valid id — lowercase "
+               f"letters, digits and dashes.{_C.RST}\n")
+            _pause()
+            return
+        if app_id in self._installed:
+            _hide_cursor()
+            _w(f"\n  {_C.BYELLOW}'{app_id}' is already installed.{_C.RST}\n")
+            _pause()
+            return
+
+        default_name = self.mgr.app_id_to_class(app_id)
+        name = _text_input("Display name", default_name) or default_name
+        description = _text_input("Description", f"{name} — a CrossPad app")
+        category = _text_input("Category (music/audio/tools/other)", "tools")
+        _hide_cursor()
+
+        choice = _menu_select(
+            f"Where does {app_id} live?",
+            ["Local only — a directory in this project",
+             "Private GitHub repo — created and pushed",
+             "Public GitHub repo — created and pushed"],
+            ["No remote. Publish later with: gh repo create",
+             "Yours alone; the project references it as a submodule",
+             "Open from the start; add it to external-apps.json to list it"])
+        if choice < 0:
+            return
+        visibility = (None, "private", "public")[choice]
+
+        _clear()
+        _show_cursor()
+        _w(f"\n  Creating {app_id}...\n\n")
+        result = self.mgr.new_app(app_id, name=name, description=description,
+                                  category=category or "tools",
+                                  visibility=visibility)
+        _hide_cursor()
+
+        if not result["ok"]:
+            _w(f"\n  {_C.BYELLOW}{result['error']}{_C.RST}\n")
+            _pause()
+            return
+
+        _w(f"\n  {_C.BGREEN}✓{_C.RST} {app_id} at {result['path']}\n")
+        if result.get("repo"):
+            _w(f"    {result['repo']}\n")
+        if result.get("track") == TRACK_LOCAL:
+            _w(f"    {_C.GRAY}tracked as local — the manager will not touch "
+               f"it{_C.RST}\n")
+        if self.config.platform == "esp-idf":
+            _w(f"\n  {_C.GRAY}New component directories are only discovered at "
+               f"configure time:\n  run idf.py fullclean && idf.py build "
+               f"once.{_C.RST}\n")
+        _pause()
+        self._reload()
 
     # -- Device ---------------------------------------------------------------
 

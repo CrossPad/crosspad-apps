@@ -1,0 +1,56 @@
+#include "crosspad-__APP_ID__/__APP_CLASS__PadLogic.hpp"
+
+#include "crosspad/pad/PadManager.hpp"
+
+namespace {
+// Pads light up in the app's accent colour while held.
+constexpr uint8_t kPadR = 0;
+constexpr uint8_t kPadG = 180;
+constexpr uint8_t kPadB = 255;
+} // namespace
+
+void __APP_CLASS__PadLogic::onActivate(crosspad::PadManager& padManager)
+{
+    for (uint8_t i = 0; i < 16; ++i) {
+        padManager.setPadColor(i, 0, 12, 24);   // dim water
+    }
+}
+
+void __APP_CLASS__PadLogic::onDeactivate(crosspad::PadManager& padManager)
+{
+    for (uint8_t i = 0; i < 16; ++i) {
+        padManager.setPadColor(i, 0, 0, 0);
+    }
+}
+
+void __APP_CLASS__PadLogic::onPadPress(crosspad::PadManager& padManager,
+                                       uint8_t padIdx, uint8_t velocity)
+{
+    if (padIdx >= 16) return;
+    padManager.setPadColor(padIdx, kPadR, kPadG, kPadB);
+
+    // Hand the event to the GUI as data, not as a drawing call: this runs on
+    // the pad thread and LVGL is not thread-safe.
+    lastVelocity_.store(velocity ? velocity : 100);
+    pendingSpawns_.fetch_add(1);
+}
+
+void __APP_CLASS__PadLogic::onPadRelease(crosspad::PadManager& padManager,
+                                         uint8_t padIdx)
+{
+    if (padIdx >= 16) return;
+    padManager.setPadColor(padIdx, 0, 12, 24);
+}
+
+void __APP_CLASS__PadLogic::onPadPressure(crosspad::PadManager& padManager,
+                                          uint8_t padIdx, uint8_t pressure)
+{
+    if (padIdx >= 16) return;
+    // Aftertouch: press harder, the pad glows brighter. Every handler must
+    // implement this — the interface has no default.
+    const uint8_t scale = pressure > 127 ? 127 : pressure;
+    padManager.setPadColor(padIdx,
+                           (uint8_t)(kPadR * scale / 127),
+                           (uint8_t)(kPadG * scale / 127),
+                           (uint8_t)(kPadB * scale / 127));
+}

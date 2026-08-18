@@ -1,0 +1,34 @@
+#pragma once
+
+#include "crosspad/pad/IPadLogicHandler.hpp"
+
+#include <atomic>
+
+/**
+ * Pad handler for __APP_NAME__.
+ *
+ * Pad callbacks arrive on the pad/event thread, NOT on the LVGL task, so this
+ * class touches no LVGL object. It only records what happened; the app's LVGL
+ * timer drains the counters and does the drawing. That split is the reason the
+ * app never needs lv_async_call from here.
+ */
+class __APP_CLASS__PadLogic : public crosspad::IPadLogicHandler {
+public:
+    void onActivate(crosspad::PadManager& padManager) override;
+    void onDeactivate(crosspad::PadManager& padManager) override;
+    void onPadPress(crosspad::PadManager& padManager, uint8_t padIdx,
+                    uint8_t velocity) override;
+    void onPadRelease(crosspad::PadManager& padManager, uint8_t padIdx) override;
+    void onPadPressure(crosspad::PadManager& padManager, uint8_t padIdx,
+                       uint8_t pressure) override;
+
+    /// Pads pressed since the last call. Drained by the LVGL timer.
+    int takePendingSpawns() { return pendingSpawns_.exchange(0); }
+
+    /// Velocity of the most recent press (0..127), for spawn size/speed.
+    uint8_t lastVelocity() const { return lastVelocity_.load(); }
+
+private:
+    std::atomic<int> pendingSpawns_{0};
+    std::atomic<uint8_t> lastVelocity_{100};
+};
