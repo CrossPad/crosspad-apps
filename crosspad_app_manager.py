@@ -930,6 +930,44 @@ def _restore_terminal():
     _show_cursor()
 
 
+def _read_raw_char() -> str:
+    """One character straight off the stdin fd, decoding UTF-8 continuations.
+
+    Deliberately not sys.stdin.read(): that wrapper buffers, and anything it
+    pulls in ahead of time becomes invisible to the select() below, which is
+    how a well-formed arrow key ends up reported as a bare Esc followed by two
+    stray letters.
+    """
+    fd = sys.stdin.fileno()
+    b = os.read(fd, 1)
+    if not b:
+        return ""
+    first = b[0]
+    if first < 0x80:
+        return chr(first)
+    extra = (1 if first >= 0xC0 else 0) + (1 if first >= 0xE0 else 0) \
+            + (1 if first >= 0xF0 else 0)
+    for _ in range(extra):
+        b += os.read(fd, 1)
+    return b.decode("utf-8", errors="replace")
+
+
+def _read_within(timeout: float) -> str | None:
+    """Next character, or None if the terminal stays quiet for `timeout`.
+
+    Only meaningful while stdin is in raw mode; used to tell a bare Esc apart
+    from the start of a cursor-key escape sequence.
+    """
+    try:
+        import select
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if not ready:
+            return None
+        return _read_raw_char()
+    except (ImportError, OSError, ValueError):
+        return _read_raw_char()
+
+
 def _read_key() -> str:
     """Read a single keypress, return normalized key name."""
     try:
@@ -939,21 +977,36 @@ def _read_key() -> str:
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
-            ch = sys.stdin.read(1)
+            ch = _read_raw_char()
             if ch == "\x1b":
-                seq = sys.stdin.read(2)
-                if seq == "[A": return "up"
-                if seq == "[B": return "down"
-                if seq == "[C": return "right"
-                if seq == "[D": return "left"
-                if seq == "[5":
-                    sys.stdin.read(1)
-                    return "pgup"
-                if seq == "[6":
-                    sys.stdin.read(1)
-                    return "pgdn"
-                if seq == "[H": return "home"
-                if seq == "[F": return "end"
+                # Escape starts both a bare Esc keypress and every arrow /
+                # navigation sequence. Reading a fixed two more bytes blocked
+                # forever on a lone Esc — which the menus advertise as "cancel"
+                # — so wait briefly for a continuation instead and treat a
+                # silent terminal as the bare key.
+                nxt = _read_within(0.05)
+                if nxt is None:
+                    return "esc"
+                # CSI ("\x1b[") and SS3 ("\x1bO", application cursor mode)
+                # both prefix the cursor keys.
+                if nxt not in ("[", "O"):
+                    return "esc"
+                code = _read_within(0.05)
+                if code is None:
+                    return "esc"
+                simple = {"A": "up", "B": "down", "C": "right", "D": "left",
+                          "H": "home", "F": "end"}
+                if code in simple:
+                    return simple[code]
+                if code.isdigit():
+                    # Numeric CSI forms: 5~ PgUp, 6~ PgDn, 1~/7~ Home, 4~/8~ End.
+                    tail = _read_within(0.05)
+                    while tail is not None and tail.isdigit():
+                        code += tail
+                        tail = _read_within(0.05)
+                    numeric = {"5": "pgup", "6": "pgdn", "1": "home",
+                               "7": "home", "4": "end", "8": "end"}
+                    return numeric.get(code, "esc")
                 return "esc"
             if ch in ("\r", "\n"): return "enter"
             if ch in ("\x7f", "\x08"): return "backspace"
