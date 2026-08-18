@@ -682,6 +682,26 @@ class AppManager:
             "protected": policy["track"] in (TRACK_LOCAL, TRACK_PINNED),
         }
 
+    def app_display_name(self, app_id: str) -> str:
+        """Human name for an app, registry or not.
+
+        An app you generated yourself is not in the registry, but it still
+        carries a crosspad-app.json — reading it keeps the UI from falling back
+        to a bare id for exactly the apps a user cares most about.
+        """
+        info = self._load_registry().get("apps", {}).get(app_id)
+        if info and info.get("name"):
+            return info["name"]
+        path = self.component_path(f"{self.config.lib_prefix}{app_id}")
+        if path:
+            meta = self.project_dir / path / "crosspad-app.json"
+            if meta.exists():
+                try:
+                    return json.loads(meta.read_text()).get("name", app_id)
+                except (OSError, ValueError):
+                    pass
+        return app_id
+
     @staticmethod
     def _same_repo(a: str, b: str) -> bool:
         """Compare remotes across the ways git spells the same repository."""
@@ -2690,11 +2710,15 @@ class _TUI:
         return result
 
     def _compatible_count(self) -> tuple[int, int]:
-        """(installed_compatible, total_compatible)."""
+        """(installed, total_compatible_in_registry).
+
+        Installed counts everything on disk, including apps that are not in the
+        registry — a locally generated app is still installed, and a dashboard
+        that says 3 above a list of 4 is just wrong.
+        """
         compat = [k for k, v in self._apps.items()
                   if self.mgr._is_compatible(v)]
-        inst = [k for k in compat if k in self._installed]
-        return len(inst), len(compat)
+        return len(self._installed), len(compat)
 
     # -- rendering helpers ----------------------------------------------------
 
@@ -2786,9 +2810,12 @@ class _TUI:
                f"{_C.BWHITE}{plat_label}{_C.RST}")
             _w(f"{'':>10}{_C.GRAY}Project{_C.RST}    "
                f"{_C.BWHITE}{proj}{_C.RST}\n")
+            extra = max(inst_c - sum(1 for k in self._installed
+                                     if k in self._apps), 0)
             _w(f"   {_C.GRAY}Installed{_C.RST}   "
                f"{_C.BWHITE}{inst_c}{_C.RST}"
-               f"{_C.GRAY}/{total_c} compatible{_C.RST}")
+               f"{_C.GRAY}  ({total_c} in registry"
+               f"{f', {extra} local' if extra else ''}){_C.RST}")
             _w(f"{'':>4}{_C.GRAY}Registry{_C.RST}   "
                f"{_C.BWHITE}{cache_str}{_C.RST}\n")
             _w(f"   {_C.GRAY}Features{_C.RST}    "
@@ -2802,8 +2829,7 @@ class _TUI:
                 self._section("Installed Apps")
                 for app_id in self._installed:
                     st = self.mgr.app_status(app_id)
-                    info = self._apps.get(app_id, {})
-                    name = info.get("name", app_id)
+                    name = self.mgr.app_display_name(app_id)
                     track = st["policy"]["track"]
                     if st["blocking"]:
                         dot, col = "●", _C.BYELLOW
