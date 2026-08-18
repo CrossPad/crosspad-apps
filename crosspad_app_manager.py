@@ -48,7 +48,7 @@ TRACK_PINNED = "pinned"       # never moves
 TRACK_LOCAL = "local"         # manager does not touch the worktree at all
 TRACK_MODES = (TRACK_REGISTRY, TRACK_BRANCH, TRACK_PINNED, TRACK_LOCAL)
 
-BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "fork")
+BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "origin-mismatch")
 
 
 @dataclass
@@ -585,7 +585,7 @@ class AppManager:
         state = {"exists": full.exists(), "branch": None, "head": None,
                  "upstream": None, "ahead": 0, "behind": 0, "dirty": 0,
                  "untracked": 0, "stashes": 0, "detached": False,
-                 "origin": "", "fork": False}
+                 "origin": ""}
         if not full.exists() or not (full / ".git").exists():
             return state
 
@@ -635,9 +635,6 @@ class AppManager:
         r = self._sub_git(path, "remote", "get-url", "origin")
         if r.returncode == 0:
             state["origin"] = r.stdout.strip()
-            state["fork"] = bool(state["origin"]) and \
-                f"/{self.config.official_org}/".lower() not in \
-                state["origin"].lower().replace(":", "/")
         return state
 
     def app_status(self, app_id: str) -> dict:
@@ -656,8 +653,18 @@ class AppManager:
             flags.append("ahead")
         if git["stashes"]:
             flags.append("stashed")
-        if git["fork"]:
-            flags.append("fork")
+
+        # An origin outside the official org is not suspicious in itself — you
+        # publishing your own app is the normal case. What matters is whether
+        # the worktree points somewhere OTHER than the repo this project
+        # recorded, because then an update would pull from a different project
+        # than the manifest describes.
+        expected = (info.get("repo", "") or
+                    self._load_manifest().get("installed", {})
+                        .get(app_id, {}).get("repo", ""))
+        if expected and git["origin"] and not self._same_repo(expected,
+                                                              git["origin"]):
+            flags.append("origin-mismatch")
 
         # Which ref this app is supposed to follow. For registry tracking that
         # is the manifest ref (what install/sync recorded); for branch tracking
@@ -676,6 +683,18 @@ class AppManager:
         }
 
     @staticmethod
+    def _same_repo(a: str, b: str) -> bool:
+        """Compare remotes across the ways git spells the same repository."""
+        def norm(url: str) -> str:
+            url = url.strip().lower()
+            url = url.replace("git@github.com:", "https://github.com/")
+            url = url.replace("ssh://git@github.com/", "https://github.com/")
+            if url.endswith(".git"):
+                url = url[:-4]
+            return url.rstrip("/")
+        return norm(a) == norm(b)
+
+    @staticmethod
     def describe_status(st: dict) -> str:
         git = st["git"]
         if not git["exists"]:
@@ -692,8 +711,8 @@ class AppManager:
             bits.append(f"+{git['untracked']}?")
         if git["stashes"]:
             bits.append(f"stash:{git['stashes']}")
-        if git["fork"]:
-            bits.append("fork")
+        if "origin-mismatch" in st.get("flags", []):
+            bits.append("origin≠manifest")
         return " ".join(bits)
 
     # -- backup / restore -----------------------------------------------------
@@ -1612,12 +1631,28 @@ class AppManager:
         manifest = self._load_manifest()
         apps = registry.get("apps", {})
 
-        if app_name not in apps:
+        if app_name not in apps and not origin:
             print(f"Error: Unknown app '{app_name}'.")
             print(f"Available: {', '.join(apps.keys())}")
+            print(f"An app outside the registry installs with "
+                  f"--origin <repo url>.")
             sys.exit(1)
 
-        info = apps[app_name]
+        if app_name in apps:
+            info = apps[app_name]
+        else:
+            # Not in the registry, but the caller named a repo: your own app,
+            # a private one, a fork. The registry is a directory, not a gate.
+            info = {
+                "name": app_name,
+                "description": f"{app_name} (not in the registry)",
+                "repo": origin,
+                "component_path": f"{self.config.lib_dir}/"
+                                  f"{self.config.lib_prefix}{app_name}",
+                "platforms": [],
+            }
+            print(f"'{app_name}' is not in the registry — installing from "
+                  f"{origin}.")
 
         if info.get("built_in"):
             print(f"Error: '{app_name}' is a built-in app and cannot "
@@ -1627,8 +1662,6 @@ class AppManager:
         if app_name in manifest.get("installed", {}):
             print(f"App '{app_name}' is already installed.")
             return
-
-        info = apps[app_name]
 
         if not self._is_compatible(info) and not force:
             platforms = ", ".join(info.get("platforms", []))
