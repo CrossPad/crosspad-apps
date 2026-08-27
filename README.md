@@ -7,12 +7,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
-- **Mixer v0.2.1** — Merge lvgl.h include fix + PlatformIO library.json with MixerPadLogic registration
 - **Sampler v0.2.1** — Fix pad editor file browser off-screen, params panel scroll, pad-editor playback silence, live start/end trim preview
+- **Mixer v0.2.1** — Merge lvgl.h include fix + PlatformIO library.json with MixerPadLogic registration
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
-- **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
 - **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
+- **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
