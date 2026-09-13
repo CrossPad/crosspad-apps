@@ -402,12 +402,33 @@ class AppManager:
                 })
         return subs
 
+    # -- board revision (ESP-IDF supplies a resolver; other platforms have none) --
+
+    def board_info(self, refresh: bool = False) -> dict | None:
+        resolve = getattr(self.config, "board_resolve", None)
+        if resolve is None:
+            return None
+        if refresh or not hasattr(self, "_board_cache"):
+            try:
+                self._board_cache = resolve()
+            except Exception as e:  # noqa: BLE001 - a broken resolver must not take the TUI down
+                self._board_cache = {"rev": None, "source": f"error: {e}"}
+        return self._board_cache
+
+    def idf_args(self) -> str:
+        b = self.board_info()
+        if not b or not b.get("rev"):
+            return ""
+        return f"-B {b['build_dir']} -DSDKCONFIG={b['sdkconfig']} "
+
     def get_build_info(self) -> dict:
         """Get firmware build status. Returns dict with binary info."""
         # Platform-specific binary paths
         if self.config.platform == "esp-idf":
+            b = self.board_info()
+            build_dir = b["build_dir"] if b and b.get("rev") else "build"
             candidates = [
-                self.project_dir / "build" / "CrossPad.bin",
+                self.project_dir / build_dir / "CrossPad.bin",
                 # fallback: find any .bin in build/
             ]
         elif self.config.platform == "arduino":
@@ -994,6 +1015,9 @@ class AppManager:
         if not source:
             return None
         path = self.project_dir / source.get("file", "")
+        b = self.board_info()
+        if source.get("file") == "sdkconfig" and b and b.get("rev"):
+            path = self.project_dir / b["sdkconfig"]
         if not path.exists():
             return None
         try:
@@ -2042,7 +2066,8 @@ class AppManager:
 
     def _print_next_steps(self):
         if self.config.platform == "esp-idf":
-            print(f"\n  Next: idf.py fullclean && idf.py build")
+            a = self.idf_args()
+            print(f"\n  Next: idf.py {a}fullclean && idf.py {a}build")
         elif self.config.platform == "arduino":
             print(f"\n  Next: pio run --target clean && pio run")
         elif self.config.platform == "pc":
@@ -2656,6 +2681,7 @@ class _TUI:
         self._manifest = self.mgr._load_manifest()
         self._apps = self._registry.get("apps", {})
         self._installed = self._manifest.get("installed", {})
+        self.mgr.board_info(refresh=True)
 
     @property
     def _cols(self):
@@ -2828,6 +2854,10 @@ class _TUI:
             pad = max(20 - len(flags_str), 2)
             _w(f"{'':>{pad}}{_C.GRAY}Build{_C.RST}      {build_str}\n")
 
+            b = self.mgr.board_info()
+            if b is not None:
+                _w(f"   {_C.GRAY}Board{_C.RST}       {self._board_label(b)}\n")
+
             # -- installed apps, with ownership state --
             if self._installed:
                 blocked = 0
@@ -2862,7 +2892,8 @@ class _TUI:
                           ("U", "Update"), ("W", "Workspace")]),
                 ("build", [("C", "Configure"), ("P", "Profiles"),
                            ("F", "Build & Run" if plat == "pc"
-                            else "Build & Flash")]),
+                            else "Build & Flash")]
+                          + ([("R", "Board")] if b is not None else [])),
                 ("device", [("O", "Run Sim" if plat == "pc" else "OTA Flash"),
                             ("D", "Device"), ("H", "Health"),
                             ("T", "Tools"), ("Q", "Quit")]),
@@ -2900,9 +2931,41 @@ class _TUI:
                 self._build_flash()
             elif key == "o":
                 self._quick_ota()
+            elif key == "r":
+                self._choose_board()
             elif key == "t":
                 self._dev_tools()
                 self._reload()
+
+    def _board_label(self, b: dict) -> str:
+        if not b.get("rev"):
+            return f"{_C.BYELLOW}not chosen{_C.RST} {_C.GRAY}— press r{_C.RST}"
+        text = f"{_C.BWHITE}{b['rev']}{_C.RST} {_C.GRAY}· {b['source']}"
+        if b.get("device"):
+            text += f" {b['device']}"
+        if b.get("pcb") is not None:
+            text += f" PCB {b['pcb']}"
+        text += _C.RST
+        if b.get("mismatch"):
+            text += (f"  {_C.BRED}fw {b['fw_rev']} on a {b['rev']} board "
+                     f"→ f Build & Flash{_C.RST}")
+        elif b.get("fw_rev"):
+            text += f"  {_C.BGREEN}fw {b['fw_rev']} ✓{_C.RST}"
+        return text
+
+    def _choose_board(self) -> bool:
+        revs = list(getattr(self.config, "board_revs", ()))
+        if not revs:
+            return False
+        b = self.mgr.board_info() or {}
+        found = {d.get("board_rev") or d.get("fw_rev"): d.get("id") for d in b.get("devices", [])}
+        descs = [f"connected: {found[r]}" if r in found else "" for r in revs]
+        idx = _menu_select("Board revision", revs, descs)
+        if idx < 0:
+            return False
+        self.config.board_set(revs[idx])
+        self.mgr.board_info(refresh=True)
+        return True
 
     # -- New app --------------------------------------------------------------
 
@@ -3091,7 +3154,8 @@ class _TUI:
 
     def _clean_build_command(self) -> str:
         if self.config.platform == "esp-idf":
-            return "idf.py fullclean && idf.py build"
+            a = self.mgr.idf_args()
+            return f"idf.py {a}fullclean && idf.py {a}build"
         if self.config.platform == "arduino":
             return "pio run --target clean && pio run"
         return "rm -rf build && cmake -B build -G Ninja && cmake --build build"
@@ -4040,9 +4104,13 @@ class _TUI:
 
     def _quick_ota(self):
         """OTA flash with build state awareness."""
+        b = self.mgr.board_info()
+        if b is not None and not b.get("rev"):
+            if not self._choose_board():
+                return
         if self.config.platform == "esp-idf":
             ota_cmd = "python3 tools/ota_flash.py"
-            build_cmd = "idf.py build"
+            build_cmd = f"idf.py {self.mgr.idf_args()}build"
         elif self.config.platform == "arduino":
             ota_cmd = "python3 scripts/ota_flash.py"
             build_cmd = "pio run"
@@ -4165,19 +4233,24 @@ class _TUI:
         plat = self.config.platform
 
         if plat == "esp-idf":
+            b = self.mgr.board_info()
+            if b is not None and not b.get("rev"):
+                if not self._choose_board():
+                    return
+            a = self.mgr.idf_args()
             commands = [
                 ("Full Clean + Build",
-                 "idf.py fullclean && idf.py build"),
+                 f"idf.py {a}fullclean && idf.py {a}build"),
                 ("Build",
-                 "idf.py build"),
+                 f"idf.py {a}build"),
                 ("Flash (UART)",
-                 "idf.py{port} flash"),
+                 f"idf.py {a}{{port}} flash"),
                 ("Flash (OTA)",
                  "python3 tools/ota_flash.py"),
                 ("Monitor",
-                 "idf.py{port} monitor"),
+                 f"idf.py {a}{{port}} monitor"),
                 ("Flash + Monitor",
-                 "idf.py{port} flash monitor"),
+                 f"idf.py {a}{{port}} flash monitor"),
             ]
         elif plat == "arduino":
             commands = [
