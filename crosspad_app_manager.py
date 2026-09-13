@@ -3135,6 +3135,10 @@ class _TUI:
         _w(f"\n   {_C.GRAY}Rewrite src/{cls}App.cpp and "
            f"src/{cls}PadLogic.cpp — that is the point of it.{_C.RST}\n")
 
+        b = self.mgr.board_info()
+        if b is not None and not b.get("rev"):
+            if not self._choose_board():
+                return
         build_cmd = self._clean_build_command()
         _w(f"\n   {_C.GRAY}A new app directory is only discovered at configure "
            f"time:{_C.RST}\n   {_C.BWHITE}{build_cmd}{_C.RST}\n")
@@ -4104,11 +4108,11 @@ class _TUI:
 
     def _quick_ota(self):
         """OTA flash with build state awareness."""
-        b = self.mgr.board_info()
-        if b is not None and not b.get("rev"):
-            if not self._choose_board():
-                return
         if self.config.platform == "esp-idf":
+            b = self.mgr.board_info()
+            if b is not None and not b.get("rev"):
+                if not self._choose_board():
+                    return
             ota_cmd = "python3 tools/ota_flash.py"
             build_cmd = f"idf.py {self.mgr.idf_args()}build"
         elif self.config.platform == "arduino":
