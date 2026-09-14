@@ -3960,8 +3960,12 @@ class _TUI:
 
                 marker = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
                 col = _C.BWHITE if value != default else _C.RST
-                dim = f"{_C.DIM}(managed by {managed}){_C.RST}" if managed else (
-                    f"{_C.BYELLOW}*{_C.RST}" if value != default else " ")
+                if self._is_board_flag(flag):
+                    dim = f"{_C.DIM}(idf.py board — enter changes){_C.RST}"
+                elif managed:
+                    dim = f"{_C.DIM}(managed by {managed}){_C.RST}"
+                else:
+                    dim = f"{_C.BYELLOW}*{_C.RST}" if value != default else " "
                 if managed:
                     col = _C.RST
                 _w(f"  {marker} {name:<28}{col}{shown:<32}{_C.RST}{dim}\n")
@@ -4008,8 +4012,16 @@ class _TUI:
             elif key == "s":
                 self._save_profile_flow()
 
+    def _is_board_flag(self, flag: dict) -> bool:
+        """The board-revision flag, on a platform whose wrapper resolves the board."""
+        return (flag.get("group") == "board"
+                and self.mgr.board_info() is not None)
+
     def _toggle_flag(self, flag: dict, values: dict):
         name = flag["name"]
+        if self._is_board_flag(flag):
+            self._choose_board()
+            return
         if self.mgr._flag_managed_elsewhere(flag):
             _clear()
             _w(f"\n  {name} is managed by "
