@@ -421,6 +421,12 @@ class AppManager:
             return ""
         return f"-B {b['build_dir']} -DSDKCONFIG={b['sdkconfig']} "
 
+    def ota_command(self) -> str:
+        b = self.board_info()
+        if not b or not b.get("rev"):
+            return "python3 tools/ota_flash.py"
+        return f"python3 tools/ota_flash.py --board {b['rev']}"
+
     def get_build_info(self) -> dict:
         """Get firmware build status. Returns dict with binary info."""
         # Platform-specific binary paths
@@ -3997,7 +4003,7 @@ class _TUI:
                     _w(f"    -D{d}\n")
                 if self.config.platform == "esp-idf":
                     _w(f"\n  {_C.GRAY}A changed flag set needs "
-                       f"idf.py fullclean.{_C.RST}\n")
+                       f"idf.py {self.mgr.idf_args()}fullclean.{_C.RST}\n")
                 _pause()
             elif key == "s":
                 self._save_profile_flow()
@@ -4113,7 +4119,7 @@ class _TUI:
             if b is not None and not b.get("rev"):
                 if not self._choose_board():
                     return
-            ota_cmd = "python3 tools/ota_flash.py"
+            ota_cmd = self.mgr.ota_command()
             build_cmd = f"idf.py {self.mgr.idf_args()}build"
         elif self.config.platform == "arduino":
             ota_cmd = "python3 scripts/ota_flash.py"
@@ -4250,7 +4256,7 @@ class _TUI:
                 ("Flash (UART)",
                  f"idf.py {a}{{port}} flash"),
                 ("Flash (OTA)",
-                 "python3 tools/ota_flash.py"),
+                 self.mgr.ota_command()),
                 ("Monitor",
                  f"idf.py {a}{{port}} monitor"),
                 ("Flash + Monitor",
