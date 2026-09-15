@@ -37,6 +37,8 @@ WORK_ROOT = ".crosspad"               # generated + backup working data
 BACKUP_ROOT = ".crosspad/backups"
 AVAILABLE_FILE = ".crosspad/available.json"   # per-app fetch results, 1 h TTL
 AVAILABLE_MAX_AGE_SECONDS = 3600
+LAST_UPDATE_FILE = ".crosspad/last-update.json"
+LAST_UPDATE_LOG = ".crosspad/last-update.log"
 PROFILE_DIR = "config/profiles"
 FEATURES_SCHEMA = "features.schema.json"
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour
@@ -945,6 +947,22 @@ class AppManager:
             inst["updated_at"] = datetime.now(timezone.utc).isoformat()
             self._save_manifest(manifest)
         return True, f"stays on {row.label}"
+
+    # -- the last update run ---------------------------------------------------
+
+    def last_update(self) -> dict | None:
+        try:
+            return json.loads((self.project_dir / LAST_UPDATE_FILE).read_text())
+        except (OSError, ValueError):
+            return None
+
+    def save_last_update(self, record: dict):
+        p = self.project_dir / LAST_UPDATE_FILE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(record, indent=2))
+
+    def infra_submodules(self) -> list[str]:
+        return [s["path"] for s in self.get_all_submodules() if s["infra"]]
 
     def app_display_name(self, app_id: str) -> str:
         """Human name for an app, registry or not.
@@ -2320,6 +2338,75 @@ class AppManager:
             print(f"\n  Next: rm -rf build && cmake -B build -G Ninja && cmake --build build")
         else:
             print(f"\n  Next: rebuild your project")
+
+
+# == Update pipeline ==========================================================
+#
+# One Enter: download → firmware components → build → flash → check. The plan
+# and the error copy are pure; UpdatePipeline (below) runs the subprocesses.
+
+STEP_NAMES = ("download", "components", "build", "flash", "check")
+STEP_TITLES = {"download": "Download updates", "components": "Firmware components",
+               "build": "Build", "flash": "Flash", "check": "Check"}
+STEP_IDLE = {"download": "apps that follow a newer version",
+             "components": "what the firmware is built from",
+             "build": "compile the firmware for your board",
+             "flash": "over USB, no cable dance needed",
+             "check": "the board answers with the new versions"}
+
+NINJA_PROGRESS_RE = _re.compile(r"^\[(\d+)/(\d+)\]")
+
+
+@dataclass
+class StepResult:
+    name: str
+    ok: bool | None = None
+    detail: str = ""
+    seconds: float = 0.0
+    error: str = ""
+
+
+def plan_update(last: dict | None, installed_ids: list[str], can_flash: bool) -> dict:
+    steps = list(STEP_NAMES) if can_flash else list(STEP_NAMES[:3])
+    fullclean = (last is None
+                 or set(last.get("installed_set", [])) != set(installed_ids))
+    estimate = None
+    if last and last.get("ok"):
+        secs = {s["name"]: s.get("seconds", 0) for s in last.get("steps", [])}
+        if all(n in secs for n in steps):
+            estimate = int(sum(secs[n] for n in steps))
+    return {"fullclean": fullclean, "steps": steps, "estimate": estimate}
+
+
+def parse_ninja_progress(line: str) -> tuple[int, int] | None:
+    m = NINJA_PROGRESS_RE.match(line)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def build_failure_where(log_tail: list[str], app_dirs: dict[str, str]) -> str:
+    for line in log_tail:
+        if "error" not in line.lower():
+            continue
+        for name, path in app_dirs.items():
+            if path.replace("\\", "/") in line.replace("\\", "/"):
+                return name
+    return "the firmware"
+
+
+def error_line(step: str, reason: str, subject: str = "") -> str:
+    table = {
+        ("download", "offline"): "Can't reach GitHub — check your connection, then [r] retry",
+        ("download", "failed"): "Couldn't update {s} → [r] retry   [3] Something's wrong",
+        ("components", "failed"): "Couldn't fetch firmware components → [r] retry",
+        ("build", "no-tools"): "Build tools are missing → [3] Something's wrong",
+        ("build", "no-board"): "Which board? Answer above, then [r] retry",
+        ("build", "failed"): "Build failed in {s} → [c] show the error   [3] Something's wrong",
+        ("flash", "no-answer"): "The board isn't answering → [r] retry   [3] Something's wrong",
+        ("flash", "failed"): "Flash failed → [c] show the error   [r] retry",
+        ("check", "mismatch"): "The board still runs the old {s} → [r] flash again",
+        ("check", "no-answer"): "The board isn't answering after the flash → [r] retry   [3] Something's wrong",
+    }
+    return table.get((step, reason), f"{STEP_TITLES.get(step, step)} failed → [r] retry").replace("{s}", subject)
 
 
 # == Standalone CLI ===========================================================
