@@ -122,3 +122,47 @@ def test_pipeline_without_flash_hook_stops_after_build(tmp_path):
     p = cam.UpdatePipeline(mgr, FakeUI())
     assert p.run() is True
     assert [s.name for s in p.steps] == ["download", "components", "build"]
+
+
+def test_pipeline_flash_output_reaches_the_log(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: (on_line("ota: 50%"), 0)[1]
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True
+    log = (tmp_path / ".crosspad" / "last-update.log").read_text()
+    assert "ota: 50%" in log
+
+
+def test_pipeline_retry_from_build_appends_log_and_skips_download(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.build_rc = 1
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is False
+    update_calls_after_first_run = len([c for c in mgr.calls if c[0] == "update"])
+
+    mgr.build_rc = 0
+    assert p.retry_from("build") is True
+    assert p.step("download").ok is True
+    update_calls_after_retry = len([c for c in mgr.calls if c[0] == "update"])
+    assert update_calls_after_retry == update_calls_after_first_run   # not re-run
+    assert p.step("flash").ok is True
+    assert p.step("check").ok is True
+    log = (tmp_path / ".crosspad" / "last-update.log").read_text()
+    assert "== Download updates ==" in log   # first run's header survived (append)
+
+
+def test_pipeline_board_set_raising_fails_the_build_step(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.board = {"rev": None, "source": "none"}
+
+    def raising_board_set(rev):
+        raise RuntimeError("boom")
+    mgr.config.board_set = raising_board_set
+    p = cam.UpdatePipeline(mgr, FakeUI(board="v2"))
+    assert p.run() is False
+    build = p.step("build")
+    assert build.ok is False
+    assert build.error == cam.error_line("build", "no-board")
+    assert mgr.saved["ok"] is False

@@ -2581,8 +2581,12 @@ class UpdatePipeline:
                 if not rev:
                     s.error = error_line("build", "no-board")
                     return False
-                self.mgr.config.board_set(rev)
-                self.mgr.board_info(refresh=True)
+                try:
+                    self.mgr.config.board_set(rev)
+                    self.mgr.board_info(refresh=True)
+                except Exception:
+                    s.error = error_line("build", "no-board")
+                    return False
             a = self.mgr.idf_args()
             cmd = f"idf.py {a}fullclean && idf.py {a}build" if self.plan["fullclean"] \
                 else f"idf.py {a}build"
@@ -2616,15 +2620,21 @@ class UpdatePipeline:
         rev = (self.mgr.board_info() or {}).get("rev")
         ports = dev.get("ports") or {}
         has_cdc = bool((ports.get("cdc") or {}).get("path")) or dev.get("usb_mode") == "audio"
+
+        def on_line(line: str):
+            self.log.write(line + "\n")
+            self.log.flush()
+            self._line(line)
+
         if has_cdc:
-            rc = self.mgr.config.flash_ota(rev, self._line)
+            rc = self.mgr.config.flash_ota(rev, on_line)
         else:
             console = (ports.get("console") or {}).get("path")
             uart = getattr(self.mgr.config, "flash_uart", None)
             if not console or uart is None:
                 s.error = error_line("flash", "no-answer")
                 return False
-            rc = uart(rev, console, self._line)
+            rc = uart(rev, console, on_line)
         if rc != 0:
             s.error = error_line("flash", "no-answer" if rc == 2 else "failed")
             return False
