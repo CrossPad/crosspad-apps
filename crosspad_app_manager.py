@@ -2456,6 +2456,212 @@ def error_line(step: str, reason: str, subject: str = "") -> str:
     return table.get((step, reason), f"{STEP_TITLES.get(step, step)} failed → [r] retry").replace("{s}", subject)
 
 
+class UpdatePipeline:
+    """Download → components → build → flash → check, rendered through `ui`.
+
+    Every step returns instead of raising; the failing step carries the line
+    the screen shows. The full output of every subprocess goes to
+    LAST_UPDATE_LOG; the timings to LAST_UPDATE_FILE for the next estimate.
+    """
+
+    def __init__(self, mgr, ui):
+        self.mgr, self.ui = mgr, ui
+        self.installed = list(mgr._load_manifest().get("installed", {}).keys())
+        can_flash = getattr(mgr.config, "flash_ota", None) is not None
+        self.plan = plan_update(mgr.last_update(), self.installed, can_flash)
+        self.steps = [StepResult(n, detail=STEP_IDLE[n]) for n in self.plan["steps"]]
+        self.tail = ""
+        self.progress = None
+        self.log = None
+        self.log_tail: list[str] = []
+
+    def step(self, name: str) -> StepResult:
+        return next(s for s in self.steps if s.name == name)
+
+    # -- driving ---------------------------------------------------------------
+
+    def run(self) -> bool:
+        return self.retry_from(self.steps[0].name)
+
+    def retry_from(self, name: str) -> bool:
+        started = datetime.now(timezone.utc)
+        log_path = self.mgr.project_dir / LAST_UPDATE_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        ok = True
+        with open(log_path, "a" if name != self.steps[0].name else "w",
+                  encoding="utf-8") as self.log:
+            begun = False
+            for s in self.steps:
+                if s.name == name:
+                    begun = True
+                if not begun:
+                    continue
+                s.ok, s.error, s.detail = None, "", "…"
+                self._render()
+                t0 = time.time()
+                self.log.write(f"\n== {STEP_TITLES[s.name]} ==\n")
+                ok = getattr(self, f"_{s.name}")(s)
+                s.seconds = time.time() - t0
+                s.ok = ok
+                self._render()
+                if not ok or self.ui.cancelled():
+                    ok = False
+                    break
+        self.mgr.save_last_update({
+            "started": started.isoformat(),
+            "finished": datetime.now(timezone.utc).isoformat(),
+            "ok": ok, "installed_set": self.installed,
+            "build_rev": (self.mgr.board_info() or {}).get("rev"),
+            "steps": [{"name": s.name, "ok": s.ok, "seconds": round(s.seconds, 1)}
+                      for s in self.steps]})
+        return ok
+
+    def _render(self):
+        self.ui.render(self.steps, self.tail, self.progress)
+
+    def _line(self, line: str):
+        self.tail = line[-110:]
+        self.log_tail = (self.log_tail + [line])[-40:]
+        p = parse_ninja_progress(line)
+        if p:
+            self.progress = p
+        self._render()
+
+    # -- steps -----------------------------------------------------------------
+
+    def _download(self, s: StepResult) -> bool:
+        done, left = [], []
+        for app_id in self.installed:
+            st = self.mgr.app_status(app_id)
+            name = self.mgr.app_display_name(app_id)
+            rule, _ = follow_rule(st["policy"])
+            if rule in ("own", "version"):
+                continue
+            force = False
+            if st["blocking"]:
+                choice = self.ui.ask_local_work(name)
+                if choice != "backup":
+                    left.append(name)
+                    continue
+                self.mgr.backup_app(app_id)
+                force = True
+            self.tail = f"{name}: fetching"
+            self._render()
+            with _capture_stdout(self.log):
+                self.mgr.update(app_name=app_id, force=force)
+            after = self.mgr.app_status(app_id)["git"]["head"]
+            if after != st["git"]["head"]:
+                done.append(f"{name} {after}")
+        bits = [", ".join(done) if done else "nothing new"]
+        if left:
+            bits.append(f"{', '.join(left)} — your changes, left alone")
+        s.detail = "; ".join(bits)
+        return True
+
+    def _components(self, s: StepResult) -> bool:
+        paths = self.mgr.infra_submodules()
+        if not paths:
+            s.detail = "none to update"
+            return True
+        r = self.mgr._git("submodule", "update", "--init", "--", *paths,
+                          check=False, capture=True)
+        self.log.write((r.stdout or "") + "\n")
+        if r.returncode != 0:
+            s.error = error_line("components", "failed")
+            return False
+        s.detail = ", ".join(os.path.basename(p) for p in paths)
+        return True
+
+    def _build(self, s: StepResult) -> bool:
+        plat = self.mgr.config.platform
+        if plat == "esp-idf":
+            b = self.mgr.board_info(refresh=True)
+            if b is not None and not b.get("rev"):
+                rev = self.ui.ask_board(list(getattr(self.mgr.config, "board_revs", ())))
+                if not rev:
+                    s.error = error_line("build", "no-board")
+                    return False
+                self.mgr.config.board_set(rev)
+                self.mgr.board_info(refresh=True)
+            a = self.mgr.idf_args()
+            cmd = f"idf.py {a}fullclean && idf.py {a}build" if self.plan["fullclean"] \
+                else f"idf.py {a}build"
+        elif plat == "arduino":
+            cmd = "pio run --target clean && pio run" if self.plan["fullclean"] else "pio run"
+        else:
+            cmd = ("cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build build"
+                   if self.plan["fullclean"] else "cmake --build build")
+        self.progress = None
+        rc = self.mgr.run_streaming(cmd, self._line, self.log)
+        if rc == 127:
+            s.error = error_line("build", "no-tools")
+            return False
+        if rc != 0:
+            dirs = {self.mgr.app_display_name(a): self.mgr.app_status(a)["path"]
+                    for a in self.installed}
+            s.error = error_line("build", "failed", build_failure_where(self.log_tail, dirs))
+            return False
+        s.detail = "firmware ready"
+        return True
+
+    def _flash(self, s: StepResult) -> bool:
+        dev = self.mgr.device_probe()
+        if dev is None:
+            self.tail = "Plug in your CrossPad — I'll flash it when I see it"
+            self._render()
+            if not self.ui.wait_for_board(self.mgr.device_probe):
+                s.error = "Cancelled before the flash"
+                return False
+            dev = self.mgr.device_probe() or {}
+        rev = (self.mgr.board_info() or {}).get("rev")
+        ports = dev.get("ports") or {}
+        has_cdc = bool((ports.get("cdc") or {}).get("path")) or dev.get("usb_mode") == "audio"
+        if has_cdc:
+            rc = self.mgr.config.flash_ota(rev, self._line)
+        else:
+            console = (ports.get("console") or {}).get("path")
+            uart = getattr(self.mgr.config, "flash_uart", None)
+            if not console or uart is None:
+                s.error = error_line("flash", "no-answer")
+                return False
+            rc = uart(rev, console, self._line)
+        if rc != 0:
+            s.error = error_line("flash", "no-answer" if rc == 2 else "failed")
+            return False
+        s.detail = "done, the board is restarting"
+        return True
+
+    def _check(self, s: StepResult) -> bool:
+        deadline = time.time() + 30
+        report = {"ok": False}
+        while time.time() < deadline:
+            report = self.mgr.device_diff()
+            if report.get("ok"):
+                break
+            time.sleep(2)
+        if not report.get("ok"):
+            s.error = error_line("check", "no-answer")
+            return False
+        stale = report.get("stale", [])
+        if stale:
+            app = stale[0].get("app_id") or stale[0].get("component")
+            s.error = error_line("check", "mismatch", self.mgr.app_display_name(app))
+            return False
+        s.detail = "every version on the board matches"
+        return True
+
+
+class _capture_stdout:
+    """Route print() of the CLI-era manager methods into the update log."""
+    def __init__(self, sink):
+        self.sink = sink
+    def __enter__(self):
+        self._old = sys.stdout
+        sys.stdout = self.sink if self.sink is not None else self._old
+    def __exit__(self, *exc):
+        sys.stdout = self._old
+
+
 # == Standalone CLI ===========================================================
 
 def cli_main(config: PlatformConfig):
