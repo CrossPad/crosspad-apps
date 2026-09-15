@@ -3368,15 +3368,69 @@ class _TUI:
         self.mgr = AppManager(os.getcwd(), config)
         self._serial_port = ""
         self._toast = ""
+        self._device = None
         self._reload()
+        self._startup_refresh()
 
     def _reload(self):
-        """(Re)load registry and manifest."""
+        """(Re)load registry, manifest, per-app status and dashboard rows."""
         self._registry = self.mgr._load_registry()
         self._manifest = self.mgr._load_manifest()
         self._apps = self._registry.get("apps", {})
         self._installed = self._manifest.get("installed", {})
         self.mgr.board_info(refresh=True)
+        self._statuses = {a: self.mgr.app_status(a) for a in self._installed}
+        self._rows = {a: app_row(st, self.mgr.available(a), a in self._apps)
+                      for a, st in self._statuses.items()}
+        self._device = self.mgr.device_probe()
+        self._next = whats_next(self._dashboard_ctx())
+
+    def _startup_refresh(self):
+        """One fetch per app when the cache is older than an hour."""
+        age = self.mgr.available_age()
+        if 0 <= age < AVAILABLE_MAX_AGE_SECONDS or not self._installed:
+            return
+        _clear()
+        _w(f"\n  {_C.GRAY}Checking for updates…{_C.RST}\n")
+        self.mgr.refresh_available(
+            list(self._installed),
+            progress=lambda a: _w(f"   {self.mgr.app_display_name(a)}\n"))
+        self._reload()
+
+    def _dashboard_ctx(self) -> dict:
+        b = self.mgr.board_info() or {}
+        last = self.mgr.last_update()
+        updates = [self.mgr.app_display_name(a) for a, r in self._rows.items()
+                   if r["state"] == "update"]
+        apps_changed = bool(last) and set(last.get("installed_set", [])) != set(self._installed)
+        moved = any(s["modified"] for s in self.mgr.get_all_submodules() if s["infra"])
+        missing = []
+        if self.config.platform == "esp-idf" and not self.mgr._find_idf_path():
+            missing.append("ESP-IDF is not installed")
+        if not self.mgr.check_gh_auth()[0]:
+            missing.append("gh is not signed in")
+        can_flash = getattr(self.config, "flash_ota", None) is not None
+        return {"board_rev": b.get("rev"), "fw_rev": b.get("fw_rev"),
+                "mismatch": bool(b.get("mismatch")), "updates": updates,
+                "apps_changed": apps_changed, "components_moved": moved,
+                "tools_missing": missing,
+                "estimate": plan_update(last, list(self._installed), can_flash)["estimate"]}
+
+    def _header_right(self) -> str:
+        b = self.mgr.board_info() or {}
+        bits = []
+        if b.get("rev"):
+            bits.append(f"{b['rev']} board")
+        if b.get("fw_rev"):
+            bits.append(f"fw {b['fw_rev']} {G['ok'] if not b.get('mismatch') else G['fail']}")
+        bits.append("connected" if self._device else "no board plugged in")
+        return " · ".join(bits)
+
+    @staticmethod
+    def _fmt_estimate(seconds) -> str:
+        if not seconds:
+            return ""
+        return f"  (~{max(round(seconds / 60), 1)} min)"
 
     @property
     def _cols(self):
@@ -3488,168 +3542,72 @@ class _TUI:
     def _dashboard(self):
         while True:
             _clear()
-            w = self._cols
-            plat = self.config.platform
-
-            # -- title box --
-            inner = f"CrossPad App Manager   ·   {plat}"
-            box_w = max(len(inner) + 6, 50)
-            if box_w > w - 4:
-                box_w = w - 4
-            pad_total = box_w - len(inner)
-            lp = pad_total // 2
-            rp = pad_total - lp
-
-            _w(f"\n  {_C.BCYAN}╭{'─' * box_w}╮{_C.RST}\n")
-            _w(f"  {_C.BCYAN}│{_C.RST}"
-               f"{' ' * lp}{_C.BWHITE}CrossPad App Manager{_C.RST}"
-               f"   {_C.GRAY}·{_C.RST}   "
-               f"{_C.BCYAN}{plat}{_C.RST}"
-               f"{' ' * rp}{_C.BCYAN}│{_C.RST}\n")
-            _w(f"  {_C.BCYAN}╰{'─' * box_w}╯{_C.RST}\n")
-
+            self._header("CrossPad", self._header_right())
             if self._toast:
-                _w(f"\n   {_C.BGREEN}✓{_C.RST} {self._toast}\n")
+                _w(f"\n   {_C.BGREEN}{G['ok']}{_C.RST} {self._toast}\n")
                 self._toast = ""
 
-            # -- stats: project, registry, feature flags, build --
-            inst_c, total_c = self._compatible_count()
-            cache_age = self.mgr.get_cache_age()
-            cache_str = self._fmt_age(cache_age) if cache_age >= 0 else "none"
-            proj = self.mgr.project_dir.name
-            plat_label = plat.upper().replace("-", " ")
+            nxt = self._next
+            self._section("What's next")
+            _w(f" {_C.BYELLOW}{G['next']}{_C.RST} {_C.BWHITE}{nxt['line']}{_C.RST}\n")
+            if nxt["action"] == "update":
+                _w(f"   {_C.BCYAN}[Enter]{_C.RST} Update my CrossPad "
+                   f"{_C.GRAY}— download, build, flash"
+                   f"{self._fmt_estimate(nxt['estimate'])}{_C.RST}\n")
+            elif nxt["action"] == "wrong":
+                _w(f"   {_C.BCYAN}[Enter]{_C.RST} Something's wrong "
+                   f"{_C.GRAY}— see what to do{_C.RST}\n")
 
-            overrides = self.mgr.feature_overrides()
-            flags_str = (f"{len(overrides)} override(s) "
-                         f"· {self.mgr.flags_hash()}" if overrides
-                         else "stock")
-            build = self.mgr.get_build_info()
-            if not build.get("exists"):
-                build_str = f"{_C.GRAY}not built{_C.RST}"
-            elif self.mgr.build_flags_stale():
-                build_str = f"{_C.BYELLOW}flags changed{_C.RST}"
-            elif build.get("stale"):
-                build_str = f"{_C.BYELLOW}sources newer{_C.RST}"
-            else:
-                build_str = (f"{_C.BGREEN}current{_C.RST} "
-                             f"{_C.GRAY}({self._fmt_age(build['age_seconds'])})"
-                             f"{_C.RST}")
+            self._section("Apps on your CrossPad")
+            if not self._installed:
+                _w(f"   {_C.GRAY}No apps yet — press 2 to add some.{_C.RST}\n")
+            rows_h = max(_get_size()[1] - 14, 3)
+            names = list(self._installed)
+            start, end = _viewport(0, len(names), rows_h)
+            for a in names[start:end]:
+                r = self._rows[a]
+                name = self.mgr.app_display_name(a)
+                if r["state"] == "update":
+                    tail = f"{r['installed']} {G['arrow']} {_C.BGREEN}{r['available']}{_C.RST}"
+                elif r["state"] == "own":
+                    tail = f"{r['installed']:<8} {_C.GRAY}your own copy{_C.RST}"
+                elif r["state"] == "changes":
+                    tail = f"{r['installed']:<8} {_C.BYELLOW}your changes{_C.RST}"
+                elif r["state"] == "missing":
+                    tail = f"{_C.BRED}missing on disk{_C.RST}"
+                else:
+                    tail = f"{r['installed']:<8} {_C.GRAY}up to date{_C.RST}"
+                _w(f"   {name:<16} {tail}\n")
+            if end < len(names):
+                _w(f"   {_C.GRAY}… {len(names) - end} more — press 2{_C.RST}\n")
 
-            _w(f"\n   {_C.GRAY}Platform{_C.RST}    "
-               f"{_C.BWHITE}{plat_label}{_C.RST}")
-            _w(f"{'':>10}{_C.GRAY}Project{_C.RST}    "
-               f"{_C.BWHITE}{proj}{_C.RST}\n")
-            extra = max(inst_c - sum(1 for k in self._installed
-                                     if k in self._apps), 0)
-            _w(f"   {_C.GRAY}Installed{_C.RST}   "
-               f"{_C.BWHITE}{inst_c}{_C.RST}"
-               f"{_C.GRAY}  ({total_c} in registry"
-               f"{f', {extra} local' if extra else ''}){_C.RST}")
-            _w(f"{'':>4}{_C.GRAY}Registry{_C.RST}   "
-               f"{_C.BWHITE}{cache_str}{_C.RST}\n")
-            _w(f"   {_C.GRAY}Features{_C.RST}    "
-               f"{_C.BWHITE}{flags_str}{_C.RST}")
-            pad = max(20 - len(flags_str), 2)
-            _w(f"{'':>{pad}}{_C.GRAY}Build{_C.RST}      {build_str}\n")
-
-            b = self.mgr.board_info()
-            if b is not None:
-                _w(f"   {_C.GRAY}Board{_C.RST}       {self._board_label(b)}\n")
-
-            # -- installed apps, with ownership state --
-            if self._installed:
-                blocked = 0
-                self._section("Installed Apps")
-                for app_id in self._installed:
-                    st = self.mgr.app_status(app_id)
-                    name = self.mgr.app_display_name(app_id)
-                    track = st["policy"]["track"]
-                    if st["blocking"]:
-                        dot, col = "●", _C.BYELLOW
-                        blocked += 1
-                    elif st["protected"]:
-                        dot, col = "✋", _C.BCYAN
-                    else:
-                        dot, col = "●", _C.BGREEN
-                    _w(f"   {col}{dot}{_C.RST} "
-                       f"{name:<16} "
-                       f"{_C.GRAY}{track:<9}{_C.RST}"
-                       f"{_C.DIM}{self.mgr.describe_status(st)}{_C.RST}\n")
-                if blocked:
-                    _w(f"\n   {_C.BYELLOW}{blocked} app(s) carry local work — "
-                       f"updates skip them.{_C.RST}\n")
-            else:
-                _w(f"\n   {_C.GRAY}No apps installed yet. "
-                   f"Press {_C.BYELLOW}b{_C.RST}{_C.GRAY} to browse."
-                   f"{_C.RST}\n")
-
-            # -- quick actions, grouped so the row stays readable --
-            self._section("Quick Actions")
-            groups = [
-                ("apps", [("B", "Browse"), ("N", "New app"),
-                          ("U", "Update"), ("W", "Workspace")]),
-                ("build", [("C", "Configure"), ("P", "Profiles"),
-                           ("F", "Build & Run" if plat == "pc"
-                            else "Build & Flash")]
-                          + ([("R", "Board")] if b is not None else [])),
-                ("device", [("O", "Run Sim" if plat == "pc" else "OTA Flash"),
-                            ("D", "Device"), ("H", "Health"),
-                            ("T", "Tools"), ("Q", "Quit")]),
-            ]
-            for label, entries in groups:
-                row = f"   {_C.GRAY}{label:<7}{_C.RST}"
-                for key, text in entries:
-                    row += f"{_C.BCYAN}[{key}]{_C.RST} {text:<14}"
-                _w(row + "\n")
+            _w("\n")
+            _w(f" {_C.BCYAN}[1]{_C.RST} Update my CrossPad     "
+               f"{_C.BCYAN}[2]{_C.RST} Add or remove apps\n")
+            _w(f" {_C.BCYAN}[3]{_C.RST} Something's wrong      "
+               f"{_C.BCYAN}[4]{_C.RST} Developer tools\n")
+            _w(f" {_C.BCYAN}[q]{_C.RST} Quit\n")
 
             key = _read_key()
             if key in ("q", "ctrl-c", "esc"):
                 break
-            elif key == "b":
-                self._browse()
+            elif key == "1" or (key == "enter" and nxt["action"] == "update"):
+                self._update_pipeline()
                 self._reload()
-            elif key == "u":
-                self._update_flow()
+            elif key == "2":
+                self._apps_screen()
                 self._reload()
-            elif key == "n":
-                self._new_app_flow()
-            elif key == "w":
-                self._workspace()
+            elif key == "3" or (key == "enter" and nxt["action"] == "wrong"):
+                self._something_wrong()
                 self._reload()
-            elif key == "c":
-                self._configure()
-            elif key == "p":
-                self._profiles()
-                self._reload()
-            elif key == "d":
-                self._device()
-            elif key == "h":
-                self._health()
-            elif key == "f":
-                self._build_flash()
-            elif key == "o":
-                self._quick_ota()
-            elif key == "r":
-                self._choose_board()
-            elif key == "t":
-                self._dev_tools()
+            elif key == "4":
+                self._developer_tools()
                 self._reload()
 
-    def _board_label(self, b: dict) -> str:
-        if not b.get("rev"):
-            return f"{_C.BYELLOW}not chosen{_C.RST} {_C.GRAY}— press r{_C.RST}"
-        text = f"{_C.BWHITE}{b['rev']}{_C.RST} {_C.GRAY}· {b['source']}"
-        if b.get("device"):
-            text += f" {b['device']}"
-        if b.get("pcb") is not None:
-            text += f" PCB {b['pcb']}"
-        text += _C.RST
-        if b.get("mismatch"):
-            text += (f"  {_C.BRED}fw {b['fw_rev']} on a {b['rev']} board "
-                     f"→ f Build & Flash{_C.RST}")
-        elif b.get("fw_rev"):
-            text += f"  {_C.BGREEN}fw {b['fw_rev']} ✓{_C.RST}"
-        return text
+    def _update_pipeline(self): self._toast = "coming in Task 11"
+    def _apps_screen(self): self._toast = "coming in Task 12"
+    def _something_wrong(self): self._toast = "coming in Task 13"
+    def _developer_tools(self): self._toast = "coming in Task 14"
 
     def _choose_board(self) -> bool:
         revs = list(getattr(self.config, "board_revs", ()))
