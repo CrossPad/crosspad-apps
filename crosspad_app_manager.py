@@ -205,6 +205,60 @@ def whats_next(ctx: dict) -> dict:
     return {"line": "Everything is up to date", "action": "none", "estimate": None}
 
 
+def wrong_rows(f: dict) -> list[dict]:
+    rows = []
+    dev, b = f.get("device"), f.get("board") or {}
+    if dev:
+        rows.append({"ok": True, "title": "Board found",
+                     "detail": f"{dev.get('board_rev') or b.get('rev') or '?'}, firmware "
+                               f"{dev.get('fw_rev') or '?'}", "fix": None, "action": None})
+        if b.get("mismatch"):
+            rows.append({"ok": False, "title": "Firmware",
+                         "detail": f"{b.get('fw_rev')} firmware on a {b.get('rev')} board",
+                         "fix": "[Enter] Update my CrossPad", "action": "update"})
+        else:
+            rows.append({"ok": True, "title": "Firmware", "detail": "matches the board",
+                         "fix": None, "action": None})
+    else:
+        rows.append({"ok": False, "title": "Board found",
+                     "detail": "No CrossPad found — plug it in over USB. Plugged in? "
+                               "On the pad: hold the encoder → Settings → USB → CDC",
+                     "fix": None, "action": None})
+    tools_bad = []
+    if f.get("idf_path") == "":
+        tools_bad.append("ESP-IDF not found — install it, then open a terminal that has idf.py")
+    if not f.get("gh_ok"):
+        tools_bad.append("run: gh auth login")
+    rows.append({"ok": not tools_bad, "title": "Tools",
+                 "detail": (f"ESP-IDF ok, gh signed in as {f.get('gh_user')}, Python {f.get('python')}"
+                            if not tools_bad else "; ".join(tools_bad)),
+                 "fix": "; ".join(tools_bad) or None, "action": None})
+    guard = f.get("usb_guard")
+    if guard == "1":
+        rows.append({"ok": False, "title": "USB serial guard",
+                     "detail": "the board asks before switching USB mode",
+                     "fix": "[Enter] turn it off on this board (bench use)", "action": "usb_guard_off"})
+    elif guard == "0":
+        rows.append({"ok": True, "title": "USB serial guard", "detail": "off", "fix": None, "action": None})
+    age = f.get("registry_age", -1)
+    stale = age < 0 or age > AVAILABLE_MAX_AGE_SECONDS
+    rows.append({"ok": None if stale else True, "title": "Registry",
+                 "detail": "never fetched" if age < 0 else f"last fetched {age // 3600} h ago"
+                 if age >= 3600 else f"fetched {age // 60} min ago",
+                 "fix": "[Enter] refresh", "action": "refresh"})
+    last = f.get("last_update")
+    rows.append({"ok": (last or {}).get("ok") if last else None, "title": "Last update",
+                 "detail": (f"{last['finished'][:16].replace('T', ' ')}, "
+                            f"{'all versions matched' if last.get('ok') else 'failed'}") if last else "never",
+                 "fix": "[l] open the log" if last else None, "action": "log" if last else None})
+    if f.get("remembered_board") and dev and dev.get("board_rev") \
+            and dev["board_rev"] != f["remembered_board"]:
+        rows.append({"ok": False, "title": "Remembered board",
+                     "detail": f"{f['remembered_board']} remembered, {dev['board_rev']} plugged in",
+                     "fix": "[Enter] forget the remembered board", "action": "forget_board"})
+    return rows
+
+
 @dataclass
 class PlatformConfig:
     platform: str                      # "esp-idf", "arduino", "pc"
@@ -3807,7 +3861,92 @@ class _TUI:
         _w(f"\n   {_C.BYELLOW}{text}{_C.RST}\n")
         _pause()
 
-    def _something_wrong(self): self._toast = "coming in Task 13"
+    def _wrong_facts(self) -> dict:
+        dev = self.mgr.device_probe()
+        guard = self.mgr.cdc_verb("USB_GUARD", timeout=2.0) if dev else None
+        if guard:
+            guard = "1" if guard.strip().endswith("1") else "0" if guard.strip().endswith("0") else None
+        gh_ok, gh_user = self.mgr.check_gh_auth()
+        local = self.mgr._load_local_config()
+        return {"device": dev, "board": self.mgr.board_info(refresh=True) or {},
+                "idf_path": self.mgr._find_idf_path() if self.config.platform == "esp-idf" else "-",
+                "gh_ok": gh_ok, "gh_user": gh_user,
+                "python": ".".join(map(str, sys.version_info[:3])),
+                "usb_guard": guard, "registry_age": self.mgr.get_cache_age(),
+                "last_update": self.mgr.last_update(),
+                "remembered_board": local.get("board")}
+
+    def _something_wrong(self):
+        cursor = 0
+        facts = self._wrong_facts()
+        while True:
+            rows = wrong_rows(facts)
+            _clear()
+            self._header("Something's wrong?", self._header_right())
+            _w("\n")
+            w = _get_size()[0]
+            for i, r in enumerate(rows):
+                mark, col = {True: (G["ok"], _C.BGREEN), False: (G["fail"], _C.BRED),
+                             None: (G["warn"], _C.BYELLOW)}[r["ok"]]
+                sel = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                _w(f" {sel} {col}{mark:<2}{_C.RST}{r['title']:<22} {r['detail'][:w - 30]}\n")
+                if r["fix"] and r["ok"] is not True:
+                    _w(f"      {' ' * 22} {_C.BCYAN}{r['fix']}{_C.RST}\n")
+            self._footer("↑↓ pick   [Enter] do it   [l] open last update log   "
+                         "[r] flash again via cable (board won't answer)   [q] back")
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            elif key == "up":
+                cursor = (cursor - 1) % len(rows)
+            elif key == "down":
+                cursor = (cursor + 1) % len(rows)
+            elif key == "l":
+                self._show_log_tail()
+            elif key == "r":
+                self._recover_flow()
+                facts = self._wrong_facts()
+            elif key == "enter":
+                action = rows[cursor]["action"]
+                if action == "update":
+                    self._update_pipeline()
+                elif action == "usb_guard_off":
+                    self.mgr.cdc_verb("USB_GUARD 0")
+                elif action == "refresh":
+                    _clear()
+                    _w(f"\n  {_C.GRAY}Refreshing…{_C.RST}\n")
+                    self.mgr._fetch_remote_registry()
+                    self.mgr.refresh_available(list(self._installed))
+                    self._reload()
+                elif action == "forget_board":
+                    local = self.mgr._load_local_config()
+                    local.pop("board", None)
+                    self.mgr.save_config(local, local=True)
+                elif action == "log":
+                    self._show_log_tail()
+                facts = self._wrong_facts()
+
+    def _recover_flow(self):
+        uart = getattr(self.config, "flash_uart", None)
+        dev = self.mgr.device_probe() or {}
+        console = ((dev.get("ports") or {}).get("console") or {}).get("path")
+        rev = (self.mgr.board_info() or {}).get("rev")
+        _clear()
+        self._header("Flash again via cable")
+        if uart is None or not console or not rev:
+            _w(f"\n  {_C.BYELLOW}Can't: "
+               f"{'no board' if not console else 'no board revision known' if not rev else 'not on this platform'}"
+               f"{_C.RST}\n")
+            _pause()
+            return
+        if not _confirm(f"Reflash {rev} over {console}? The board restarts"):
+            return
+        _w("\n")
+        rc = uart(rev, console, lambda line: _w(f" {_C.DIM}{line[:_get_size()[0] - 2]}{_C.RST}\n"))
+        _w(f"\n  {(_C.BGREEN + G['ok']) if rc == 0 else (_C.BRED + G['fail'])}{_C.RST} "
+           f"{'flashed' if rc == 0 else 'flash failed — if esptool could not sync, hold BOOT while resetting'}\n")
+        _pause()
+
     def _developer_tools(self): self._toast = "coming in Task 14"
 
     def _choose_board(self) -> bool:
@@ -5227,141 +5366,6 @@ class _TUI:
                     self._serial_port = port
             elif key in ("q", "esc"):
                 break
-
-    # -- Health ---------------------------------------------------------------
-
-    def _health(self):
-        while True:
-            _clear()
-            self._header("Project Health")
-
-            # -- submodules --
-            self._section("Components")
-            subs = self.mgr.get_all_submodules()
-            if subs:
-                for s in subs:
-                    dirty = self.mgr.get_submodule_dirty(s["path"])
-                    if s["modified"]:
-                        st = f"{_C.BYELLOW}\u2195 modified{_C.RST}"
-                    elif s["uninitialized"]:
-                        st = f"{_C.BRED}\u2717 uninit{_C.RST}  "
-                    elif dirty:
-                        st = f"{_C.BYELLOW}\u26a0 dirty{_C.RST}   "
-                    else:
-                        st = f"{_C.BGREEN}\u2713 clean{_C.RST}   "
-
-                    tag = (f"{_C.DIM}(infra){_C.RST}" if s["infra"]
-                           else f"{_C.CYAN}(app){_C.RST}" if s["is_app"]
-                           else "")
-
-                    _w(f"   {st}  {s['name']:<30} "
-                       f"{_C.GRAY}{s['commit']}{_C.RST}  {tag}\n")
-            else:
-                _w(f"   {_C.GRAY}No submodules found.{_C.RST}\n")
-
-            # -- manifest sync check --
-            self._section("Status")
-
-            orphans = []
-            missing = []
-            for aid in self._installed:
-                info = self._apps.get(aid, {})
-                if info:
-                    path = self.mgr._resolve_install_path(info)
-                    if not (self.mgr.project_dir / path).exists():
-                        missing.append(aid)
-
-            for aid, info in self._apps.items():
-                path = self.mgr._resolve_install_path(info)
-                full = self.mgr.project_dir / path
-                if (full.exists() and (full / ".git").exists()
-                        and aid not in self._installed):
-                    orphans.append(aid)
-
-            if not orphans and not missing:
-                _w(f"   {_C.BGREEN}\u2713{_C.RST} Manifest"
-                   f"      synced with disk\n")
-            else:
-                if orphans:
-                    _w(f"   {_C.BYELLOW}\u26a0{_C.RST} Manifest"
-                       f"      {len(orphans)} orphan(s): "
-                       f"{', '.join(orphans)}\n")
-                if missing:
-                    _w(f"   {_C.BRED}\u2717{_C.RST} Manifest"
-                       f"      {len(missing)} missing: "
-                       f"{', '.join(missing)}\n")
-
-            # intent vs state: a policy that no longer matches the worktree is
-            # the thing that silently breaks the next update
-            drift = []
-            for aid in self._installed:
-                st = self.mgr.app_status(aid)
-                if st["blocking"]:
-                    drift.append(f"{aid} ({', '.join(st['blocking'])})")
-            if drift:
-                _w(f"   {_C.BYELLOW}⚠{_C.RST} Ownership"
-                   f"     {len(drift)} protected: {', '.join(drift)}\n")
-            else:
-                _w(f"   {_C.BGREEN}✓{_C.RST} Ownership"
-                   f"     no local work in the way\n")
-
-            # feature flags vs what the last build used
-            overrides = self.mgr.feature_overrides()
-            if not overrides:
-                _w(f"   {_C.BGREEN}✓{_C.RST} Features"
-                   f"      stock (checked-in defaults)\n")
-            elif self.mgr.build_flags_stale():
-                _w(f"   {_C.BYELLOW}⚠{_C.RST} Features"
-                   f"      {len(overrides)} override(s), build predates them\n")
-            else:
-                _w(f"   {_C.BGREEN}✓{_C.RST} Features"
-                   f"      {len(overrides)} override(s), "
-                   f"set {self.mgr.flags_hash()}\n")
-
-            # cache age
-            cache_age = self.mgr.get_cache_age()
-            if cache_age < 0:
-                _w(f"   {_C.BYELLOW}\u26a0{_C.RST} Registry"
-                   f"      not cached\n")
-            elif cache_age < CACHE_MAX_AGE_SECONDS:
-                _w(f"   {_C.BGREEN}\u2713{_C.RST} Registry"
-                   f"      cached {self._fmt_age(cache_age)}\n")
-            else:
-                _w(f"   {_C.BYELLOW}\u26a0{_C.RST} Registry"
-                   f"      stale ({self._fmt_age(cache_age)})\n")
-
-            # gh auth
-            auth_ok, auth_user = self.mgr.check_gh_auth()
-            if auth_ok:
-                _w(f"   {_C.BGREEN}\u2713{_C.RST} gh CLI"
-                   f"        authenticated ({auth_user})\n")
-            else:
-                _w(f"   {_C.BRED}\u2717{_C.RST} gh CLI"
-                   f"        not authenticated\n")
-
-            self._footer("[s] Sync manifest   [r] Refresh registry   q back")
-
-            key = _read_key()
-            if key in ("q", "esc"):
-                break
-            elif key == "s":
-                _clear()
-                self._header("Syncing manifest...")
-                _show_cursor()
-                self.mgr.sync()
-                _hide_cursor()
-                self._reload()
-                _pause()
-            elif key == "r":
-                _clear()
-                self._header("Refreshing registry...")
-                _show_cursor()
-                self.mgr._fetch_remote_registry()
-                _hide_cursor()
-                self._reload()
-                _w(f"\n  {_C.BGREEN}\u2713{_C.RST} "
-                   f"Registry refreshed.\n")
-                _pause()
 
     # -- Dev Tools ------------------------------------------------------------
 

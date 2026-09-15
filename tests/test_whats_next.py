@@ -78,3 +78,31 @@ def test_whats_next_priority():
 
     n = cam.whats_next(ctx())
     assert n["line"] == "Everything is up to date" and n["action"] == "none"
+
+
+def test_wrong_rows_without_board_and_with_guard_on():
+    rows = cam.wrong_rows({"device": None, "board": {"rev": "v2", "source": "memory"},
+                           "idf_path": "/x", "gh_ok": True, "gh_user": "matixan",
+                           "python": "3.12.3", "usb_guard": None, "registry_age": 200000,
+                           "last_update": {"finished": "2026-09-14T21:14:00+00:00", "ok": True},
+                           "remembered_board": "v2"})
+    titles = [r["title"] for r in rows]
+    assert titles[0] == "Board found" and rows[0]["ok"] is False
+    assert "plug it in over USB" in rows[0]["detail"]
+    reg = next(r for r in rows if r["title"] == "Registry")
+    assert reg["ok"] is None and reg["action"] == "refresh"
+    assert next(r for r in rows if r["title"] == "Tools")["ok"] is True
+
+
+def test_wrong_rows_usb_guard_and_mismatch():
+    rows = cam.wrong_rows({"device": {"id": "dev_31ea", "board_rev": "v2", "fw_rev": "v1",
+                                      "usb_mode": "default"},
+                           "board": {"rev": "v2", "source": "device", "fw_rev": "v1", "mismatch": True},
+                           "idf_path": "", "gh_ok": False, "gh_user": "", "python": "3.12.3",
+                           "usb_guard": "1", "registry_age": 10, "last_update": None,
+                           "remembered_board": None})
+    by = {r["title"]: r for r in rows}
+    assert by["Firmware"]["ok"] is False and by["Firmware"]["action"] == "update"
+    assert by["USB serial guard"]["ok"] is False and by["USB serial guard"]["action"] == "usb_guard_off"
+    assert by["Tools"]["ok"] is False and "gh auth login" in by["Tools"]["fix"]
+    assert by["Last update"]["detail"] == "never"
