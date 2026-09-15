@@ -51,6 +51,103 @@ TRACK_MODES = (TRACK_REGISTRY, TRACK_BRANCH, TRACK_PINNED, TRACK_LOCAL)
 BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "origin-mismatch")
 
 
+# == Versions & follow rules =================================================
+#
+# The UI never says "pinned": an app follows the latest release, follows the
+# latest development, or stays on a version the user picked. These functions
+# turn the config's track policy plus observed git facts into rows the screen
+# draws — pure, so they are tested without git or a terminal.
+
+import re as _re
+
+RELEASE_TAG_RE = _re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+
+def follow_rule(policy: dict) -> tuple[str, str]:
+    """(rule, target): release | development <branch> | version <sha> | own."""
+    track = policy.get("track", TRACK_REGISTRY)
+    if track == TRACK_BRANCH:
+        return "development", policy.get("ref", "")
+    if track == TRACK_PINNED:
+        return "version", policy.get("commit", "")
+    if track == TRACK_LOCAL:
+        return "own", ""
+    return "release", ""
+
+
+def parse_tag_lines(text: str) -> list[tuple[str, str]]:
+    """`git for-each-ref --format='%(refname:short) %(creatordate:short)'` → [(tag, date)]."""
+    out = []
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        date = parts[1] if len(parts) > 1 and _re.match(r"\d{4}-\d{2}-\d{2}", parts[1]) else ""
+        out.append((parts[0], date))
+    return out
+
+
+def newest_release(tags: list[tuple[str, str]]) -> str | None:
+    """First semver tag in a newest-first list, or None."""
+    for tag, _date in tags:
+        if RELEASE_TAG_RE.match(tag):
+            return tag
+    return None
+
+
+def _bare_version(tag: str) -> str:
+    return tag[1:] if tag.startswith("v") else tag
+
+
+@dataclass
+class VersionRow:
+    kind: str          # release | development | version | other
+    label: str
+    target: str        # tag, branch or sha the row resolves to ("" for other)
+    detail: str
+    current: bool = False
+    installed: bool = False
+    recommended: bool = False
+
+
+def version_rows(policy: dict, default_branch: str, installed_sha: str,
+                 installed_tag: str | None, tags: list[tuple[str, str]],
+                 dev_head: str, dev_behind: int) -> list[VersionRow]:
+    rule, target = follow_rule(policy)
+    newest = newest_release(tags)
+    rows = []
+
+    if newest:
+        rel_detail = f"{_bare_version(newest):<8} auto-update"
+        rel_target = newest
+    else:
+        rel_detail = f"no releases yet, uses {default_branch}"
+        rel_target = default_branch
+    rows.append(VersionRow("release", "Latest release", rel_target, rel_detail,
+                           current=(rule == "release"), recommended=True))
+
+    dev_note = f"{dev_head}, {dev_behind} commits newer" if dev_behind else f"{dev_head}, up to date"
+    dev_branch = target if rule == "development" and target else default_branch
+    rows.append(VersionRow("development", "Latest development", dev_branch,
+                           f"{dev_branch:<8} {dev_note}",
+                           current=(rule == "development")))
+
+    for tag, date in tags:
+        if not RELEASE_TAG_RE.match(tag):
+            continue
+        rows.append(VersionRow("version", _bare_version(tag), tag, date,
+                               current=(rule == "version" and target == tag),
+                               installed=(installed_tag == tag)))
+
+    pinned_elsewhere = rule == "version" and target and target not in {t for t, _ in tags}
+    if pinned_elsewhere:
+        rows.append(VersionRow("other", target, target, "a commit you picked",
+                               current=True, installed=(installed_sha == target)))
+    else:
+        rows.append(VersionRow("other", "Other commit…", "", ""))
+    return rows
+
+
 @dataclass
 class PlatformConfig:
     platform: str                      # "esp-idf", "arduino", "pc"
