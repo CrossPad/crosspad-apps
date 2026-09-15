@@ -2092,8 +2092,10 @@ class AppManager:
                     check=True)
                 self._git("add", install_path)
             except subprocess.CalledProcessError:
-                print(f"Error: Failed to checkout ref '{ref}'.")
-                sys.exit(1)
+                default = self._get_default_branch(install_path)
+                print(f"  no {ref} tag yet — using {default}")
+                ref = default
+                self._sub_git(install_path, "checkout", "--quiet", f"origin/{ref}")
 
         commit = self._get_submodule_commit(install_path)
         manifest.setdefault("installed", {})[app_name] = {
@@ -3728,7 +3730,83 @@ class _TUI:
             _w(f" {col}{line[:w - 2]}{_C.RST}\n")
         _pause()
 
-    def _apps_screen(self): self._toast = "coming in Task 12"
+    def _apps_screen(self):
+        cursor, search = 0, ""
+        while True:
+            installed = [a for a in self._installed]
+            available = [a for a in self._apps if a not in self._installed]
+            if search:
+                f = lambda a: search.lower() in self.mgr.app_display_name(a).lower()
+                installed, available = [a for a in installed if f(a)], [a for a in available if f(a)]
+            items = ([("h", "On your CrossPad")] + [("i", a) for a in installed]
+                     + [("h", "Available")] + [("a", a) for a in available])
+            sel = [i for i, (k, _) in enumerate(items) if k != "h"]
+            if not sel:
+                items, sel = [("h", "Nothing matches")], []
+            cursor = min(cursor, max(len(sel) - 1, 0))
+
+            _clear()
+            self._header("Add or remove apps",
+                         f"type to filter{(' · ' + search) if search else ''} · "
+                         f"{len(self._apps)} apps")
+            h = max(_get_size()[1] - 7, 3)
+            cur_idx = sel[cursor] if sel else 0
+            start, end = _viewport(cur_idx, len(items), h)
+            w = _get_size()[0]
+            for i in range(start, end):
+                kind, val = items[i]
+                if kind == "h":
+                    self._section(val)
+                    continue
+                info = self._apps.get(val, {})
+                name = self.mgr.app_display_name(val)
+                compat = self.mgr._is_compatible(info) if info else True
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == cur_idx else " "
+                if kind == "i":
+                    r = self._rows.get(val, {"installed": "", "state": "current"})
+                    note = {"own": "your own copy", "changes": "your changes",
+                            "update": f"{r.get('available', '')} available"}.get(r["state"], "")
+                    _w(f" {mark} {_C.BGREEN}{G['ok']}{_C.RST} {name:<16} {r['installed']:<8} "
+                       f"{_C.GRAY}{(note or info.get('description', ''))[:w - 34]}{_C.RST}\n")
+                else:
+                    col = _C.DIM if not compat else ""
+                    why = (f"({', '.join(info.get('platforms', []))} only)"
+                           if not compat else info.get("description", ""))
+                    _w(f" {mark}   {col}{name:<16} {info.get('version', ''):<8} "
+                       f"{_C.GRAY}{why[:w - 34]}{_C.RST}\n")
+            self._footer("[Enter] install / open   [x] remove   [backspace] clear filter   [q] back")
+
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            elif key == "up" and sel:
+                cursor = (cursor - 1) % len(sel)
+            elif key == "down" and sel:
+                cursor = (cursor + 1) % len(sel)
+            elif key == "enter" and sel:
+                kind, app_id = items[sel[cursor]]
+                if kind == "i":
+                    self._app_versions(app_id)
+                else:
+                    info = self._apps.get(app_id, {})
+                    if not self.mgr._is_compatible(info):
+                        self._toast_here(f"{self.mgr.app_display_name(app_id)} is for "
+                                         f"{', '.join(info.get('platforms', []))}, not this CrossPad")
+                        continue
+                    self._install_flow(app_id)
+                self._reload()
+            elif key == "x" and sel and items[sel[cursor]][0] == "i":
+                self._remove_flow(items[sel[cursor]][1])
+                self._reload()
+            elif key == "backspace":
+                search = search[:-1]
+            elif len(key) == 1 and key.isprintable():
+                search += key
+
+    def _toast_here(self, text: str):
+        _w(f"\n   {_C.BYELLOW}{text}{_C.RST}\n")
+        _pause()
+
     def _something_wrong(self): self._toast = "coming in Task 13"
     def _developer_tools(self): self._toast = "coming in Task 14"
 
@@ -4361,25 +4439,28 @@ class _TUI:
                f"{self.config.platform}{_C.RST}\n")
             _w(f"  {_C.GRAY}Supported: {plats}{_C.RST}\n")
 
-        _w("\n")
-        ref = _text_input("Branch/tag/commit", "main")
-        if ref is None:
-            return
+        ref = self._latest_ref(app_id, info)
 
         _w("\n")
         req_str = self.mgr._format_requires(info)
         if req_str:
             _w(f"  {_C.GRAY}Dependencies: {req_str}{_C.RST}\n")
 
-        if not _confirm(f"Install {name} ({ref})?"):
+        if not _confirm(f"Install {name}?"):
             return
 
         _clear()
         self._header(f"Installing {name}...")
         _show_cursor()
         self.mgr.install(app_id, ref=ref, force=True)
+        self.mgr.refresh_available([app_id])
         _hide_cursor()
         _pause()
+
+    def _latest_ref(self, app_id: str, info: dict) -> str:
+        """The registry's version as a tag when the repo has it, else the default branch."""
+        ver = info.get("version")
+        return f"v{ver}" if ver else "main"
 
     # -- Remove flow ----------------------------------------------------------
 
