@@ -3828,7 +3828,8 @@ class _TUI:
                            if not compat else info.get("description", ""))
                     _w(f" {mark}   {col}{name:<16} {info.get('version', ''):<8} "
                        f"{_C.GRAY}{why[:w - 34]}{_C.RST}\n")
-            self._footer("[Enter] install / open   [x] remove   [backspace] clear filter   [q] back")
+            self._footer("[Enter] install / open   [x] remove (when not filtering)   "
+                         "[backspace] clear filter   [q] back")
 
             key = _read_key()
             if key in ("q", "esc", "ctrl-c"):
@@ -3849,7 +3850,7 @@ class _TUI:
                         continue
                     self._install_flow(app_id)
                 self._reload()
-            elif key == "x" and sel and items[sel[cursor]][0] == "i":
+            elif key == "x" and not search and sel and items[sel[cursor]][0] == "i":
                 self._remove_flow(items[sel[cursor]][1])
                 self._reload()
             elif key == "backspace":
