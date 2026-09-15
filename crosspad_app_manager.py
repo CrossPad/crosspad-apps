@@ -35,6 +35,8 @@ CONFIG_FILE = "crosspad.config.json"  # intent: apps, track policy, features
 LOCAL_CONFIG_FILE = "crosspad.local.json"  # personal overrides (gitignored)
 WORK_ROOT = ".crosspad"               # generated + backup working data
 BACKUP_ROOT = ".crosspad/backups"
+AVAILABLE_FILE = ".crosspad/available.json"   # per-app fetch results, 1 h TTL
+AVAILABLE_MAX_AGE_SECONDS = 3600
 PROFILE_DIR = "config/profiles"
 FEATURES_SCHEMA = "features.schema.json"
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour
@@ -172,6 +174,11 @@ def app_row(status: dict, avail: dict | None, in_registry: bool) -> dict:
             return {"state": "update", "installed": installed,
                     "available": f"{avail.get('default_branch', target)} {avail.get('dev_head', '')}".strip()}
     return {"state": "current", "installed": installed, "available": ""}
+
+
+def _release_target(tags: list[tuple[str, str]], default_branch: str) -> str:
+    newest = newest_release(tags)
+    return newest if newest else f"origin/{default_branch}"
 
 
 # == What's next ==============================================================
@@ -853,6 +860,91 @@ class AppManager:
             "want_ref": want_ref, "flags": flags, "blocking": blocking,
             "protected": policy["track"] in (TRACK_LOCAL, TRACK_PINNED),
         }
+
+    # -- what is available upstream, cached -----------------------------------
+    #
+    # The dashboard must not run `git fetch` on every redraw. One pass at TUI
+    # start (and on demand) records per app what origin has; screens read the
+    # record. Same TTL as the registry cache.
+
+    @property
+    def available_path(self) -> Path:
+        return self.project_dir / AVAILABLE_FILE
+
+    def available_age(self) -> int:
+        if not self.available_path.exists():
+            return -1
+        return int(time.time() - self.available_path.stat().st_mtime)
+
+    def available(self, app_id: str) -> dict | None:
+        try:
+            return json.loads(self.available_path.read_text()).get(app_id)
+        except (OSError, ValueError):
+            return None
+
+    def refresh_available(self, app_ids: list[str], progress=None) -> dict:
+        records = {}
+        try:
+            records = json.loads(self.available_path.read_text())
+        except (OSError, ValueError):
+            pass
+        for app_id in app_ids:
+            path = self.app_status(app_id)["path"]
+            if not (self.project_dir / path / ".git").exists():
+                continue
+            if progress:
+                progress(app_id)
+            r = self._sub_git(path, "fetch", "--tags", "--quiet", "origin", timeout=60)
+            if r.returncode != 0:
+                records[app_id] = dict(records.get(app_id, {}), error="fetch failed")
+                continue
+            default = self._get_default_branch(path)
+            tags = parse_tag_lines(self._sub_git(
+                path, "for-each-ref", "--sort=-v:refname",
+                "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
+            newest = newest_release(tags)
+            rec = {"tags": [list(t) for t in tags], "default_branch": default,
+                   "dev_head": self._sub_git(path, "rev-parse", "--short",
+                                             f"origin/{default}").stdout.strip(),
+                   "dev_behind": self._count(path, f"HEAD..origin/{default}"),
+                   "release_behind": self._count(path, f"HEAD..{newest}") if newest else 0,
+                   "installed_tag": None,
+                   "fetched_at": datetime.now(timezone.utc).isoformat()}
+            exact = self._sub_git(path, "describe", "--tags", "--exact-match", "HEAD")
+            if exact.returncode == 0:
+                rec["installed_tag"] = exact.stdout.strip()
+            records[app_id] = rec
+        self.available_path.parent.mkdir(parents=True, exist_ok=True)
+        self.available_path.write_text(json.dumps(records, indent=2))
+        return records
+
+    def _count(self, path: str, range_spec: str) -> int:
+        r = self._sub_git(path, "rev-list", "--count", range_spec)
+        return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else 0
+
+    def set_version(self, app_id: str, row: VersionRow) -> tuple[bool, str]:
+        """Apply a row from version_rows(): write the policy, check out a concrete pick."""
+        self.ensure_config(quiet=True)
+        if row.kind == "release":
+            self.set_app_policy(app_id, TRACK_REGISTRY)
+            return True, "follows the latest release"
+        if row.kind == "development":
+            self.set_app_policy(app_id, TRACK_BRANCH, ref=row.target)
+            return True, f"follows {row.target}"
+        path = self.app_status(app_id)["path"]
+        r = self._sub_git(path, "checkout", "--quiet", row.target)
+        if r.returncode != 0:
+            return False, f"{row.target} is not a version this app has"
+        sha = self._get_submodule_commit(path)
+        self.set_app_policy(app_id, TRACK_PINNED, commit=sha)
+        self._git("add", path, check=False)
+        manifest = self._load_manifest()
+        inst = manifest.get("installed", {}).get(app_id)
+        if inst is not None:
+            inst["version"] = sha
+            inst["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._save_manifest(manifest)
+        return True, f"stays on {row.label}"
 
     def app_display_name(self, app_id: str) -> str:
         """Human name for an app, registry or not.
@@ -2084,7 +2176,7 @@ class AppManager:
                 updated += 1
                 continue
 
-            r = self._sub_git(install_path, "fetch", "origin")
+            r = self._sub_git(install_path, "fetch", "--tags", "origin")
             if r.returncode != 0:
                 skipped.append((name, "fetch failed"))
                 continue
@@ -2103,14 +2195,17 @@ class AppManager:
                                           "(diverged from origin)"))
                     continue
             else:
-                checkout_ref = (f"origin/{ref}"
-                                if not ref.startswith(("origin/", "refs/"))
-                                and len(ref) < 12
-                                else ref)
-                r = self._sub_git(install_path, "checkout", checkout_ref)
+                # Latest release = the newest semver tag on origin; an app
+                # without tags follows its default branch instead.
+                tags = parse_tag_lines(self._sub_git(
+                    install_path, "for-each-ref", "--sort=-v:refname",
+                    "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
+                checkout_ref = _release_target(tags, self._get_default_branch(install_path))
+                r = self._sub_git(install_path, "checkout", "--quiet", checkout_ref)
                 if r.returncode != 0:
                     skipped.append((name, f"checkout {checkout_ref} failed"))
                     continue
+                ref = checkout_ref
 
             self._git("add", install_path, check=False)
             commit = self._get_submodule_commit(install_path)

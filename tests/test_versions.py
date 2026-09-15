@@ -49,3 +49,8 @@ def test_version_rows_without_tags_says_so():
     assert rows[0].detail == "no releases yet, uses main"
     assert rows[0].target == "main"
     assert rows[1].detail == "main     abc1234, up to date"
+
+
+def test_release_target_prefers_tag_then_branch():
+    assert cam._release_target(TAGS, "master") == "v0.3.0"
+    assert cam._release_target([("nightly", "")], "master") == "origin/master"
