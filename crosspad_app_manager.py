@@ -483,6 +483,7 @@ class AppManager:
     def run_command(self, cmd: str) -> int:
         """Run a shell command in the project dir, return exit code."""
         cmd = self._wrap_idf(cmd)
+        _alt_screen_off()
         sys.stdout.write(f"\n  Running: {cmd}\n\n")
         sys.stdout.flush()
         _restore_terminal()
@@ -500,6 +501,7 @@ class AppManager:
         if rc != 0:
             sys.stdout.write(f"\n  \033[1;31mFailed (exit code {rc})\033[0m\n")
         sys.stdout.flush()
+        _alt_screen_on()
         return rc
 
     def _wrap_idf(self, cmd: str) -> str:
@@ -3004,6 +3006,72 @@ class _C:
     BGCYAN = "\033[46m"
 
 
+# -- glyphs ------------------------------------------------------------------
+#
+# Windows' classic console without a UTF-8 code page draws boxes for most of
+# these; Windows Terminal (WT_SESSION) and every POSIX terminal are fine.
+
+G_UNICODE = {"ok": "✓", "fail": "✗", "warn": "!", "next": "▸", "bar_on": "█",
+             "bar_off": "░", "dot_on": "●", "dot_off": "○", "arrow": "→",
+             "back": "←", "rule": "─", "hand": "✋"}
+G_ASCII = {"ok": "OK", "fail": "X", "warn": "!", "next": ">", "bar_on": "#",
+           "bar_off": "-", "dot_on": "*", "dot_off": "o", "arrow": "->",
+           "back": "<-", "rule": "-", "hand": "!"}
+
+
+def _console_utf8() -> bool:
+    try:
+        import ctypes
+        return ctypes.windll.kernel32.GetConsoleOutputCP() == 65001
+    except (AttributeError, OSError):
+        return False
+
+
+def _use_ascii() -> bool:
+    if sys.platform != "win32":
+        return False
+    if os.environ.get("WT_SESSION"):
+        return False
+    return not _console_utf8()
+
+
+G = dict(G_ASCII if _use_ascii() else G_UNICODE)
+
+
+def _enable_windows_vt():
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if k32.GetConsoleMode(h, ctypes.byref(mode)):
+            k32.SetConsoleMode(h, mode.value | 0x0004)   # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    except (AttributeError, OSError):
+        pass
+
+
+def _alt_screen_on():
+    _enable_windows_vt()
+    _w("\033[?1049h\033[H")
+
+
+def _alt_screen_off():
+    _w("\033[?1049l")
+
+
+def _viewport(cursor: int, total: int, height: int) -> tuple[int, int]:
+    """Rows [start, end) of a list `total` long to draw in `height` rows."""
+    height = max(height, 1)
+    if total <= height:
+        return 0, total
+    start = min(max(cursor - height + 1, 0), total - height)
+    if cursor < start:
+        start = cursor
+    return start, start + height
+
+
 def _w(s: str):
     """Write to stdout without newline."""
     sys.stdout.write(s)
@@ -3147,11 +3215,36 @@ def _decode_key(ch: str) -> str:
     return ch
 
 
-def _read_key() -> str:
-    """Read a single keypress, return normalized key name."""
+_resized = False
+
+
+def _install_resize_handler():
+    global _resized
+    try:
+        import signal
+        def on_winch(_sig, _frm):
+            global _resized
+            _resized = True
+        signal.signal(signal.SIGWINCH, on_winch)
+    except (ImportError, AttributeError, ValueError):
+        pass   # no SIGWINCH on Windows; the next key redraws
+
+
+def _read_key(timeout: float | None = None) -> str:
+    """One key, or "" after `timeout` seconds, or "resize" after SIGWINCH."""
+    global _resized
     if _raw_mode:
-        # The session already holds raw mode — just read.
-        return _decode_key(_read_raw_char())
+        deadline = None if timeout is None else time.time() + timeout
+        while True:
+            if _resized:
+                _resized = False
+                return "resize"
+            wait = 0.5 if deadline is None else max(min(deadline - time.time(), 0.5), 0)
+            ch = _read_within(wait)
+            if ch is not None:
+                return _decode_key(ch)
+            if deadline is not None and time.time() >= deadline:
+                return ""
 
     try:
         import termios
@@ -3165,6 +3258,12 @@ def _read_key() -> str:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
     except (ImportError, OSError):
         import msvcrt
+        if timeout is not None:
+            deadline = time.time() + timeout
+            while not msvcrt.kbhit():
+                if time.time() >= deadline:
+                    return ""
+                time.sleep(0.05)
         ch = msvcrt.getch()
         if ch in (b"\xe0", b"\x00"):
             ch2 = msvcrt.getch()
@@ -3284,8 +3383,10 @@ class _TUI:
         return _get_size()[0]
 
     def run(self):
+        _alt_screen_on()
         _save_terminal()
         _hide_cursor()
+        _install_resize_handler()
         try:
             self._dashboard()
         except KeyboardInterrupt:
@@ -3293,6 +3394,7 @@ class _TUI:
         finally:
             _restore_terminal()
             _clear()
+            _alt_screen_off()
 
     # -- formatting -----------------------------------------------------------
 
