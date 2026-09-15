@@ -3278,6 +3278,20 @@ def _read_key(timeout: float | None = None) -> str:
         return ch.decode("utf-8", errors="ignore")
 
 
+def _read_key_blocking() -> str:
+    """Like _read_key(), but a stray "" (timeout) or "resize" isn't an answer.
+
+    For the single-shot reads that decide something on the one key they get —
+    "press any key" prompts, one-key confirmations — a bare SIGWINCH must not
+    read as the answer: it would silently discard whatever the screen was
+    about to do (or dismiss it) instead of just redrawing.
+    """
+    while True:
+        key = _read_key()
+        if key not in ("", "resize"):
+            return key
+
+
 # -- TUI widgets --------------------------------------------------------------
 
 def _confirm(prompt: str) -> bool:
@@ -3355,7 +3369,7 @@ def _menu_select(title: str, items: list[str],
 
 def _pause():
     _w(f"\n  {_C.GRAY}Press any key to continue...{_C.RST}")
-    _read_key()
+    _read_key_blocking()
 
 
 # -- Main TUI class -----------------------------------------------------------
@@ -3902,7 +3916,7 @@ class _TUI:
         if not selectable:
             _clear()
             _w(f"\n  {_C.GRAY}No apps in registry.{_C.RST}\n")
-            _read_key()
+            _read_key_blocking()
             return
 
         cursor = 0
@@ -4702,7 +4716,7 @@ class _TUI:
                 _w(f"\n  {_C.GRAY}No profiles yet. A profile is a recipe: "
                    f"board, feature flags and the app set.{_C.RST}\n")
                 self._footer("[s] save current state as a profile   q back")
-                key = _read_key()
+                key = _read_key_blocking()
                 if key == "s":
                     self._save_profile_flow()
                     continue
@@ -4749,7 +4763,7 @@ class _TUI:
             _w(f"   {_C.GRAY}Project already matches this profile.{_C.RST}\n")
 
         self._footer("[a] apply   [x] apply + remove extras   q back")
-        key = _read_key()
+        key = _read_key_blocking()
         if key not in ("a", "x"):
             return
         _clear()
@@ -4795,7 +4809,7 @@ class _TUI:
                 _w(f"\n   {_C.BRED}\u2717 No binary found{_C.RST}\n")
                 _w(f"   {_C.GRAY}Build the project first.{_C.RST}\n")
                 self._footer("[b] Build now   q back")
-                key = _read_key()
+                key = _read_key_blocking()
                 if key == "b":
                     _clear()
                     self._header("Building...")
@@ -4834,7 +4848,7 @@ class _TUI:
                 _w(f"   {_C.GRAY}Build the project first."
                    f"{_C.RST}\n")
                 self._footer("[b] Build now   q back")
-                key = _read_key()
+                key = _read_key_blocking()
                 if key == "b":
                     _clear()
                     self._header("Building...")
