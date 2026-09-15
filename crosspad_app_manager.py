@@ -1460,18 +1460,6 @@ class AppManager:
         return {"defs": defs, "hash": digest,
                 "cmake": str(cmake_path), "ini": str(ini_path)}
 
-    def build_flags_stale(self) -> bool:
-        """True when the last build used a different flag set."""
-        marker = self.project_dir / WORK_ROOT / "built.hash"
-        if not marker.exists():
-            return bool(self.feature_overrides())
-        return marker.read_text().strip() != self.flags_hash()
-
-    def mark_build_flags_built(self):
-        work = self.project_dir / WORK_ROOT
-        work.mkdir(parents=True, exist_ok=True)
-        (work / "built.hash").write_text(self.flags_hash() + "\n")
-
     # -- profiles -------------------------------------------------------------
 
     def profile_dir(self) -> Path:
