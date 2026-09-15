@@ -3372,6 +3372,79 @@ def _pause():
     _read_key_blocking()
 
 
+class _PipelineUI:
+    """Draws UpdatePipeline's state; owns nothing but the screen."""
+
+    def __init__(self, tui: "_TUI"):
+        self.tui = tui
+        self._cancel = False
+
+    def render(self, steps, tail, progress):
+        _clear()
+        self.tui._header("Update my CrossPad", self.tui._header_right())
+        _w("\n")
+        w = _get_size()[0]
+        for s in steps:
+            if s.ok is True:
+                mark, col = G["ok"], _C.BGREEN
+            elif s.ok is False:
+                mark, col = G["fail"], _C.BRED
+            elif s.detail == "…":
+                mark, col = G["next"], _C.BYELLOW
+            else:
+                mark, col = " ", _C.GRAY
+            detail = s.error or s.detail
+            if s.detail == "…" and s.name == "build" and progress:
+                n, m = progress
+                width = 20
+                filled = int(width * n / max(m, 1))
+                pct = int(100 * n / max(m, 1))
+                detail = (f"{G['bar_on'] * filled}{G['bar_off'] * (width - filled)}  "
+                          f"{pct:3d} %")
+            elif s.detail == "…":
+                detail = "working…"
+            line = f" {col}{mark:<2}{_C.RST}{STEP_TITLES[s.name]:<22} "
+            _w(line + (f"{_C.BRED}{detail}{_C.RST}" if s.error else
+                       f"{_C.GRAY if s.ok is None else ''}{detail[:w - 28]}{_C.RST}") + "\n")
+        _w(f"\n {_C.DIM}{tail[:w - 4]}{_C.RST}\n")
+        _w(f"\n{' ' * max(w - 14, 0)}{_C.GRAY}[q] cancel{_C.RST}\n")
+
+    def ask_local_work(self, app_name: str) -> str:
+        _w(f"\n {_C.BYELLOW}{app_name} has changes you made.{_C.RST}\n")
+        _w(f"   {_C.BCYAN}[Enter]{_C.RST} Leave it alone (keep my changes)\n")
+        _w(f"   {_C.BCYAN}[b]{_C.RST}     Back it up to {BACKUP_ROOT} and update anyway\n")
+        while True:
+            key = _read_key()
+            if key == "b":
+                return "backup"
+            if key in ("enter", "esc", "q"):
+                return "leave"
+
+    def ask_board(self, revs: list[str]) -> str | None:
+        _w(f"\n {_C.BYELLOW}Which CrossPad do you have?{_C.RST}\n")
+        for i, r in enumerate(revs, 1):
+            _w(f"   {_C.BCYAN}[{i}]{_C.RST} {r}\n")
+        _w(f"   {_C.GRAY}Look at the sticker on the back cover.{_C.RST}\n")
+        while True:
+            key = _read_key()
+            if key.isdigit() and 1 <= int(key) <= len(revs):
+                return revs[int(key) - 1]
+            if key in ("esc", "q"):
+                return None
+
+    def wait_for_board(self, probe) -> bool:
+        while True:
+            key = _read_key(timeout=2.0)
+            if key in ("q", "esc", "ctrl-c"):
+                self._cancel = True
+                return False
+            if probe() is not None:
+                return True
+
+    def cancelled(self) -> bool:
+        return self._cancel
+
+
 # -- Main TUI class -----------------------------------------------------------
 
 class _TUI:
@@ -3618,7 +3691,43 @@ class _TUI:
                 self._developer_tools()
                 self._reload()
 
-    def _update_pipeline(self): self._toast = "coming in Task 11"
+    def _update_pipeline(self):
+        ui = _PipelineUI(self)
+        pipe = UpdatePipeline(self.mgr, ui)
+        ok = pipe.run()
+        while True:
+            ui.render(pipe.steps, pipe.tail, None)
+            failed = next((s for s in pipe.steps if s.ok is False), None)
+            if ok:
+                _w(f"\n {_C.BGREEN}{G['ok']} Your CrossPad is up to date.{_C.RST}"
+                   f"   {_C.GRAY}[q] back{_C.RST}\n")
+            else:
+                _w(f"\n {_C.GRAY}[r] retry from {STEP_TITLES[failed.name] if failed else 'the start'}"
+                   f"   [c] show the error   [3] Something's wrong   [q] back{_C.RST}\n")
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c", "enter") and (ok or key != "enter"):
+                return
+            if key == "r" and failed:
+                ok = pipe.retry_from(failed.name)
+            elif key == "c":
+                self._show_log_tail()
+            elif key == "3":
+                self._something_wrong()
+
+    def _show_log_tail(self, lines: int = 40):
+        _clear()
+        self._header("The error", LAST_UPDATE_LOG)
+        try:
+            tail = (self.mgr.project_dir / LAST_UPDATE_LOG).read_text(
+                encoding="utf-8", errors="replace").splitlines()[-lines:]
+        except OSError:
+            tail = ["(no log yet)"]
+        w = _get_size()[0]
+        for line in tail:
+            col = _C.BRED if "error" in line.lower() else ""
+            _w(f" {col}{line[:w - 2]}{_C.RST}\n")
+        _pause()
+
     def _apps_screen(self): self._toast = "coming in Task 12"
     def _something_wrong(self): self._toast = "coming in Task 13"
     def _developer_tools(self): self._toast = "coming in Task 14"
@@ -4285,49 +4394,6 @@ class _TUI:
         self._header(f"Removing {name}...")
         _show_cursor()
         self.mgr.remove(app_id)
-        _hide_cursor()
-        _pause()
-
-    # -- Update flow ----------------------------------------------------------
-
-    def _update_flow(self):
-        _clear()
-        if not self._installed:
-            _w(f"\n  {_C.GRAY}No apps installed.{_C.RST}\n")
-            _pause()
-            return
-
-        self._header("Update Apps")
-        _w(f"\n  Checking {len(self._installed)} app(s)...\n\n")
-
-        # Show what the guard will do before touching anything — an update that
-        # silently skips half the apps is worse than one that says so up front.
-        blocked = []
-        for app_id in self._installed:
-            st = self.mgr.app_status(app_id)
-            if st["protected"]:
-                _w(f"   {_C.BCYAN}\u270b{_C.RST} {app_id:<16}"
-                   f"{_C.GRAY}protected: track="
-                   f"{st['policy']['track']}{_C.RST}\n")
-            elif st["blocking"]:
-                blocked.append(app_id)
-                _w(f"   {_C.BYELLOW}\u25cf{_C.RST} {app_id:<16}"
-                   f"{_C.YELLOW}local work: "
-                   f"{', '.join(st['blocking'])}{_C.RST}\n")
-            else:
-                _w(f"   {_C.BGREEN}\u25cf{_C.RST} {app_id:<16}"
-                   f"{_C.GRAY}ready{_C.RST}\n")
-
-        force = False
-        if blocked:
-            _w(f"\n  {len(blocked)} app(s) carry local work.\n")
-            _show_cursor()
-            force = _confirm("Back them up and update anyway?")
-            _hide_cursor()
-
-        _w("\n")
-        _show_cursor()
-        self.mgr.update(update_all=True, force=force)
         _hide_cursor()
         _pause()
 
