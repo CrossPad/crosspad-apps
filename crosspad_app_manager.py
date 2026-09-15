@@ -148,6 +148,54 @@ def version_rows(policy: dict, default_branch: str, installed_sha: str,
     return rows
 
 
+def app_row(status: dict, avail: dict | None, in_registry: bool) -> dict:
+    """One dashboard line: what is installed, what is available, and a state."""
+    git = status["git"]
+    if not git.get("exists"):
+        return {"state": "missing", "installed": "", "available": ""}
+    rule, target = follow_rule(status["policy"])
+    if rule == "own" or not in_registry:
+        return {"state": "own", "installed": git.get("head") or "", "available": ""}
+    tag = (avail or {}).get("installed_tag")
+    installed = _bare_version(tag) if tag else (git.get("head") or "")
+    if status["blocking"]:
+        return {"state": "changes", "installed": installed, "available": ""}
+    if not avail:
+        return {"state": "current", "installed": installed, "available": ""}
+    if rule == "release":
+        newest = newest_release([tuple(t) for t in avail.get("tags", [])])
+        if newest and avail.get("release_behind", 0) > 0:
+            return {"state": "update", "installed": installed,
+                    "available": _bare_version(newest)}
+    elif rule == "development":
+        if avail.get("dev_behind", 0) > 0:
+            return {"state": "update", "installed": installed,
+                    "available": f"{avail.get('default_branch', target)} {avail.get('dev_head', '')}".strip()}
+    return {"state": "current", "installed": installed, "available": ""}
+
+
+# == What's next ==============================================================
+
+def whats_next(ctx: dict) -> dict:
+    """The dashboard's first line. First matching rule wins."""
+    if ctx.get("mismatch"):
+        return {"line": f"The board runs {ctx['fw_rev']} firmware on a "
+                        f"{ctx['board_rev']} board",
+                "action": "update", "estimate": ctx.get("estimate")}
+    updates = ctx.get("updates") or []
+    if updates:
+        n = len(updates)
+        return {"line": f"{n} update{'s' if n != 1 else ''} waiting: {', '.join(updates)}",
+                "action": "update", "estimate": ctx.get("estimate")}
+    if ctx.get("apps_changed") or ctx.get("components_moved"):
+        return {"line": "Apps changed — put them on the board",
+                "action": "update", "estimate": ctx.get("estimate")}
+    missing = ctx.get("tools_missing") or []
+    if missing:
+        return {"line": f"Set up: {missing[0]}", "action": "wrong", "estimate": None}
+    return {"line": "Everything is up to date", "action": "none", "estimate": None}
+
+
 @dataclass
 class PlatformConfig:
     platform: str                      # "esp-idf", "arduino", "pc"
