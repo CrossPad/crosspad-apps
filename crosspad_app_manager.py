@@ -3936,7 +3936,26 @@ class _TUI:
            f"{'flashed' if rc == 0 else 'flash failed — if esptool could not sync, hold BOOT while resetting'}\n")
         _pause()
 
-    def _developer_tools(self): self._toast = "coming in Task 14"
+    def _developer_tools(self):
+        entries = [
+            ("Workspace", "per-app ownership: follow rule, git state, backups", self._workspace),
+            ("Browse registry", "every app with details and changelog", self._browse),
+            ("Configure", "compile-time feature flags", self._configure),
+            ("Profiles", "saved app sets", self._profiles),
+            ("Build & Flash", "the raw idf.py / cmake commands", self._build_flash),
+            ("OTA Flash", "flash the last build without rebuilding", self._quick_ota),
+            ("New app", "scaffold an app from the template", self._new_app_flow),
+            ("Registry tools", "refresh, inspect, clear cache, sync manifest", self._registry_tools),
+        ]
+        if getattr(self.config, "board_revs", None):
+            entries.insert(4, ("Board", "choose the board revision to build for",
+                               lambda: self._choose_board()))
+        while True:
+            idx = _menu_select("Developer tools", [e[0] for e in entries], [e[1] for e in entries])
+            if idx < 0:
+                return
+            entries[idx][2]()
+            self._reload()
 
     def _choose_board(self) -> bool:
         revs = list(getattr(self.config, "board_revs", ()))
@@ -4857,8 +4876,13 @@ class _TUI:
             _clear()
             self._header(f"Workspace — {app}")
             git = st["git"]
+            rule, target = follow_rule(st["policy"])
+            follows = {"release": "follows latest release",
+                       "development": f"follows {target}",
+                       "version": f"stays on {target[:8]}",
+                       "own": "yours"}[rule]
             rows = [
-                ("Track", st["policy"]["track"]),
+                ("Follows", follows),
                 ("Wanted ref", st["want_ref"]),
                 ("Branch", git["branch"] or f"detached @ {git['head']}"),
                 ("HEAD", git["head"] or "?"),
@@ -5358,7 +5382,7 @@ class _TUI:
 
     # -- Dev Tools ------------------------------------------------------------
 
-    def _dev_tools(self):
+    def _registry_tools(self):
         tools = [
             ("Force refresh registry",
              "Bypass cache, fetch fresh from GitHub"),
