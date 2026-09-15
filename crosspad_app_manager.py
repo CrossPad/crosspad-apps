@@ -482,15 +482,7 @@ class AppManager:
 
     def run_command(self, cmd: str) -> int:
         """Run a shell command in the project dir, return exit code."""
-        if self.config.platform == "esp-idf":
-            idf_path = self._find_idf_path()
-            if idf_path:
-                # Source export.sh — puts idf.py + toolchain on PATH
-                export_sh = os.path.join(idf_path, "export.sh")
-                if os.path.exists(export_sh):
-                    cmd = (f"export IDF_PATH={idf_path} "
-                           f"IDF_PATH_FORCE=1 && "
-                           f". {export_sh} > /dev/null 2>&1 && {cmd}")
+        cmd = self._wrap_idf(cmd)
         sys.stdout.write(f"\n  Running: {cmd}\n\n")
         sys.stdout.flush()
         _restore_terminal()
@@ -509,6 +501,39 @@ class AppManager:
             sys.stdout.write(f"\n  \033[1;31mFailed (exit code {rc})\033[0m\n")
         sys.stdout.flush()
         return rc
+
+    def _wrap_idf(self, cmd: str) -> str:
+        if self.config.platform != "esp-idf":
+            return cmd
+        idf_path = self._find_idf_path()
+        if not idf_path:
+            return cmd
+        if sys.platform == "win32":
+            export = os.path.join(idf_path, "export.bat")
+            return f'call "{export}" >nul 2>&1 && {cmd}' if os.path.exists(export) else cmd
+        export = os.path.join(idf_path, "export.sh")
+        if not os.path.exists(export):
+            return cmd
+        return (f"export IDF_PATH={idf_path} IDF_PATH_FORCE=1 && "
+                f". {export} > /dev/null 2>&1 && {cmd}")
+
+    def run_streaming(self, cmd: str, on_line, log=None) -> int:
+        """Run a shell command; hand every output line to on_line (and to log).
+
+        Unlike run_command this never writes to the terminal — the caller
+        owns the screen and decides what one line of ninja is worth showing.
+        """
+        proc = subprocess.Popen(
+            self._wrap_idf(cmd), shell=True, cwd=str(self.project_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace", bufsize=1)
+        for line in proc.stdout:
+            line = line.rstrip("\r\n")
+            if log is not None:
+                log.write(line + "\n")
+                log.flush()
+            on_line(line)
+        return proc.wait()
 
     def check_gh_auth(self) -> tuple[bool, str]:
         """Check if gh CLI is authenticated. Returns (ok, username)."""
@@ -1568,6 +1593,52 @@ class AppManager:
                 return f"{base}/{component}" if base != "." else component
         return None
 
+    def _cdc_exchange(self, verb: str, end_marker: str | None,
+                      timeout: float) -> tuple[bool, str]:
+        """Send one CDC line, collect the reply. (ok, text-or-reason)."""
+        try:
+            import serial
+        except ImportError:
+            return False, "pyserial not installed (pip install pyserial)"
+        port = self.device_port()
+        if not port:
+            return False, ("no CrossPad CDC port — device unplugged, or in "
+                           "USB audio mode (no CDC there)")
+        try:
+            with serial.Serial(port, 115200, timeout=0.5) as ser:
+                ser.reset_input_buffer()
+                ser.write(f"{verb}\r\n".encode())
+                deadline = time.time() + timeout
+                buf = ""
+                while time.time() < deadline:
+                    chunk = ser.read(512).decode("utf-8", "replace")
+                    if chunk:
+                        buf += chunk
+                        if end_marker and end_marker in buf:
+                            break
+                        if not end_marker and "\n" in buf:
+                            break
+        except Exception as e:                      # noqa: BLE001 - report it
+            return False, f"{type(e).__name__}: {e}"
+        if not buf.strip():
+            return False, "no reply — the board did not answer"
+        return True, buf
+
+    def cdc_verb(self, verb: str, timeout: float = 4.0) -> str | None:
+        ok, text = self._cdc_exchange(verb, None, timeout)
+        return text.strip().splitlines()[0] if ok else None
+
+    def device_probe(self) -> dict | None:
+        """What is plugged in, through the platform's probe when it has one."""
+        probe = getattr(self.config, "device_probe", None)
+        if probe is not None:
+            try:
+                return probe()
+            except Exception:                       # noqa: BLE001 - a broken probe is "nothing found"
+                return None
+        port = self.device_port()
+        return {"ports": {"cdc": {"path": port}}} if port else None
+
     def query_device_versions(self, timeout: float = 3.0) -> dict:
         """Ask a connected device what it was built from.
 
@@ -1580,35 +1651,11 @@ class AppManager:
             return self._query_binary_versions(timeout)
 
         out = {"ok": False, "error": "", "entries": [], "port": None}
-        try:
-            import serial
-        except ImportError:
-            out["error"] = "pyserial not installed (pip install pyserial)"
+        ok, buf = self._cdc_exchange("APP_VERSIONS", "APPVER: end", timeout)
+        if not ok:
+            out["error"] = buf
             return out
-
-        port = self.device_port()
-        if not port:
-            out["error"] = ("no CrossPad CDC port — device unplugged, or in "
-                            "USB audio mode (no CDC there)")
-            return out
-        out["port"] = port
-
-        try:
-            with serial.Serial(port, 115200, timeout=0.5) as ser:
-                ser.reset_input_buffer()
-                ser.write(b"APP_VERSIONS\r\n")
-                deadline = time.time() + timeout
-                buf = ""
-                while time.time() < deadline:
-                    chunk = ser.read(512).decode("utf-8", "replace")
-                    if chunk:
-                        buf += chunk
-                        if "APPVER: end" in buf:
-                            break
-        except Exception as e:                      # noqa: BLE001 - report it
-            out["error"] = f"{type(e).__name__}: {e}"
-            return out
-
+        out["port"] = self.device_port()
         out["entries"] = self._parse_appver_lines(buf)
 
         if not out["entries"]:
