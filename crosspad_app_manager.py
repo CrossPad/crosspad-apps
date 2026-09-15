@@ -4331,6 +4331,87 @@ class _TUI:
         _hide_cursor()
         _pause()
 
+    # -- App versions -----------------------------------------------------
+
+    def _app_versions(self, app_id: str) -> bool:
+        """One list: follow the latest release, follow development, or a version."""
+        cursor = None
+        while True:
+            st = self.mgr.app_status(app_id)
+            avail = self.mgr.available(app_id) or {}
+            info = self._apps.get(app_id, {})
+            default = avail.get("default_branch") or self.mgr._get_default_branch(st["path"])
+            rows = version_rows(st["policy"], default, st["git"]["head"] or "",
+                                avail.get("installed_tag"),
+                                [tuple(t) for t in avail.get("tags", [])],
+                                avail.get("dev_head", "?"), avail.get("dev_behind", 0))
+            if cursor is None:
+                cursor = next((i for i, r in enumerate(rows) if r.current), 0)
+
+            _clear()
+            name = self.mgr.app_display_name(app_id)
+            row = self._rows.get(app_id) or app_row(st, avail or None, app_id in self._apps)
+            owner = info.get("repo", "").replace("https://github.com/", "").split("/")[0]
+            self._header(name, f"installed {row['installed']}"
+                               + (f" · by {owner}" if owner else ""))
+            if info.get("description"):
+                _w(f" {_C.GRAY}{info['description']}{_C.RST}\n")
+            self._section("Version")
+            h = max(_get_size()[1] - 9, 3)
+            start, end = _viewport(cursor, len(rows), h)
+            for i in range(start, end):
+                r = rows[i]
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                dot = G["dot_on"] if r.current else G["dot_off"]
+                tags = []
+                if r.installed:
+                    tags.append(f"{G['back']} installed")
+                if r.recommended:
+                    tags.append(f"{G['back']} recommended")
+                _w(f" {mark} {dot} {r.label:<22} {_C.GRAY}{r.detail:<34}"
+                   f"{'  '.join(tags)}{_C.RST}\n")
+            if end < len(rows):
+                _w(f"     {_C.GRAY}… {len(rows) - end} more{_C.RST}\n")
+            self._footer("[Enter] use this version   [c] what changed   "
+                         "[x] remove   [q] back")
+
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return False
+            elif key == "up":
+                cursor = (cursor - 1) % len(rows)
+            elif key == "down":
+                cursor = (cursor + 1) % len(rows)
+            elif key == "enter":
+                r = rows[cursor]
+                if r.kind == "other" and not r.target:
+                    r = self._other_commit_flow(app_id)
+                    if r is None:
+                        continue
+                ok, msg = self.mgr.set_version(app_id, r)
+                _clear()
+                mark = G["ok"] if ok else G["fail"]
+                _w(f"\n  {_C.BGREEN if ok else _C.BRED}{mark}{_C.RST} {name}: {msg}\n")
+                if ok and r.kind in ("release", "development"):
+                    _w(f"  {_C.GRAY}Update my CrossPad puts it on the board.{_C.RST}\n")
+                _pause()
+                self._reload()
+            elif key == "c":
+                self._show_changelog(app_id)
+            elif key == "x":
+                self._remove_flow(app_id)
+                self._reload()
+                if app_id not in self._installed:
+                    return True
+
+    def _other_commit_flow(self, app_id: str):
+        _show_cursor()
+        text = _text_input("Commit or tag", "")
+        _hide_cursor()
+        if not text:
+            return None
+        return VersionRow("other", text.strip(), text.strip(), "a commit you picked")
+
     # -- Workspace ------------------------------------------------------------
 
     def _workspace(self):
@@ -4366,7 +4447,6 @@ class _TUI:
 
             for i, st in enumerate(statuses):
                 name = st["app"]
-                track = st["policy"]["track"]
                 if st["blocking"]:
                     dot, col = "●", _C.BYELLOW
                 elif st["protected"]:
@@ -4375,8 +4455,13 @@ class _TUI:
                     dot, col = "●", _C.BGREEN
                 marker = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
                 nb = len(self.mgr.list_backups(name))
+                rule, target = follow_rule(st["policy"])
+                follow = {"release": "follows latest release",
+                          "development": f"follows {target}",
+                          "version": f"stays on {target[:8]}",
+                          "own": "yours"}[rule]
                 _w(f"  {marker} {col}{dot}{_C.RST} {name:<16}"
-                   f"{_C.GRAY}track={_C.RST}{track:<9} "
+                   f"{_C.GRAY}{follow:<26}{_C.RST} "
                    f"{self.mgr.describe_status(st):<30} "
                    f"{_C.DIM}{('bk:' + str(nb)) if nb else ''}{_C.RST}\n")
                 if i == cursor and st["blocking"]:
@@ -4388,7 +4473,7 @@ class _TUI:
                f"{_C.BYELLOW}●{_C.RST} local work (updates blocked)   "
                f"{_C.BCYAN}✋{_C.RST} protected by policy\n")
 
-            self._footer("↑↓ navigate   [m] track mode   [b] backup   "
+            self._footer("↑↓ navigate   [m] version   [b] backup   "
                          "[r] restore   [p] park WIP   [x] remove   "
                          "[enter] details   q back")
 
@@ -4400,7 +4485,8 @@ class _TUI:
             elif key == "down":
                 cursor = (cursor + 1) % len(statuses)
             elif key == "m":
-                self._track_mode_flow(statuses[cursor])
+                self._app_versions(statuses[cursor]["app"])
+                self._reload()
                 refresh()
             elif key == "b":
                 app = statuses[cursor]["app"]
@@ -4464,40 +4550,6 @@ class _TUI:
         _pause()
         return True
 
-    def _track_mode_flow(self, st: dict):
-        app = st["app"]
-        modes = [
-            (TRACK_REGISTRY, "Follow the registry ref (fast-forward only)"),
-            (TRACK_BRANCH, "Follow a branch of yours; never switched away"),
-            (TRACK_PINNED, "Freeze at the current commit"),
-            (TRACK_LOCAL, "Hands off — the manager never touches it"),
-        ]
-        cur = st["policy"]["track"]
-        labels = [f"{m}{'  (current)' if m == cur else ''}" for m, _ in modes]
-        idx = _menu_select(f"Track mode — {app}", labels,
-                           [d for _, d in modes])
-        if idx < 0:
-            return
-        mode = modes[idx][0]
-        ref = commit = None
-        if mode == TRACK_BRANCH:
-            _show_cursor()
-            ref = _text_input("Branch",
-                              st["git"]["branch"] or st["want_ref"])
-            _hide_cursor()
-            if not ref:
-                return
-        elif mode == TRACK_PINNED:
-            commit = st["git"]["head"]
-        self.mgr.ensure_config(quiet=True)
-        self.mgr.set_app_policy(app, mode, ref=ref, commit=commit)
-        _clear()
-        _w(f"\n  {app}: track={mode}"
-           f"{' ref=' + ref if ref else ''}"
-           f"{' @ ' + commit if commit else ''}\n"
-           f"  written to {CONFIG_FILE}\n")
-        _pause()
-
     def _restore_flow(self, app: str):
         stamps = self.mgr.list_backups(app)
         if not stamps:
@@ -4554,13 +4606,14 @@ class _TUI:
                 for line in log:
                     _w(f"   {_C.DIM}{line}{_C.RST}\n")
 
-            self._footer("[m] track mode   [b] backup   [r] restore   "
+            self._footer("[m] version   [b] backup   [r] restore   "
                          "[p] park WIP   q back")
             key = _read_key()
             if key in ("q", "esc", "ctrl-c"):
                 return
             elif key == "m":
-                self._track_mode_flow(st)
+                self._app_versions(st["app"])
+                self._reload()
             elif key == "b":
                 _clear()
                 dest = self.mgr.backup_app(app)
