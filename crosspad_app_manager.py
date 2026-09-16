@@ -3577,20 +3577,44 @@ class _TUI:
         self._serial_port = ""
         self._toast = ""
         self._device = None
+        self._env_cache: dict | None = None
+        self._env_at = 0.0
+        self._stale = False
         self._reload()
         self._startup_refresh()
 
-    def _reload(self):
+    # How long the answers that cost a subprocess are worth reusing. `gh auth
+    # status` and the device probe are ~0.4 s and ~0.2 s, and neither changes
+    # between two keypresses; without this they ran on every screen return.
+    ENV_TTL_SECONDS = 30
+
+    def _env(self, force: bool = False) -> dict:
+        """Board, device and toolchain — the facts that cost a subprocess."""
+        fresh = (not force and self._env_cache is not None
+                 and time.time() - self._env_at < self.ENV_TTL_SECONDS)
+        if not fresh:
+            gh_ok, gh_user = self.mgr.check_gh_auth()
+            self._env_cache = {
+                "board": self.mgr.board_info(refresh=True) or {},
+                "device": self.mgr.device_probe(),
+                "gh_ok": gh_ok, "gh_user": gh_user,
+                "idf_path": (self.mgr._find_idf_path()
+                             if self.config.platform == "esp-idf" else "-"),
+            }
+            self._env_at = time.time()
+        return self._env_cache
+
+    def _reload(self, force_env: bool = False):
         """(Re)load registry, manifest, per-app status and dashboard rows."""
         self._registry = self.mgr._load_registry()
         self._manifest = self.mgr._load_manifest()
         self._apps = self._registry.get("apps", {})
         self._installed = self._manifest.get("installed", {})
-        self.mgr.board_info(refresh=True)
+        env = self._env(force=force_env)
         self._statuses = {a: self.mgr.app_status(a) for a in self._installed}
         self._rows = {a: app_row(st, self.mgr.available(a), a in self._apps)
                       for a, st in self._statuses.items()}
-        self._device = self.mgr.device_probe()
+        self._device = env["device"]
         self._next = whats_next(self._dashboard_ctx())
 
     def _startup_refresh(self):
@@ -3609,16 +3633,17 @@ class _TUI:
         self._reload()
 
     def _dashboard_ctx(self) -> dict:
-        b = self.mgr.board_info() or {}
+        env = self._env()
+        b = env["board"]
         last = self.mgr.last_update()
         updates = [self.mgr.app_display_name(a) for a, r in self._rows.items()
                    if r["state"] == "update"]
         apps_changed = bool(last) and set(last.get("installed_set", [])) != set(self._installed)
         moved = any(s["modified"] for s in self.mgr.get_all_submodules() if s["infra"])
         missing = []
-        if self.config.platform == "esp-idf" and not self.mgr._find_idf_path():
+        if self.config.platform == "esp-idf" and not env["idf_path"]:
             missing.append("ESP-IDF is not installed")
-        if not self.mgr.check_gh_auth()[0]:
+        if not env["gh_ok"]:
             missing.append("gh is not signed in")
         can_flash = getattr(self.config, "flash_ota", None) is not None
         return {"board_rev": b.get("rev"), "fw_rev": b.get("fw_rev"),
@@ -3628,7 +3653,7 @@ class _TUI:
                 "estimate": plan_update(last, list(self._installed), can_flash)["estimate"]}
 
     def _header_right(self) -> str:
-        b = self.mgr.board_info() or {}
+        b = self._env()["board"]
         bits = []
         if b.get("rev"):
             bits.append(f"{b['rev']} board")
@@ -3751,7 +3776,14 @@ class _TUI:
     # -- Dashboard ------------------------------------------------------------
 
     def _dashboard(self):
+        painted = False
         while True:
+            if self._stale and painted:
+                # Second pass: the frame from before the action is already on
+                # screen, so the wait for git and the device probe happens
+                # where nobody is staring at a dead terminal.
+                self._reload(force_env=(self._stale == "force"))
+                self._stale = False
             _clear()
             self._header("CrossPad", self._header_right())
             if self._toast:
@@ -3799,21 +3831,28 @@ class _TUI:
                f"{_C.BCYAN}[4]{_C.RST} Developer tools\n")
             _w(f" {_C.BCYAN}[q]{_C.RST} Quit\n")
 
+            # Everything below returns to a dashboard drawn from what we
+            # already know; the refresh happens at the top of the next pass,
+            # after the frame is on screen.
+            painted = True
+            if self._stale:
+                continue          # draw the fresh numbers before waiting for a key
+
             key = _read_key()
             if key in ("q", "ctrl-c", "esc"):
                 break
             elif key == "1" or (key == "enter" and nxt["action"] == "update"):
                 self._update_pipeline()
-                self._reload()
+                self._stale = "force"
             elif key == "2":
                 self._apps_screen()
-                self._reload()
+                self._stale = True
             elif key == "3" or (key == "enter" and nxt["action"] == "wrong"):
                 self._something_wrong()
-                self._reload()
+                self._stale = True
             elif key == "4":
                 self._developer_tools()
-                self._reload()
+                self._stale = "force" 
 
     def _update_pipeline(self):
         ui = _PipelineUI(self)
@@ -3931,15 +3970,15 @@ class _TUI:
         _pause()
 
     def _wrong_facts(self) -> dict:
-        dev = self.mgr.device_probe()
+        env = self._env(force=True)
+        dev = env["device"]
         guard = self.mgr.cdc_verb("USB_GUARD", timeout=2.0) if dev else None
         if guard:
             guard = "1" if guard.strip().endswith("1") else "0" if guard.strip().endswith("0") else None
-        gh_ok, gh_user = self.mgr.check_gh_auth()
         local = self.mgr._load_local_config()
-        return {"device": dev, "board": self.mgr.board_info(refresh=True) or {},
-                "idf_path": self.mgr._find_idf_path() if self.config.platform == "esp-idf" else "-",
-                "gh_ok": gh_ok, "gh_user": gh_user,
+        return {"device": dev, "board": env["board"],
+                "idf_path": env["idf_path"],
+                "gh_ok": env["gh_ok"], "gh_user": env["gh_user"],
                 "python": ".".join(map(str, sys.version_info[:3])),
                 "usb_guard": guard, "registry_age": self.mgr.get_cache_age(),
                 "last_update": self.mgr.last_update(),
