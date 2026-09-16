@@ -106,3 +106,38 @@ def test_wrong_rows_usb_guard_and_mismatch():
     assert by["USB serial guard"]["ok"] is False and by["USB serial guard"]["action"] == "usb_guard_off"
     assert by["Tools"]["ok"] is False and "gh auth login" in by["Tools"]["fix"]
     assert by["Last update"]["detail"] == "never"
+
+
+def test_whats_next_offline_outranks_the_tool_checks():
+    # gh fails without a network, so "gh is not signed in" is the wrong thing
+    # to tell someone whose wifi is off.
+    n = cam.whats_next(ctx(offline=True, tools_missing=["gh is not signed in"]))
+    assert n == {"line": "No connection — can't check for updates",
+                 "action": "wrong", "estimate": None}
+
+
+def test_whats_next_offline_does_not_hide_what_is_already_known():
+    n = cam.whats_next(ctx(offline=True, updates=["Sampler"], estimate=240))
+    assert n["action"] == "update" and n["line"] == "1 update waiting: Sampler"
+    n = cam.whats_next(ctx(offline=True, mismatch=True, fw_rev="v1"))
+    assert n["action"] == "update"
+
+
+def test_wrong_rows_internet_row_says_which_way_it_is():
+    facts = {"device": None, "board": {}, "idf_path": "/x", "gh_ok": True,
+             "gh_user": "matixan", "python": "3.12.3", "usb_guard": None,
+             "registry_age": 10, "last_update": None, "remembered_board": None}
+    off = {r["title"]: r for r in cam.wrong_rows(dict(facts, offline=True))}["Internet"]
+    assert off["ok"] is False and off["action"] == "refresh"
+    assert off["detail"] == "no connection — updates and new apps need it"
+    on = {r["title"]: r for r in cam.wrong_rows(dict(facts, offline=False))}["Internet"]
+    assert on["ok"] is True and on["action"] is None and on["detail"] == "ok"
+
+
+def test_looks_offline_tells_a_missing_network_from_a_missing_repo():
+    assert cam.AppManager.looks_offline("fatal: could not resolve host: github.com")
+    assert cam.AppManager.looks_offline("fatal: unable to access 'https://…': …")
+    assert cam.AppManager.looks_offline("ssh: connect to host github.com: Network is unreachable")
+    assert not cam.AppManager.looks_offline(
+        "ERROR: Repository not found.\nfatal: Could not read from remote repository.")
+    assert not cam.AppManager.looks_offline("")

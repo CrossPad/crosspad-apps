@@ -199,6 +199,12 @@ def whats_next(ctx: dict) -> dict:
     if ctx.get("apps_changed") or ctx.get("components_moved"):
         return {"line": "Apps changed — put them on the board",
                 "action": "update", "estimate": ctx.get("estimate")}
+    # Offline outranks the tool checks: with no network `gh auth status` fails
+    # too, and "gh is not signed in" is the wrong thing to tell someone whose
+    # wifi is off.
+    if ctx.get("offline"):
+        return {"line": "No connection — can't check for updates",
+                "action": "wrong", "estimate": None}
     missing = ctx.get("tools_missing") or []
     if missing:
         return {"line": f"Set up: {missing[0]}", "action": "wrong", "estimate": None}
@@ -240,6 +246,15 @@ def wrong_rows(f: dict) -> list[dict]:
                      "fix": "[Enter] turn it off on this board (bench use)", "action": "usb_guard_off"})
     elif guard == "0":
         rows.append({"ok": True, "title": "USB serial guard", "detail": "off", "fix": None, "action": None})
+    if f.get("offline"):
+        rows.append({"ok": False, "title": "Internet",
+                     "detail": "no connection — updates and new apps need it",
+                     "fix": "Connect, then [Enter] to look again", "action": "refresh"})
+    else:
+        # "ok" rather than "reachable": nothing here pings anything, it only
+        # reports that nothing has failed to reach GitHub this session.
+        rows.append({"ok": True, "title": "Internet", "detail": "ok",
+                     "fix": None, "action": None})
     age = f.get("registry_age", -1)
     stale = age < 0 or age > AVAILABLE_MAX_AGE_SECONDS
     rows.append({"ok": None if stale else True, "title": "Registry",
@@ -275,10 +290,38 @@ class AppManager:
         self.manifest_path = self.project_dir / MANIFEST_FILE
         self.config_path = self.project_dir / CONFIG_FILE
         self.local_config_path = self.project_dir / LOCAL_CONFIG_FILE
+        # Everything network-shaped asks this first. One failed reach sets it
+        # for the session: a machine that cannot reach GitHub will not reach it
+        # five apps later either, and retrying once per app is what turned a
+        # missing connection into an error beside every app on screen.
+        self._offline = False
+        self._registry_cache: dict | None = None
+
+    # -- offline ---------------------------------------------------------------
+
+    @property
+    def offline(self) -> bool:
+        return self._offline
+
+    def retry_network(self):
+        """Forget that the network was unreachable, so the next call tries again."""
+        self._offline = False
+        self._registry_cache = None
+
+    @staticmethod
+    def looks_offline(text: str) -> bool:
+        """Does this git/gh failure read as 'no network' rather than 'no such repo'?"""
+        t = (text or "").lower()
+        return any(s in t for s in (
+            "could not resolve host", "unable to access", "network is unreachable",
+            "connection refused", "connection timed out", "temporary failure in name",
+            "no route to host", "operation timed out", "failed to connect"))
 
     # -- registry loading -----------------------------------------------------
 
     def _fetch_remote_registry(self) -> dict | None:
+        if self._offline:
+            return None
         try:
             result = subprocess.run(
                 ["gh", "api",
@@ -294,8 +337,9 @@ class AppManager:
                 f.write("\n")
             return data
         except (subprocess.CalledProcessError, FileNotFoundError,
-                subprocess.TimeoutExpired) as e:
-            print(f"  Warning: Could not fetch remote registry via gh: {e}")
+                subprocess.TimeoutExpired):
+            # Silent on purpose: the screens say "no connection" in one place.
+            self._offline = True
             return None
 
     def _is_cache_fresh(self) -> bool:
@@ -305,17 +349,28 @@ class AppManager:
         return age < CACHE_MAX_AGE_SECONDS
 
     def _load_registry(self) -> dict:
+        """The app list, network at most once per session.
+
+        app_status() calls this for every app, so an uncached miss used to mean
+        one gh invocation per app — and, offline, one failure message per app.
+        """
+        if self._registry_cache is not None:
+            return self._registry_cache
+
         if not self._is_cache_fresh():
             remote = self._fetch_remote_registry()
             if remote:
+                self._registry_cache = remote
                 return remote
 
         if self.local_registry_path.exists():
             with open(self.local_registry_path) as f:
-                return json.load(f)
+                cached = json.load(f)
+            self._registry_cache = cached
+            return cached
 
-        print("Error: No registry available (remote unreachable, no local cache).")
-        print(f"  Check your network or create {LOCAL_REGISTRY_FILE} manually.")
+        print("No connection, and no app list saved on this computer yet.")
+        print("  Connect to the internet once and start this again.")
         sys.exit(1)
 
     # -- manifest -------------------------------------------------------------
@@ -980,6 +1035,12 @@ class AppManager:
                 progress(app_id)
             r = self._sub_git(path, "fetch", "--tags", "--quiet", "origin", timeout=60)
             if r.returncode != 0:
+                # A machine with no network fails the same way for every app,
+                # each time after its own DNS timeout. Stop at the first one and
+                # keep whatever the cache already knew.
+                if self.looks_offline(r.stderr):
+                    self._offline = True
+                    break
                 records[app_id] = dict(records.get(app_id, {}), error="fetch failed")
                 continue
             default = self._get_default_branch(path)
@@ -3542,6 +3603,9 @@ class _TUI:
         self.mgr.refresh_available(
             list(self._installed),
             progress=lambda a: _w(f"   {self.mgr.app_display_name(a)}\n"))
+        if self.mgr.offline:
+            _w(f"\n  {_C.BYELLOW}No connection{_C.RST} "
+               f"{_C.GRAY}— showing what's on this computer.{_C.RST}\n")
         self._reload()
 
     def _dashboard_ctx(self) -> dict:
@@ -3560,7 +3624,7 @@ class _TUI:
         return {"board_rev": b.get("rev"), "fw_rev": b.get("fw_rev"),
                 "mismatch": bool(b.get("mismatch")), "updates": updates,
                 "apps_changed": apps_changed, "components_moved": moved,
-                "tools_missing": missing,
+                "tools_missing": missing, "offline": self.mgr.offline,
                 "estimate": plan_update(last, list(self._installed), can_flash)["estimate"]}
 
     def _header_right(self) -> str:
@@ -3879,6 +3943,7 @@ class _TUI:
                 "python": ".".join(map(str, sys.version_info[:3])),
                 "usb_guard": guard, "registry_age": self.mgr.get_cache_age(),
                 "last_update": self.mgr.last_update(),
+                "offline": self.mgr.offline,
                 "remembered_board": local.get("board")}
 
     def _something_wrong(self):
@@ -3920,6 +3985,7 @@ class _TUI:
                 elif action == "refresh":
                     _clear()
                     _w(f"\n  {_C.GRAY}Refreshing…{_C.RST}\n")
+                    self.mgr.retry_network()
                     self.mgr._fetch_remote_registry()
                     self.mgr.refresh_available(list(self._installed))
                     self._reload()
