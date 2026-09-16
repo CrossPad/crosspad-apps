@@ -54,3 +54,15 @@ def test_version_rows_without_tags_says_so():
 def test_release_target_prefers_tag_then_branch():
     assert cam._release_target(TAGS, "master") == "v0.3.0"
     assert cam._release_target([("nightly", "")], "master") == "origin/master"
+
+
+def test_registry_policy_after_fresh_install_marks_release_current():
+    """Regression for _install_flow: installing from Add-or-remove-apps
+    always means Latest release (spec §4), so the policy left behind must
+    be {"track": "registry"} — not track=branch with the install ref (a
+    release tag), which the version screen would then show as Latest
+    development instead."""
+    rows = cam.version_rows({"track": "registry"}, "main", "abc1234", "v0.3.0",
+                            [("v0.3.0", "2026-09-14")], "abc1234", 0)
+    assert rows[0].kind == "release" and rows[0].current
+    assert not any(r.kind == "development" and r.current for r in rows)

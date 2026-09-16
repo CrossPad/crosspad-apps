@@ -555,6 +555,7 @@ class AppManager:
         if rc != 0:
             sys.stdout.write(f"\n  \033[1;31mFailed (exit code {rc})\033[0m\n")
         sys.stdout.flush()
+        _save_terminal()
         _alt_screen_on()
         return rc
 
@@ -1673,7 +1674,20 @@ class AppManager:
         return text.strip().splitlines()[0] if ok else None
 
     def device_probe(self) -> dict | None:
-        """What is plugged in, through the platform's probe when it has one."""
+        """What is plugged in, through the platform's probe when it has one.
+
+        The board resolver's own scan (`board_info()`, e.g. `crosspad-hil
+        devices` on ESP-IDF) already carries a "devices" list built from the
+        same platform scan the device_probe hook would run — reuse its first
+        entry instead of a second subprocess scan. Falls back to the hook
+        when there is no cached board decision or it found nothing (no
+        board_resolve hook, or a board that answered with an unknown
+        revision).
+        """
+        board = self.board_info()
+        devices = (board or {}).get("devices") or []
+        if devices:
+            return devices[0]
         probe = getattr(self.config, "device_probe", None)
         if probe is not None:
             try:
@@ -2589,7 +2603,9 @@ class UpdatePipeline:
                 if choice != "backup":
                     left.append(name)
                     continue
-                self.mgr.backup_app(app_id)
+                # update(force=True) backs up through guard() itself — no
+                # need to also back up here (that took two identical
+                # snapshots per confirmation).
                 force = True
             self.tail = f"{name}: fetching"
             self._render()
@@ -4600,6 +4616,12 @@ class _TUI:
         self._header(f"Installing {name}...")
         _show_cursor()
         self.mgr.install(app_id, ref=ref, force=True)
+        # install()'s own heuristic treats a non-default ref as "the user
+        # typed a branch" — a release tag is never == the default branch, so
+        # it would land as track=branch here. This screen always means
+        # Latest release (spec §4): pin the policy explicitly.
+        self.mgr.ensure_config(quiet=True)
+        self.mgr.set_app_policy(app_id, TRACK_REGISTRY)
         self.mgr.refresh_available([app_id])
         _hide_cursor()
         _pause()
@@ -4816,7 +4838,12 @@ class _TUI:
         _clear()
         self._header(f"Remove {app}")
         _w(f"\n   {_C.GRAY}{st['path']}{_C.RST}\n")
-        _w(f"   {_C.GRAY}track={st['policy']['track']}   "
+        rule, target = follow_rule(st["policy"])
+        follows = {"release": "follows latest release",
+                   "development": f"follows {target}",
+                   "version": f"stays on {target[:8]}",
+                   "own": "yours"}[rule]
+        _w(f"   {_C.GRAY}{follows}   "
            f"{self.mgr.describe_status(st)}{_C.RST}\n")
 
         risky = st["blocking"] or st["git"]["untracked"] or st["git"]["stashes"]

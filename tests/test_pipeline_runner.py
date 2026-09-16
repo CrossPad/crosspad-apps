@@ -79,7 +79,10 @@ def test_pipeline_backup_then_update_local_work(tmp_path):
     mgr.config.flash_ota = lambda rev, on_line: 0
     p = cam.UpdatePipeline(mgr, FakeUI(local="backup"))
     p.run()
-    assert ("backup", "dawcontrol") in mgr.calls
+    # _download no longer backs up itself — update(force=True) does that
+    # through guard() (a real AppManager's own path), so a second, identical
+    # snapshot is not taken here.
+    assert ("backup", "dawcontrol") not in mgr.calls
     assert ("update", "dawcontrol", True) in mgr.calls
 
 
