@@ -104,7 +104,9 @@ def test_wrong_rows_usb_guard_and_mismatch():
     by = {r["title"]: r for r in rows}
     assert by["Firmware"]["ok"] is False and by["Firmware"]["action"] == "update"
     assert by["USB serial guard"]["ok"] is False and by["USB serial guard"]["action"] == "usb_guard_off"
-    assert by["Tools"]["ok"] is False and "gh auth login" in by["Tools"]["fix"]
+    assert by["Tools"]["ok"] is False and "ESP-IDF not found" in by["Tools"]["fix"]
+    # Not being signed in to GitHub is a note, not a fault: reading apps needs no account.
+    assert by["GitHub sign-in"]["ok"] is None and "only for publishing" in by["GitHub sign-in"]["fix"]
     assert by["Last update"]["detail"] == "never"
 
 
@@ -141,3 +143,31 @@ def test_looks_offline_tells_a_missing_network_from_a_missing_repo():
     assert not cam.AppManager.looks_offline(
         "ERROR: Repository not found.\nfatal: Could not read from remote repository.")
     assert not cam.AppManager.looks_offline("")
+
+
+def test_wrong_rows_tools_name_git_and_certificates():
+    facts = {"device": None, "board": {}, "idf_path": "/x", "gh_ok": False, "gh_user": "",
+             "git_ok": False, "python": "3.12.3", "usb_guard": None, "registry_age": 10,
+             "last_update": None, "remembered_board": None, "cert_problem": True}
+    by = {r["title"]: r for r in cam.wrong_rows(facts)}
+    assert by["Tools"]["ok"] is False and "git is not installed" in by["Tools"]["detail"]
+    assert by["HTTPS certificates"]["ok"] is False
+    assert "Install Certificates.command" in by["HTTPS certificates"]["fix"]
+
+
+def test_wrong_rows_on_pc_talk_about_the_simulator_not_a_board():
+    facts = {"platform": "pc", "sim_built": None, "device": None, "board": {},
+             "idf_path": "-", "gh_ok": True, "gh_user": "x", "git_ok": True,
+             "python": "3.12.3", "usb_guard": None, "registry_age": 10,
+             "last_update": None, "remembered_board": None}
+    titles = [r["title"] for r in cam.wrong_rows(facts)]
+    assert "Board found" not in titles and titles[0] == "Simulator"
+    tools = {r["title"]: r for r in cam.wrong_rows(facts)}["Tools"]
+    assert tools["ok"] is True and "ESP-IDF" not in tools["detail"]
+
+
+def test_owner_repo_of_reads_every_github_spelling():
+    assert cam.owner_repo_of("https://github.com/CrossPad/crosspad-sampler.git") == "CrossPad/crosspad-sampler"
+    assert cam.owner_repo_of("git@github.com:CrossPad/crosspad-mixer") == "CrossPad/crosspad-mixer"
+    assert cam.owner_repo_of("https://gitlab.com/x/y") is None
+    assert cam.owner_repo_of("") is None

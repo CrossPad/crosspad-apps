@@ -46,7 +46,7 @@ class FakeMgr:
         return R()
     def board_info(self, refresh=False): return self.board
     def idf_args(self): return "-B build_v2 -DSDKCONFIG=sdkconfig.v2 "
-    def run_streaming(self, cmd, on_line, log=None):
+    def run_streaming(self, cmd, on_line, log=None, cancel=None):
         self.calls.append(("run", cmd))
         on_line("[10/20] Building CXX object x.obj")
         return self.build_rc
@@ -169,3 +169,54 @@ def test_pipeline_board_set_raising_fails_the_build_step(tmp_path):
     assert build.ok is False
     assert build.error == cam.error_line("build", "no-board")
     assert mgr.saved["ok"] is False
+
+
+def test_explain_failure_names_known_causes():
+    assert "disk is full" in cam.explain_failure(["x", "ld: No space left on device"])
+    assert "path too long" in cam.explain_failure(["fatal: Filename too long"])
+    assert "clean build" in cam.explain_failure(
+        ["app_registry_init.cpp:(.text+0x1): undefined reference to `_register_sampler_app()'"])
+    assert "dialout" in cam.explain_failure(["PermissionError: [Errno 13] Permission denied: '/dev/ttyACM0'"])
+    assert cam.explain_failure(["error: expected ';' before '}' token"]) is None
+
+
+def test_build_failure_with_a_known_cause_says_it_and_forces_a_clean_retry(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    def failing(cmd, on_line, log=None, cancel=None):
+        on_line("undefined reference to `_register_fishtank_app()'")
+        return 1
+    mgr.run_streaming = failing
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    p.plan["fullclean"] = False
+    assert p.run() is False
+    assert "clean build" in p.step("build").error and p.plan["fullclean"] is True
+
+
+def test_stopped_build_is_a_retryable_step_not_a_crash(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.run_streaming = lambda cmd, on_line, log=None, cancel=None: cam.AppManager.CANCELLED
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is False
+    assert p.step("build").error.startswith("Stopped")
+
+
+def test_ctrl_c_inside_a_step_marks_it_stopped(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    def boom(rev, on_line):
+        raise KeyboardInterrupt
+    mgr.config.flash_ota = boom
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is False
+    assert "Flash stopped" in p.step("flash").error
+
+
+def test_run_streaming_cancel_stops_the_process_tree(tmp_path):
+    import sys, time
+    mgr = cam.AppManager(str(tmp_path), cam.PlatformConfig(platform="pc"))
+    lines = []
+    t0 = time.time()
+    rc = mgr.run_streaming(f'"{sys.executable}" -c "import time; print(1, flush=True); time.sleep(30)"',
+                           lines.append, cancel=lambda: bool(lines))
+    assert rc == cam.AppManager.CANCELLED and time.time() - t0 < 10 and lines == ["1"]

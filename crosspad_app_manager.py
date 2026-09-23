@@ -19,6 +19,7 @@ Usage:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+MANAGER_VERSION = "1.1.0"    # CP Tools; shown in help and in support reports
 REMOTE_REGISTRY_REPO = "CrossPad/crosspad-apps"
 REMOTE_REGISTRY_PATH = "registry.json"
 LOCAL_REGISTRY_FILE = "app-registry.json"
@@ -56,6 +58,58 @@ TRACK_ALIASES = {"release": TRACK_REGISTRY, "development": TRACK_BRANCH,
                  "version": TRACK_PINNED, "mine": TRACK_LOCAL}
 
 BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "origin-mismatch")
+
+RAW_BASE = "https://raw.githubusercontent.com"
+HTTP_TIMEOUT_SECONDS = 15
+
+
+class NetError(Exception):
+    """A fetch that failed. `offline` says whether it reads as "no network"
+    rather than "the server answered no" — a 404 is an answer, not an outage."""
+
+    def __init__(self, message: str, offline: bool, cert: bool = False):
+        super().__init__(message)
+        self.offline = offline
+        self.cert = cert
+
+
+def http_get(url: str, timeout: float = HTTP_TIMEOUT_SECONDS) -> bytes:
+    """GET a public URL with the standard library — no gh, no GitHub account.
+
+    Reading a public registry, a public changelog or the manager itself needs
+    nobody's sign-in; requiring `gh auth login` for it was the first wall a
+    musician hit. HTTP(S)_PROXY from the environment is honoured by urllib.
+    """
+    import ssl
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "crosspad-apps"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        raise NetError(f"HTTP {e.code} for {url}", offline=False) from e
+    except urllib.error.URLError as e:
+        cert = isinstance(e.reason, ssl.SSLCertVerificationError)
+        raise NetError(str(e.reason), offline=not cert, cert=cert) from e
+    except (TimeoutError, OSError) as e:
+        raise NetError(str(e), offline=True) from e
+
+
+def raw_url(owner_repo: str, path: str, ref: str = "HEAD") -> str:
+    return f"{RAW_BASE}/{owner_repo}/{ref}/{path}"
+
+
+def owner_repo_of(url: str) -> str | None:
+    """'https://github.com/CrossPad/crosspad-sampler.git' → 'CrossPad/crosspad-sampler'."""
+    url = (url or "").strip().rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    url = url.replace("git@github.com:", "https://github.com/")
+    if "github.com/" not in url:
+        return None
+    parts = url.split("github.com/", 1)[1].split("/")
+    return f"{parts[0]}/{parts[1]}" if len(parts) >= 2 and parts[0] and parts[1] else None
 
 
 # == Versions & follow rules =================================================
@@ -214,10 +268,38 @@ def whats_next(ctx: dict) -> dict:
     return {"line": "Everything is up to date", "action": "none", "estimate": None}
 
 
+ESP_IDF_BUILD_DEPTH = 150    # characters a build path adds below the project dir
+WINDOWS_MAX_PATH = 260
+FREE_DISK_WARN_GB = 5        # two board revisions' build dirs, with room to spare
+
+
+def path_problems(project_dir: str, platform: str, is_windows: bool,
+                  longpaths: bool | None) -> list[str]:
+    """What about where the project lives will break a build — before it does."""
+    out = []
+    if platform == "esp-idf" and " " in project_dir:
+        out.append("the project folder has a space in its path — ESP-IDF can't build there")
+    if platform == "esp-idf" and not project_dir.isascii():
+        out.append("the project folder's path has non-English letters — ESP-IDF tools "
+                   "choke on them")
+    if is_windows and not longpaths and \
+            len(project_dir) + ESP_IDF_BUILD_DEPTH > WINDOWS_MAX_PATH:
+        out.append(f"the path is {len(project_dir)} characters and Windows long paths "
+                   f"are off — builds go ~{ESP_IDF_BUILD_DEPTH} deeper than the "
+                   f"{WINDOWS_MAX_PATH} limit allows")
+    return out
+
+
 def wrong_rows(f: dict) -> list[dict]:
     rows = []
     dev, b = f.get("device"), f.get("board") or {}
-    if dev:
+    if f.get("platform") == "pc":
+        built = f.get("sim_built")
+        rows.append({"ok": bool(built), "title": "Simulator",
+                     "detail": f"built {built}" if built else
+                               "not built yet — [1] Update my CrossPad builds it",
+                     "fix": None, "action": None})
+    elif dev:
         rows.append({"ok": True, "title": "Board found",
                      "detail": f"{dev.get('board_rev') or b.get('rev') or '?'}, firmware "
                                f"{dev.get('fw_rev') or '?'}", "fix": None, "action": None})
@@ -235,13 +317,41 @@ def wrong_rows(f: dict) -> list[dict]:
                      "fix": None, "action": None})
     tools_bad = []
     if f.get("idf_path") == "":
-        tools_bad.append("ESP-IDF not found — install it, then open a terminal that has idf.py")
-    if not f.get("gh_ok"):
-        tools_bad.append("run: gh auth login")
+        tools_bad.append("ESP-IDF not found — run the CrossPad installer again "
+                         "(see README), or open a terminal that has idf.py")
+    if f.get("git_ok") is False:
+        tools_bad.append("git is not installed — get it from git-scm.com")
+    good = ([] if f.get("idf_path") in ("-", None) else ["ESP-IDF ok"]) + \
+        (["git ok"] if f.get("git_ok") else []) + [f"Python {f.get('python')}"]
     rows.append({"ok": not tools_bad, "title": "Tools",
-                 "detail": (f"ESP-IDF ok, gh signed in as {f.get('gh_user')}, Python {f.get('python')}"
-                            if not tools_bad else "; ".join(tools_bad)),
+                 "detail": ", ".join(good) if not tools_bad else "; ".join(tools_bad),
                  "fix": "; ".join(tools_bad) or None, "action": None})
+    if f.get("cert_problem"):
+        rows.append({"ok": False, "title": "HTTPS certificates",
+                     "detail": "Python can't verify GitHub's certificate",
+                     "fix": "macOS: open your Python folder in Applications and run "
+                            "'Install Certificates.command'", "action": None})
+    probs = f.get("path_problems") or []
+    if probs:
+        rows.append({"ok": False, "title": "Project folder", "detail": "; ".join(probs),
+                     "fix": "move the project to a short plain folder, e.g. C:\\cp or ~/cp",
+                     "action": None})
+    free = f.get("free_gb")
+    if free is not None and free < FREE_DISK_WARN_GB:
+        rows.append({"ok": False, "title": "Disk space",
+                     "detail": f"{free:.1f} GB free — a build needs about {FREE_DISK_WARN_GB} GB",
+                     "fix": "free some space", "action": None})
+    if f.get("defender_hint"):
+        rows.append({"ok": None, "title": "Windows Defender",
+                     "detail": "scans every file a build writes — builds take about twice as long",
+                     "fix": "PowerShell as admin: Add-MpPreference -ExclusionPath "
+                            f"\"{f['defender_hint']}\"", "action": None})
+    # Reading apps needs no account; only publishing your own does.
+    rows.append({"ok": True if f.get("gh_ok") else None, "title": "GitHub sign-in",
+                 "detail": (f"signed in as {f.get('gh_user')}" if f.get("gh_ok") else
+                            "not signed in — only needed to publish your own apps"),
+                 "fix": None if f.get("gh_ok") else "run: gh auth login (only for publishing)",
+                 "action": None})
     if f.get("pyserial") is False:
         rows.append({"ok": False, "title": "USB serial",
                      "detail": "the Python package pyserial is missing — without it "
@@ -304,6 +414,9 @@ class AppManager:
         # missing connection into an error beside every app on screen.
         self._offline = False
         self._registry_cache: dict | None = None
+        # Python could not verify GitHub's certificate — a python.org install
+        # on macOS without "Install Certificates.command" — not a missing network.
+        self.cert_problem = False
 
     # -- offline ---------------------------------------------------------------
 
@@ -330,24 +443,35 @@ class AppManager:
     def _fetch_remote_registry(self) -> dict | None:
         if self._offline:
             return None
+        data = None
         try:
-            result = subprocess.run(
-                ["gh", "api",
-                 f"repos/{REMOTE_REGISTRY_REPO}/contents/{REMOTE_REGISTRY_PATH}",
-                 "--jq", ".content"],
-                capture_output=True, text=True, check=True, timeout=15,
-            )
+            data = json.loads(http_get(raw_url(REMOTE_REGISTRY_REPO, REMOTE_REGISTRY_PATH,
+                                               "main")))
+        except NetError as e:
+            self.cert_problem = self.cert_problem or e.cert
+            data = self._gh_contents(REMOTE_REGISTRY_REPO, REMOTE_REGISTRY_PATH)
+            if data is None:
+                # Silent on purpose: the screens say "no connection" in one place.
+                self._offline = e.offline or e.cert
+                return None
+        except ValueError:
+            return None
+        with open(self.local_registry_path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        return data
+
+    @staticmethod
+    def _gh_contents(owner_repo: str, path: str) -> dict | None:
+        """The same file through `gh api` — a proxy gh is set up for, a private repo."""
+        try:
             import base64
-            content = base64.b64decode(result.stdout.strip()).decode()
-            data = json.loads(content)
-            with open(self.local_registry_path, "w") as f:
-                json.dump(data, f, indent=2)
-                f.write("\n")
-            return data
+            r = subprocess.run(
+                ["gh", "api", f"repos/{owner_repo}/contents/{path}", "--jq", ".content"],
+                capture_output=True, text=True, check=True, timeout=15)
+            return json.loads(base64.b64decode(r.stdout.strip()).decode())
         except (subprocess.CalledProcessError, FileNotFoundError,
-                subprocess.TimeoutExpired):
-            # Silent on purpose: the screens say "no connection" in one place.
-            self._offline = True
+                subprocess.TimeoutExpired, ValueError):
             return None
 
     def _is_cache_fresh(self) -> bool:
@@ -530,25 +654,14 @@ class AppManager:
         if registry is None:
             registry = self._load_registry()
         info = registry.get("apps", {}).get(app_id, {})
-        repo = info.get("repo", "")
-        if not repo:
+        owner_repo = owner_repo_of(info.get("repo", ""))
+        if not owner_repo or self._offline:
             return []
-        parts = repo.rstrip("/").rstrip(".git").split("/")
-        if len(parts) < 2:
-            return []
-        owner_repo = f"{parts[-2]}/{parts[-1]}"
         try:
-            import base64
-            r = subprocess.run(
-                ["gh", "api",
-                 f"repos/{owner_repo}/contents/crosspad-app.json",
-                 "--jq", ".content"],
-                capture_output=True, text=True, check=True, timeout=10,
-            )
-            data = json.loads(base64.b64decode(r.stdout.strip()).decode())
-            return data.get("changelog", [])
-        except Exception:
-            return []
+            data = json.loads(http_get(raw_url(owner_repo, "crosspad-app.json"), timeout=10))
+        except (NetError, ValueError):
+            data = self._gh_contents(owner_repo, "crosspad-app.json") or {}
+        return data.get("changelog", [])
 
     def detect_serial_port(self) -> str:
         """Try to auto-detect CrossPad serial port."""
@@ -637,22 +750,60 @@ class AppManager:
         return (f"export IDF_PATH={idf_path} IDF_PATH_FORCE=1 && "
                 f". {export} > /dev/null 2>&1 && {cmd}")
 
-    def run_streaming(self, cmd: str, on_line, log=None) -> int:
+    CANCELLED = -2
+
+    def run_streaming(self, cmd: str, on_line, log=None, cancel=None) -> int:
         """Run a shell command; hand every output line to on_line (and to log).
 
         Unlike run_command this never writes to the terminal — the caller
         owns the screen and decides what one line of ninja is worth showing.
+
+        `cancel()` is asked between lines and every 0.2 s of silence; True, or
+        Ctrl+C, stops the whole process tree and returns CANCELLED. Before
+        this, Ctrl+C in a build unwound the entire TUI back to the shell and
+        the screen's own "[q] cancel" did nothing while a step ran.
         """
+        import queue
+        import threading
+        popen_kw = {}
+        if sys.platform == "win32":
+            popen_kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kw["start_new_session"] = True   # the whole tree dies together
         proc = subprocess.Popen(
             self._wrap_idf(cmd), shell=True, cwd=str(self.project_dir),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            encoding="utf-8", errors="replace", bufsize=1)
-        for line in proc.stdout:
-            line = line.rstrip("\r\n")
+            encoding="utf-8", errors="replace", bufsize=1, **popen_kw)
+        lines: "queue.Queue[str | None]" = queue.Queue()
+
+        def pump():
+            for raw in proc.stdout:
+                lines.put(raw.rstrip("\r\n"))
+            lines.put(None)
+
+        threading.Thread(target=pump, daemon=True).start()
+        try:
+            while True:
+                try:
+                    line = lines.get(timeout=0.2)
+                except queue.Empty:
+                    line = ""
+                    if cancel is not None and cancel():
+                        raise KeyboardInterrupt
+                    continue
+                if line is None:
+                    break
+                if log is not None:
+                    log.write(line + "\n")
+                    log.flush()
+                on_line(line)
+                if cancel is not None and cancel():
+                    raise KeyboardInterrupt
+        except KeyboardInterrupt:
+            _kill_tree(proc)
             if log is not None:
-                log.write(line + "\n")
-                log.flush()
-            on_line(line)
+                log.write("\n(stopped)\n")
+            return self.CANCELLED
         return proc.wait()
 
     def check_gh_auth(self) -> tuple[bool, str]:
@@ -663,14 +814,10 @@ class AppManager:
                 capture_output=True, text=True, check=False, timeout=5,
             )
             if r.returncode == 0:
-                for line in (r.stdout + r.stderr).splitlines():
-                    if "Logged in" in line or "account" in line:
-                        parts = line.strip().split()
-                        for p in parts:
-                            if not p.startswith(("-", "~", "/", "(")):
-                                if len(p) > 2 and p[0].isalpha():
-                                    return True, p
-                return True, "authenticated"
+                # "Logged in to github.com account matixan (keyring)" (gh ≥ 2.40)
+                # or "Logged in to github.com as matixan" (older gh).
+                m = _re.search(r"Logged in to \S+ (?:account|as) (\S+)", r.stdout + r.stderr)
+                return True, m.group(1) if m else "authenticated"
             return False, ""
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False, ""
@@ -700,6 +847,102 @@ class AppManager:
                     "infra": infra, "is_app": is_app,
                 })
         return subs
+
+    # -- diagnosis --------------------------------------------------------------
+
+    def windows_longpaths(self) -> bool | None:
+        """Both switches a deep ESP-IDF tree needs on Windows: the OS and git's."""
+        if sys.platform != "win32":
+            return None
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+                os_on = winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1
+        except OSError:
+            os_on = False
+        r = subprocess.run(["git", "config", "--get", "core.longpaths"],
+                           capture_output=True, text=True, check=False)
+        return os_on and r.stdout.strip().lower() == "true"
+
+    def doctor_facts(self, device: dict | None = None, gh: tuple | None = None) -> dict:
+        """Everything wrong_rows() reads. No terminal, so the CLI and MCP get it too."""
+        gh_ok, gh_user = gh if gh is not None else self.check_gh_auth()
+        dev = device if device is not None else self.device_probe()
+        guard = self.cdc_verb("USB_GUARD", timeout=2.0) if dev else None
+        if guard:
+            guard = ("1" if guard.strip().endswith("1") else
+                     "0" if guard.strip().endswith("0") else None)
+        build = self.get_build_info() if self.config.platform == "pc" else {}
+        try:
+            free_gb = shutil.disk_usage(self.project_dir).free / 1e9
+        except OSError:
+            free_gb = None
+        is_win = sys.platform == "win32"
+        return {
+            "platform": self.config.platform, "device": dev,
+            "board": self.board_info(refresh=True) or {},
+            "sim_built": (f"{build['age_seconds'] // 60} min ago"
+                          if build.get("exists") else None),
+            "idf_path": (self._find_idf_path() if self.config.platform == "esp-idf" else "-"),
+            "git_ok": shutil.which("git") is not None,
+            "gh_ok": gh_ok, "gh_user": gh_user,
+            "python": ".".join(map(str, sys.version_info[:3])),
+            "pyserial": _has_module("serial"),
+            "cert_problem": self.cert_problem, "offline": self._offline,
+            "usb_guard": guard, "registry_age": self.get_cache_age(),
+            "last_update": self.last_update(),
+            "remembered_board": self._load_local_config().get("board"),
+            "path_problems": path_problems(str(self.project_dir.resolve()),
+                                           self.config.platform, is_win,
+                                           self.windows_longpaths()),
+            "free_gb": free_gb,
+            "defender_hint": str(self.project_dir.resolve()) if is_win else None,
+        }
+
+    def support_bundle(self, facts: dict | None = None) -> Path:
+        """One zip that answers a helper's first ten questions.
+
+        What happened (the last update's log and timings), what is installed
+        and what was asked for (apps.json, crosspad.config.json, submodule
+        commits), and the doctor's findings. No environment variables and no
+        tokens; the personal config is included with anything secret-looking
+        blanked.
+        """
+        import platform as _pf
+        import zipfile
+        facts = facts if facts is not None else self.doctor_facts()
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_dir = self.project_dir / WORK_ROOT / "support"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / f"crosspad-support-{stamp}.zip"
+        lines = [f"CP Tools {MANAGER_VERSION} on {self.config.platform}",
+                 f"OS: {_pf.platform()}   Python {sys.version.split()[0]}",
+                 f"Project: {self.project_dir.resolve()}",
+                 f"Created: {datetime.now(timezone.utc).isoformat()}", ""]
+        for r in wrong_rows(facts):
+            mark = {True: "ok ", False: "BAD", None: "?  "}[r["ok"]]
+            lines.append(f"[{mark}] {r['title']}: {r['detail']}"
+                         + (f"   -> {r['fix']}" if r["fix"] and r["ok"] is not True else ""))
+        sub = self._git("submodule", "status", check=False, capture=True)
+        head = self._git("log", "-1", "--format=%h %d %s", check=False, capture=True)
+        lines += ["", "Project HEAD: " + (head.stdout or "").strip(), "",
+                  "Submodules:", (sub.stdout or "").rstrip()]
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("report.txt", "\n".join(lines) + "\n")
+            z.writestr("doctor.json", json.dumps(facts, indent=2, default=str))
+            for rel in (LAST_UPDATE_FILE, MANIFEST_FILE, CONFIG_FILE):
+                f = self.project_dir / rel
+                if f.exists():
+                    z.write(f, rel)
+            log = self.project_dir / LAST_UPDATE_LOG
+            if log.exists():
+                tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-3000:]
+                z.writestr(LAST_UPDATE_LOG, "\n".join(tail) + "\n")
+            local = self._load_local_config()
+            if local:
+                z.writestr(LOCAL_CONFIG_FILE, json.dumps(_redact(local), indent=2))
+        return dest
 
     # -- board revision (ESP-IDF supplies a resolver; other platforms have none) --
 
@@ -2570,6 +2813,42 @@ def build_failure_where(log_tail: list[str], app_dirs: dict[str, str]) -> str:
     return "the firmware"
 
 
+# Known ways a build or a flash fails, in the words of the person at the
+# keyboard. First match wins; the pattern is searched in the last lines of
+# output. Same idea as idf.py's hints.yml, for the failures seen here.
+FAILURE_HINTS = (
+    (r"No space left on device|not enough space on the disk",
+     "The disk is full — free a few GB, then [r] retry"),
+    (r"Filename too long|path too long|filename or extension is too long|MAX_PATH",
+     "Windows path too long — move the project to a short folder like C:\\cp, "
+     "then [r] retry"),
+    (r"undefined reference to `?_register_\w+_app",
+     "An app changed without a clean build — [r] retry starts clean"),
+    (r"idf\.py: (command )?not found|'idf\.py' is not recognized",
+     "ESP-IDF isn't set up in this terminal → [3] Something's wrong"),
+    (r"No module named '?serial'?",
+     "The Python package pyserial is missing → [3] Something's wrong installs it"),
+    (r"Permission denied: '?/dev/tty",
+     "No permission for the USB port — Linux: sudo usermod -aG dialout $USER, "
+     "then log out and back in"),
+    (r"could not open port|Access is denied|Resource busy|port is busy",
+     "Another program holds the CrossPad's USB port — close serial monitors "
+     "and DAWs, then [r] retry"),
+    (r"fatal: not a git repository|does not appear to be a git repository",
+     "A component folder is broken → [2], open the app, Repair"),
+    (r"CMakeLists\.txt.*(No such file|does not exist)",
+     "A component is missing its files → [r] retry downloads it again"),
+)
+
+
+def explain_failure(log_tail: list[str]) -> str | None:
+    text = "\n".join(log_tail[-60:])
+    for pattern, hint in FAILURE_HINTS:
+        if _re.search(pattern, text, _re.IGNORECASE):
+            return hint
+    return None
+
+
 def error_line(step: str, reason: str, subject: str = "") -> str:
     table = {
         ("download", "offline"): "Can't reach GitHub — check your connection, then [r] retry",
@@ -2582,6 +2861,9 @@ def error_line(step: str, reason: str, subject: str = "") -> str:
         ("flash", "failed"): "Flash failed → [c] show the error   [r] retry",
         ("check", "mismatch"): "The board still runs the old {s} → [r] flash again",
         ("check", "no-answer"): "The board isn't answering after the flash → [r] retry   [3] Something's wrong",
+        ("build", "stopped"): "Stopped → [r] build again",
+        ("flash", "stopped"): "Flash stopped — if the board shows nothing, [r] flash again",
+        ("any", "stopped"): "Stopped → [r] start this step again",
     }
     return table.get((step, reason), f"{STEP_TITLES.get(step, step)} failed → [r] retry").replace("{s}", subject)
 
@@ -2615,6 +2897,9 @@ class UpdatePipeline:
 
     def retry_from(self, name: str) -> bool:
         started = datetime.now(timezone.utc)
+        reset = getattr(self.ui, "reset_cancel", None)
+        if reset is not None:
+            reset()
         log_path = self.mgr.project_dir / LAST_UPDATE_LOG
         log_path.parent.mkdir(parents=True, exist_ok=True)
         ok = True
@@ -2630,7 +2915,12 @@ class UpdatePipeline:
                 self._render()
                 t0 = time.time()
                 self.log.write(f"\n== {STEP_TITLES[s.name]} ==\n")
-                ok = getattr(self, f"_{s.name}")(s)
+                try:
+                    ok = getattr(self, f"_{s.name}")(s)
+                except KeyboardInterrupt:
+                    s.error = error_line(s.name, "stopped") if s.name in ("build", "flash") \
+                        else error_line("any", "stopped")
+                    ok = False
                 s.seconds = time.time() - t0
                 s.ok = ok
                 self._render()
@@ -2728,14 +3018,22 @@ class UpdatePipeline:
             cmd = ("cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build build"
                    if self.plan["fullclean"] else "cmake --build build")
         self.progress = None
-        rc = self.mgr.run_streaming(cmd, self._line, self.log)
+        rc = self.mgr.run_streaming(cmd, self._line, self.log,
+                                    cancel=getattr(self.ui, "poll_cancel", None))
+        if rc == AppManager.CANCELLED:
+            s.error = error_line("build", "stopped")
+            return False
         if rc == 127:
             s.error = error_line("build", "no-tools")
             return False
         if rc != 0:
+            hint = explain_failure(self.log_tail)
+            if hint and "clean build" in hint:
+                self.plan["fullclean"] = True
             dirs = {self.mgr.app_display_name(a): self.mgr.app_status(a)["path"]
                     for a in self.installed}
-            s.error = error_line("build", "failed", build_failure_where(self.log_tail, dirs))
+            s.error = hint or error_line("build", "failed",
+                                         build_failure_where(self.log_tail, dirs))
             return False
         s.detail = "firmware ready"
         return True
@@ -2768,7 +3066,8 @@ class UpdatePipeline:
                 return False
             rc = uart(rev, console, on_line)
         if rc != 0:
-            s.error = error_line("flash", "no-answer" if rc == 2 else "failed")
+            s.error = (explain_failure(self.log_tail)
+                       or error_line("flash", "no-answer" if rc == 2 else "failed"))
             return False
         s.detail = "done, the board is restarting"
         return True
@@ -2903,11 +3202,36 @@ def cli_main(config: PlatformConfig):
     prof_cmd.add_argument("--description", default="",
                           help="Description when saving")
     sub.add_parser("sync", help="Sync manifest with existing submodules")
-    sub.add_parser("tui", help="Interactive terminal UI")
+    tui_cmd = sub.add_parser("tui", help="Interactive terminal UI")
+    tui_cmd.add_argument("--plain", action="store_true",
+                         help="No colour, no full-screen redraw (screen readers)")
+    doctor_cmd = sub.add_parser("doctor", help="Check tools, board, network and "
+                                               "project folder; say how to fix each")
+    sub.add_parser("support", help="Save a zip with logs and findings for support")
+    for p_ in (list_cmd, status_cmd, doctor_cmd, sub.choices["device"]):
+        p_.add_argument("--json", action="store_true",
+                        help="Machine-readable output (schema_version 1)")
 
     args = parser.parse_args()
     mgr = AppManager(os.getcwd(), config)
 
+    if getattr(args, "json", False):
+        sys.exit(_json_cli(mgr, args))
+    if args.command == "doctor":
+        mgr._load_registry()          # a stale list is refreshed, and a dead network shows
+        rows = wrong_rows(mgr.doctor_facts())
+        for r in rows:
+            mark = {True: "OK ", False: "BAD", None: " ? "}[r["ok"]]
+            print(f"  [{mark}] {r['title']:<20} {r['detail']}")
+            if r["fix"] and r["ok"] is not True:
+                print(f"        {'':<20} -> {r['fix']}")
+        bad = [r for r in rows if r["ok"] is False]
+        print(f"\n  {'Ready.' if not bad else f'{len(bad)} thing(s) to fix.'}\n")
+        sys.exit(1 if bad else 0)
+    if args.command == "support":
+        print(f"Saved {mgr.support_bundle()}")
+        print("Send it on the CrossPad Discord (#support) with a line about what you were doing.")
+        return
     if args.command == "list":
         mgr.list_apps(show_all=args.all)
     elif args.command == "install":
@@ -2983,6 +3307,9 @@ def cli_main(config: PlatformConfig):
         mgr.sync()
         mgr.ensure_config(quiet=True)
     elif args.command == "tui" or args.command is None:
+        if getattr(args, "plain", False):
+            os.environ["CROSSPAD_PLAIN"] = "1"
+            _set_plain()
         if _is_interactive():
             tui_main(config)
         elif args.command is None:
@@ -2992,6 +3319,38 @@ def cli_main(config: PlatformConfig):
             sys.exit(1)
     else:
         parser.print_help()
+
+
+def _json_cli(mgr: "AppManager", args) -> int:
+    """`--json`: the same answers for scripts, CI and agents. Exit 0 on success."""
+    out: dict = {"schema_version": 1, "command": args.command}
+    rc = 0
+    if args.command == "doctor":
+        mgr._load_registry()
+        facts = mgr.doctor_facts()
+        out["rows"] = wrong_rows(facts)
+        out["facts"] = facts
+        rc = 1 if any(r["ok"] is False for r in out["rows"]) else 0
+    elif args.command == "status":
+        names = [args.app] if args.app else list(mgr._load_manifest().get("installed", {}))
+        out["apps"] = []
+        for a in names:
+            st = mgr.app_status(a)
+            rule, target = follow_rule(st["policy"])
+            out["apps"].append(dict(st, follows=rule, follows_target=target,
+                                    row=app_row(st, mgr.available(a),
+                                                a in mgr._load_registry().get("apps", {}))))
+    elif args.command == "list":
+        installed = mgr._load_manifest().get("installed", {})
+        out["apps"] = [dict(info, id=a, installed=a in installed,
+                            compatible=mgr._is_compatible(info))
+                       for a, info in mgr._load_registry().get("apps", {}).items()
+                       if args.all or mgr._is_compatible(info)]
+    elif args.command == "device":
+        out.update(mgr.device_diff())
+        rc = 0 if out.get("ok") and not out.get("stale") else 1
+    print(json.dumps(out, indent=2, default=str))
+    return rc
 
 
 def _config_cli(mgr: "AppManager", args):
@@ -3099,6 +3458,30 @@ def _profile_cli(mgr: "AppManager", args):
 #  Interactive TUI
 # =============================================================================
 
+def _redact(obj):
+    """Blank anything that looks like a secret before it leaves the machine."""
+    if isinstance(obj, dict):
+        return {k: ("***" if _re.search(r"token|secret|password|key", str(k), _re.I)
+                    else _redact(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact(v) for v in obj]
+    return obj
+
+
+def _kill_tree(proc: subprocess.Popen):
+    """Stop a shell=True child and everything it started (ninja, compilers)."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, check=False)
+        else:
+            import signal
+            os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        proc.kill()
+
+
 def _has_module(name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(name) is not None
@@ -3142,6 +3525,25 @@ class _C:
     BGCYAN = "\033[46m"
 
 
+# no-color.org: set and non-empty turns colour off. CROSSPAD_PLAIN goes
+# further for screen readers and logs: no colour, no full-screen redraw —
+# every screen is printed below the last one, as a stream a reader can follow.
+PLAIN = False
+
+
+def _set_plain():
+    global PLAIN
+    PLAIN = bool(os.environ.get("CROSSPAD_PLAIN"))
+    if PLAIN or os.environ.get("NO_COLOR"):
+        for name in [n for n in vars(_C) if n.isupper()]:
+            setattr(_C, name, "")
+    if PLAIN and "G" in globals():
+        G.update(G_ASCII)
+
+
+_set_plain()
+
+
 # -- glyphs ------------------------------------------------------------------
 #
 # Windows' classic console without a UTF-8 code page draws boxes for most of
@@ -3164,6 +3566,8 @@ def _console_utf8() -> bool:
 
 
 def _use_ascii() -> bool:
+    if os.environ.get("CROSSPAD_PLAIN"):
+        return True
     if sys.platform != "win32":
         return False
     if os.environ.get("WT_SESSION"):
@@ -3190,11 +3594,13 @@ def _enable_windows_vt():
 
 def _alt_screen_on():
     _enable_windows_vt()
-    _w("\033[?1049h\033[H")
+    if not PLAIN:
+        _w("\033[?1049h\033[H")
 
 
 def _alt_screen_off():
-    _w("\033[?1049l")
+    if not PLAIN:
+        _w("\033[?1049l")
 
 
 def _viewport(cursor: int, total: int, height: int) -> tuple[int, int]:
@@ -3224,15 +3630,17 @@ def _get_size() -> tuple[int, int]:
 
 
 def _clear():
-    _w("\033[2J\033[H")
+    _w("\n" + "=" * 40 + "\n" if PLAIN else "\033[2J\033[H")
 
 
 def _hide_cursor():
-    _w("\033[?25l")
+    if not PLAIN:
+        _w("\033[?25l")
 
 
 def _show_cursor():
-    _w("\033[?25h")
+    if not PLAIN:
+        _w("\033[?25h")
 
 
 # Terminal state management — raw mode breaks subprocess output
@@ -3352,6 +3760,15 @@ def _decode_key(ch: str) -> str:
 
 
 _resized = False
+_win_size: tuple | None = None
+
+# `?` on any screen: the TUI registers a hook; the title and key hints of the
+# screen on display are recorded as they are drawn, so the help can never
+# drift from what the screen actually offers.
+_help_hook = None
+_help_suspended = False
+_screen_title = ""
+_screen_hints = ""
 
 
 def _install_resize_handler():
@@ -3367,7 +3784,19 @@ def _install_resize_handler():
 
 
 def _read_key(timeout: float | None = None) -> str:
-    """One key, or "" after `timeout` seconds, or "resize" after SIGWINCH."""
+    """One key, or "" after `timeout` seconds, or "resize" after SIGWINCH.
+
+    `?` opens the help for the screen on display and reads as "resize", so
+    whatever loop asked redraws itself afterwards.
+    """
+    key = _read_key_raw(timeout)
+    if key == "?" and _help_hook is not None and not _help_suspended:
+        _help_hook(_screen_title, _screen_hints)
+        return "resize"
+    return key
+
+
+def _read_key_raw(timeout: float | None = None) -> str:
     global _resized
     if _raw_mode:
         deadline = None if timeout is None else time.time() + timeout
@@ -3394,12 +3823,19 @@ def _read_key(timeout: float | None = None) -> str:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
     except (ImportError, OSError):
         import msvcrt
-        if timeout is not None:
-            deadline = time.time() + timeout
-            while not msvcrt.kbhit():
-                if time.time() >= deadline:
-                    return ""
-                time.sleep(0.05)
+        # No SIGWINCH on Windows: poll the size while waiting, so a resized
+        # console redraws at once instead of on the next key.
+        global _win_size
+        deadline = None if timeout is None else time.time() + timeout
+        while not msvcrt.kbhit():
+            size = _get_size()
+            if _win_size is not None and size != _win_size:
+                _win_size = size
+                return "resize"
+            _win_size = size
+            if deadline is not None and time.time() >= deadline:
+                return ""
+            time.sleep(0.05)
         ch = msvcrt.getch()
         if ch in (b"\xe0", b"\x00"):
             ch2 = msvcrt.getch()
@@ -3447,7 +3883,16 @@ def _confirm(prompt: str) -> bool:
 
 
 def _text_input(prompt: str, default: str = "") -> str | None:
-    """Single-line text input. Returns None on cancel."""
+    """Single-line text input. Returns None on cancel. `?` is just a character here."""
+    global _help_suspended
+    _help_suspended = True
+    try:
+        return _text_input_loop(prompt, default)
+    finally:
+        _help_suspended = False
+
+
+def _text_input_loop(prompt: str, default: str) -> str | None:
     buf = list(default)
     _show_cursor()
     while True:
@@ -3472,9 +3917,11 @@ def _menu_select(title: str, items: list[str],
                  descriptions: list[str] = None,
                  hotkeys: list[str] = None) -> int:
     """Arrow-key menu. Returns selected index or -1."""
+    global _screen_title, _screen_hints
     cursor = 0
     while True:
         _clear()
+        _screen_title, _screen_hints = title, "[Enter] select   [q] back"
         _w(f"\n  {_C.BCYAN}{title}{_C.RST}\n")
         _w(f"  {_C.GRAY}{'─' * (_get_size()[0] - 4)}{_C.RST}\n\n")
         for i, item in enumerate(items):
@@ -3485,7 +3932,7 @@ def _menu_select(title: str, items: list[str],
             else:
                 _w(f"    {item}\n")
         _w(f"\n  {_C.GRAY}[arrows] navigate  "
-           f"[enter] select  [q/esc] back{_C.RST}\n")
+           f"[enter] select  [q/esc] back  [?] help{_C.RST}\n")
         key = _read_key()
         if key == "up":
             cursor = (cursor - 1) % len(items)
@@ -3543,7 +3990,9 @@ class _PipelineUI:
             _w(line + (f"{_C.BRED}{detail}{_C.RST}" if s.error else
                        f"{_C.GRAY if s.ok is None else ''}{detail[:w - 28]}{_C.RST}") + "\n")
         _w(f"\n {_C.DIM}{tail[:w - 4]}{_C.RST}\n")
-        _w(f"\n{' ' * max(w - 14, 0)}{_C.GRAY}[q] cancel{_C.RST}\n")
+        global _screen_hints
+        _screen_hints = "[q] stop the step that is running (Ctrl+C does the same)"
+        _w(f"\n{' ' * max(w - 14, 0)}{_C.GRAY}[q] stop{_C.RST}\n")
 
     def ask_local_work(self, app_name: str) -> str:
         _w(f"\n {_C.BYELLOW}{app_name} has changes you made.{_C.RST}\n")
@@ -3580,6 +4029,15 @@ class _PipelineUI:
     def cancelled(self) -> bool:
         return self._cancel
 
+    def poll_cancel(self) -> bool:
+        """Non-blocking: was [q] pressed while a step runs?"""
+        if _read_key(timeout=0) in ("q", "esc"):
+            self._cancel = True
+        return self._cancel
+
+    def reset_cancel(self):
+        self._cancel = False
+
 
 # -- Main TUI class -----------------------------------------------------------
 
@@ -3613,6 +4071,7 @@ class _TUI:
                 "board": self.mgr.board_info(refresh=True) or {},
                 "device": self.mgr.device_probe(),
                 "gh_ok": gh_ok, "gh_user": gh_user,
+                "git_ok": shutil.which("git") is not None,
                 "idf_path": (self.mgr._find_idf_path()
                              if self.config.platform == "esp-idf" else "-"),
             }
@@ -3658,8 +4117,10 @@ class _TUI:
         missing = []
         if self.config.platform == "esp-idf" and not env["idf_path"]:
             missing.append("ESP-IDF is not installed")
-        if not env["gh_ok"]:
-            missing.append("gh is not signed in")
+        if not env["git_ok"]:
+            missing.append("git is not installed")
+        if self.mgr.cert_problem:
+            missing.append("Python can't verify GitHub's certificate")
         can_flash = getattr(self.config, "flash_ota", None) is not None
         return {"board_rev": b.get("rev"), "fw_rev": b.get("fw_rev"),
                 "mismatch": bool(b.get("mismatch")), "updates": updates,
@@ -3688,6 +4149,8 @@ class _TUI:
         return _get_size()[0]
 
     def run(self):
+        global _help_hook
+        _help_hook = self._help
         _alt_screen_on()
         _save_terminal()
         _hide_cursor()
@@ -3757,6 +4220,8 @@ class _TUI:
     # -- rendering helpers ----------------------------------------------------
 
     def _header(self, title: str, right: str = ""):
+        global _screen_title
+        _screen_title = title
         w = self._cols
         _w(f"\n  {_C.BCYAN}{title}{_C.RST}")
         if right:
@@ -3771,7 +4236,39 @@ class _TUI:
            f"{_C.GRAY}{'─' * max(pad, 2)}{_C.RST}\n")
 
     def _footer(self, hints: str):
-        _w(f"\n  {_C.GRAY}{hints}{_C.RST}\n")
+        global _screen_hints
+        _screen_hints = hints
+        _w(f"\n  {_C.GRAY}{hints}   [?] help{_C.RST}\n")
+
+    def _help(self, title: str, hints: str):
+        """What `?` shows: this screen's keys, the rules everywhere, the marks."""
+        _clear()
+        self._header(f"Help — {title}" if title else "Help")
+        keys = [h.strip() for h in _re.split(r"\s{3,}", hints) if h.strip()]
+        if keys:
+            self._section("Keys on this screen")
+            for k in keys:
+                _w(f"   {k}\n")
+        self._section("Everywhere")
+        for k, what in (("↑ ↓", "move — arrows and numbers always work, letters are shortcuts"),
+                        ("Enter", "do the highlighted thing"),
+                        ("q or Esc", "one screen back (on the first screen: quit)"),
+                        ("?", "this help"),
+                        ("Ctrl+C", "stops a running build or flash, not the whole tool")):
+            _w(f"   {_C.BCYAN}{k:<10}{_C.RST} {what}\n")
+        self._section("What the marks mean")
+        _w(f"   {G['ok']} fine   {G['fail']} needs you   {G['warn']} worth a look   "
+           f"{G['next']} next / working   {G['dot_on']} installed   {G['dot_off']} not installed\n")
+        self._section("If the screen is hard to read")
+        _w("   NO_COLOR=1         no colours\n"
+           "   CROSSPAD_PLAIN=1   plain text, one screen after another (screen readers)\n")
+        _w(f"\n  {_C.GRAY}Any key: back{_C.RST}")
+        global _help_suspended
+        _help_suspended = True
+        try:
+            _read_key_blocking()
+        finally:
+            _help_suspended = False
 
     def _open_url(self, url: str):
         try:
@@ -3844,7 +4341,12 @@ class _TUI:
                f"{_C.BCYAN}[2]{_C.RST} Add or remove apps\n")
             _w(f" {_C.BCYAN}[3]{_C.RST} Something's wrong      "
                f"{_C.BCYAN}[4]{_C.RST} Developer tools\n")
-            _w(f" {_C.BCYAN}[q]{_C.RST} Quit\n")
+            _w(f" {_C.BCYAN}[q]{_C.RST} Quit                   {_C.BCYAN}[?]{_C.RST} Help\n")
+            global _screen_hints
+            _screen_hints = ("[1] Update my CrossPad — download, build, flash, check   "
+                             "[2] Add or remove apps, or pick a version   "
+                             "[3] Something's wrong — every check, with its fix   "
+                             "[4] Developer tools   [q] Quit")
 
             # Everything below returns to a dashboard drawn from what we
             # already know; the refresh happens at the top of the next pass,
@@ -3880,8 +4382,11 @@ class _TUI:
                 _w(f"\n {_C.BGREEN}{G['ok']} Your CrossPad is up to date.{_C.RST}"
                    f"   {_C.GRAY}[q] back{_C.RST}\n")
             else:
-                _w(f"\n {_C.GRAY}[r] retry from {STEP_TITLES[failed.name] if failed else 'the start'}"
-                   f"   [c] show the error   [3] Something's wrong   [q] back{_C.RST}\n")
+                global _screen_hints
+                _screen_hints = (f"[r] retry from {STEP_TITLES[failed.name] if failed else 'the start'}"
+                                 f"   [c] show the error   [s] save a report for support"
+                                 f"   [3] Something's wrong   [q] back")
+                _w(f"\n {_C.GRAY}{_screen_hints}   [?] help{_C.RST}\n")
             key = _read_key()
             if key in ("q", "esc", "ctrl-c", "enter") and (ok or key != "enter"):
                 return
@@ -3889,6 +4394,8 @@ class _TUI:
                 ok = pipe.retry_from(failed.name)
             elif key == "c":
                 self._show_log_tail()
+            elif key == "s" and not ok:
+                self._support_flow()
             elif key == "3":
                 self._something_wrong()
 
@@ -3986,20 +4493,8 @@ class _TUI:
 
     def _wrong_facts(self) -> dict:
         env = self._env(force=True)
-        dev = env["device"]
-        guard = self.mgr.cdc_verb("USB_GUARD", timeout=2.0) if dev else None
-        if guard:
-            guard = "1" if guard.strip().endswith("1") else "0" if guard.strip().endswith("0") else None
-        local = self.mgr._load_local_config()
-        return {"device": dev, "board": env["board"],
-                "idf_path": env["idf_path"],
-                "gh_ok": env["gh_ok"], "gh_user": env["gh_user"],
-                "python": ".".join(map(str, sys.version_info[:3])),
-                "usb_guard": guard, "registry_age": self.mgr.get_cache_age(),
-                "last_update": self.mgr.last_update(),
-                "offline": self.mgr.offline,
-                "pyserial": _has_module("serial"),
-                "remembered_board": local.get("board")}
+        return self.mgr.doctor_facts(device=env["device"],
+                                     gh=(env["gh_ok"], env["gh_user"]))
 
     def _something_wrong(self):
         cursor = 0
@@ -4018,6 +4513,7 @@ class _TUI:
                 if r["fix"] and r["ok"] is not True:
                     _w(f"      {' ' * 22} {_C.BCYAN}{r['fix']}{_C.RST}\n")
             self._footer("↑↓ pick   [Enter] do it   [l] open last update log   "
+                         "[s] save a report for support   "
                          "[f] flash again via cable (board won't answer)   [q] back")
             key = _read_key()
             if key in ("q", "esc", "ctrl-c"):
@@ -4028,6 +4524,8 @@ class _TUI:
                 cursor = (cursor + 1) % len(rows)
             elif key == "l":
                 self._show_log_tail()
+            elif key == "s":
+                self._support_flow(facts)
             elif key == "f":
                 self._recover_flow()
                 facts = self._wrong_facts()
@@ -4055,6 +4553,22 @@ class _TUI:
                 elif action == "log":
                     self._show_log_tail()
                 facts = self._wrong_facts()
+
+    def _support_flow(self, facts: dict | None = None):
+        _clear()
+        self._header("Report for support")
+        _w(f"\n  {_C.GRAY}Collecting…{_C.RST}\n")
+        path = self.mgr.support_bundle(facts)
+        _clear()
+        self._header("Report for support")
+        _w(f"\n  Saved: {_C.BWHITE}{path}{_C.RST}\n\n"
+           f"  It holds the last update's log, which apps you have and what this\n"
+           f"  screen found — no passwords, no tokens.\n\n"
+           f"  Send it on the CrossPad Discord (#support) with one line about what\n"
+           f"  you were doing.\n")
+        self._footer("[o] open the folder   any other key: back")
+        if _read_key_blocking() == "o":
+            self._open_url(str(path.parent))
 
     def _recover_flow(self):
         uart = getattr(self.config, "flash_uart", None)
