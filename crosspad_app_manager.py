@@ -881,14 +881,21 @@ class AppManager:
         idf_path = self._find_idf_path()
         if not idf_path:
             return cmd
+        # An ESP-IDF installed by EIM or the VS Code extension keeps its tools
+        # elsewhere than ~/.espressif; the installer records where.
+        tools = self._load_local_config().get("idf_tools_path", "")
         if sys.platform == "win32":
             export = os.path.join(idf_path, "export.bat")
-            return f'call "{export}" >nul 2>&1 && {cmd}' if os.path.exists(export) else cmd
+            if not os.path.exists(export):
+                return cmd
+            env = f'set "IDF_TOOLS_PATH={tools}" && ' if tools else ""
+            return f'{env}call "{export}" >nul 2>&1 && {cmd}'
         export = os.path.join(idf_path, "export.sh")
         if not os.path.exists(export):
             return cmd
-        return (f"export IDF_PATH={idf_path} IDF_PATH_FORCE=1 && "
-                f". {export} > /dev/null 2>&1 && {cmd}")
+        env = f"export IDF_TOOLS_PATH='{tools}' && " if tools else ""
+        return (f"{env}export IDF_PATH='{idf_path}' IDF_PATH_FORCE=1 && "
+                f". '{export}' > /dev/null 2>&1 && {cmd}")
 
     CANCELLED = -2
 

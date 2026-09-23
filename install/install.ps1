@@ -11,8 +11,10 @@
 # Options (environment variables):
 #   CROSSPAD_DIR=C:\CrossPad       where the project goes (short, no spaces)
 #   CROSSPAD_BRANCH=crosspad_v20   which branch of CrossPad/platform-idf
-#   CROSSPAD_IDF_DIR=C:\esp\esp-idf
-#   CROSSPAD_YES=1                 answer yes to every question
+#   CROSSPAD_IDF_DIR=C:\esp\esp-idf   (default: an ESP-IDF 5.5 already here, else this)
+#   CROSSPAD_YES=1                 answer yes to every question (extras stay off)
+#   CROSSPAD_WITH_PC=1             also set up the PC simulator (C:\CrossPad-PC)
+#   CROSSPAD_WITH_ARDUINO=1        also set up the Arduino version (C:\CrossPad-Arduino)
 #   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_VSCODE=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
 
 $ErrorActionPreference = "Continue"
@@ -25,6 +27,12 @@ $IdfDir      = Env-Or "CROSSPAD_IDF_DIR" "C:\esp\esp-idf"
 $IdfTools    = "C:\esp\.espressif"           # short, ASCII-only: user names break ESP-IDF tools
 $IdfVersion  = "v5.5.5"
 $Repo        = "CrossPad/platform-idf"
+$PcDir       = Env-Or "CROSSPAD_PC_DIR" "C:\CrossPad-PC"
+$PcBranch    = Env-Or "CROSSPAD_PC_BRANCH" "master"
+$ArduinoDir  = Env-Or "CROSSPAD_ARDUINO_DIR" "C:\CrossPad-Arduino"
+$ArduinoBranch = Env-Or "CROSSPAD_ARDUINO_BRANCH" "main"
+$WithPc      = [bool]$env:CROSSPAD_WITH_PC
+$WithArduino = [bool]$env:CROSSPAD_WITH_ARDUINO
 $Steps = 10; $script:StepNo = 0; $script:Failed = @()
 
 function Step($title, $what) { $script:StepNo++; Write-Host ""; Write-Host "Step $($script:StepNo) of ${Steps}: $title" -ForegroundColor White; if ($what) { Write-Host "  $what" -ForegroundColor DarkGray } }
@@ -33,6 +41,7 @@ function Bad($t, $fix) { Write-Host "  [X]  $t" -ForegroundColor Red; if ($fix) 
 function Note($t) { Write-Host "  $t" -ForegroundColor DarkGray }
 function Have($c) { [bool](Get-Command $c -ErrorAction SilentlyContinue) }
 function Ask($q) { if ($env:CROSSPAD_YES) { return $true }; $r = Read-Host "  $q [Y/n]"; return -not ($r -match '^(n|no)$') }
+function Ask-No($q) { if ($env:CROSSPAD_YES) { return $false }; $r = Read-Host "  $q [y/N]"; return ($r -match '^(y|yes|t|tak)$') }
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
 }
@@ -64,6 +73,14 @@ Write-Host "It takes 15-30 minutes the first time (mostly downloading), a minute
 Write-Host "Project folder: $CrossPadDir"
 if (($CrossPadDir + $IdfDir) -match ' ') { Bad "The folders must not contain spaces (ESP-IDF cannot build there)" "set CROSSPAD_DIR to a path without spaces"; exit 1 }
 $tmp = Join-Path $env:TEMP "crosspad-setup"; New-Item -ItemType Directory -Force $tmp | Out-Null
+if (-not ($WithPc -or $WithArduino) -and -not $env:CROSSPAD_YES) {
+    Write-Host ""
+    Write-Host "Optional - answer now, then you can leave it running:"
+    $WithPc = Ask-No "Also set up the PC simulator (the CrossPad on this computer's screen)?"
+    $WithArduino = Ask-No "Also set up the Arduino (PlatformIO) version of the firmware?"
+}
+if ($WithPc) { $Steps++ }
+if ($WithArduino) { $Steps++ }
 
 # ---------------------------------------------------------------------------
 Step "Basic tools" "git and Python 3"
@@ -150,39 +167,128 @@ git -C $CrossPadDir submodule update --init --recursive
 if ($LASTEXITCODE -eq 0) { Ok "project and its components" } else { Bad "some components did not download" "run this again" }
 
 # ---------------------------------------------------------------------------
-Step "ESP-IDF $IdfVersion" "the compiler for the CrossPad's chip - about 15 minutes the first time"
-[Environment]::SetEnvironmentVariable("IDF_TOOLS_PATH", $IdfTools, "User"); $env:IDF_TOOLS_PATH = $IdfTools
-function Idf-Ok { cmd /c "call `"$IdfDir\export.bat`" >nul 2>&1 && idf.py --version >nul 2>&1"; return $LASTEXITCODE -eq 0 }
-if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.git")) {
-    $aside = "$IdfDir.broken-$(Get-Date -Format yyyyMMdd-HHmmss)"
-    Note "$IdfDir is not a working ESP-IDF - moving it to $aside"
-    Move-Item $IdfDir $aside
+Step "ESP-IDF 5.5" "the compiler for the CrossPad's chip - about 15 minutes the first time"
+# An ESP-IDF 5.5 that is already here (EIM, the VS Code extension, a manual
+# install) is used as it is. One of another version is left alone and 5.5 goes
+# next to it. Only an ESP-IDF this installer made itself is ever repaired.
+# IDF_TOOLS_PATH is set per command, never for the whole account: another
+# ESP-IDF on this machine keeps working the way it did.
+$findIdfPy = @'
+import glob, json, os, re, sys
+# Every ESP-IDF already on this machine, the one to use first.
+# Prints JSON: {"use": {path, tools, version} or null, "others": ["5.3.1 at …", …]}
+home = os.path.expanduser("~")
+want = sys.argv[1] if len(sys.argv) > 1 else "5.5"
+found = []
+
+
+def version(path):
+    try:
+        text = open(os.path.join(path, "tools", "cmake", "version.cmake"), encoding="utf-8").read()
+    except OSError:
+        return None
+    parts = [re.search(r"IDF_VERSION_%s\s+(\d+)" % k, text) for k in ("MAJOR", "MINOR", "PATCH")]
+    return ".".join(m.group(1) for m in parts) if all(parts) else None
+
+
+def add(path, tools=None):
+    if not path:
+        return
+    path = os.path.normpath(os.path.expanduser(path))
+    if any(os.path.normcase(f[0]) == os.path.normcase(path) for f in found):
+        return
+    v = version(path)
+    if v:
+        found.append((path, tools, v))
+
+
+add(os.environ.get("IDF_PATH"), os.environ.get("IDF_TOOLS_PATH"))
+# The IDE / EIM records: esp_idf.json (VS Code extension, EIM) and eim_idf.json.
+for tools_dir in (os.environ.get("IDF_TOOLS_PATH"), os.path.join(home, ".espressif"),
+                  "C:/Espressif/tools", "C:/Espressif", "C:/esp/.espressif"):
+    for name in ("esp_idf.json", "eim_idf.json"):
+        try:
+            cfg = json.load(open(os.path.join(tools_dir or "", name), encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        installed = cfg.get("idfInstalled") or {}
+        entries = installed.values() if isinstance(installed, dict) else installed
+        selected = installed.get(cfg.get("idfSelectedId")) if isinstance(installed, dict) else None
+        for e in ([selected] if selected else []) + list(entries):
+            if isinstance(e, dict):
+                add(e.get("path"), cfg.get("idfToolsPath") or tools_dir)
+# Where people and installers usually put it.
+for pattern in ("~/esp/esp-idf", "~/esp/v*/esp-idf", "~/esp/esp-idf-v*", "~/.espressif/v*/esp-idf",
+                "/opt/esp-idf", "/opt/esp/idf", "C:/esp/esp-idf", "C:/esp/esp-idf-v*",
+                "C:/Espressif/frameworks/esp-idf-v*", "~/esp-idf"):
+    for p in sorted(glob.glob(os.path.expanduser(pattern)), reverse=True):
+        add(p)
+# The VS Code ESP-IDF extension's own setting.
+for settings in ("~/.config/Code/User/settings.json",
+                 "~/Library/Application Support/Code/User/settings.json",
+                 os.path.join(os.environ.get("APPDATA", ""), "Code", "User", "settings.json")):
+    try:
+        s = json.load(open(os.path.expanduser(settings), encoding="utf-8"))
+    except (OSError, ValueError):
+        continue
+    add(s.get("idf.espIdfPathWin") if os.name == "nt" else s.get("idf.espIdfPath"),
+        s.get("idf.toolsPathWin") if os.name == "nt" else s.get("idf.toolsPath"))
+
+good = [f for f in found if f[2] == want or f[2].startswith(want + ".")]
+use = max(good, key=lambda f: [int(x) for x in f[2].split(".")]) if good else None
+print(json.dumps({
+    "use": {"path": use[0], "tools": use[1] or os.environ.get("IDF_TOOLS_PATH")
+            or os.path.join(home, ".espressif"), "version": use[2]} if use else None,
+    "others": [f"{v} at {p}" for p, _, v in found if not use or p != use[0]]}))
+'@
+$ownIdf = $true
+if (-not $env:CROSSPAD_IDF_DIR) {
+    $findIdfPy | Set-Content -Encoding UTF8 "$tmp\find_idf.py"
+    $found = (& python "$tmp\find_idf.py" 5.5) | ConvertFrom-Json
+    if ($found.use) {
+        $IdfDir = $found.use.path; $IdfTools = $found.use.tools
+        if (-not (Test-Path "$IdfDir\.crosspad-installed")) {
+            $ownIdf = $false
+            Note "found your ESP-IDF $($found.use.version) at $IdfDir - using it as it is"
+        }
+    } else {
+        if ($found.others) { Note "found ESP-IDF $($found.others -join '; ') - CrossPad needs 5.5; it goes next to them, yours stay as they are" }
+        if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.crosspad-installed")) { $IdfDir = "C:\esp\esp-idf-v5.5" }
+    }
 }
-if (-not (Test-Path $IdfDir)) {
-    New-Item -ItemType Directory -Force (Split-Path $IdfDir) | Out-Null
-    git -c advice.detachedHead=false clone --quiet --depth 1 --branch $IdfVersion --recursive --shallow-submodules https://github.com/espressif/esp-idf $IdfDir
-    if ($LASTEXITCODE -ne 0) { Bad "ESP-IDF download failed" "check the connection and run this again"; exit 1 }
-}
-$haveVer = git -C $IdfDir describe --tags 2>$null
-if ($haveVer -notlike "v5.5*") {
-    Note "found ESP-IDF $haveVer; CrossPad needs 5.5 - using $IdfVersion"
-    git -C $IdfDir fetch --quiet --depth 1 origin tag $IdfVersion
-    git -C $IdfDir checkout --quiet $IdfVersion
-    git -C $IdfDir submodule update --quiet --init --recursive --depth 1
+$env:IDF_TOOLS_PATH = $IdfTools
+function Idf-Ok { cmd /c "set `"IDF_TOOLS_PATH=$IdfTools`" && call `"$IdfDir\export.bat`" >nul 2>&1 && idf.py --version >nul 2>&1"; return $LASTEXITCODE -eq 0 }
+if ($ownIdf) {
+    if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.git")) {
+        $aside = "$IdfDir.broken-$(Get-Date -Format yyyyMMdd-HHmmss)"
+        Note "$IdfDir is not a working ESP-IDF - moving it to $aside"
+        Move-Item $IdfDir $aside
+    }
+    if (-not (Test-Path $IdfDir)) {
+        New-Item -ItemType Directory -Force (Split-Path $IdfDir) | Out-Null
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch $IdfVersion --recursive --shallow-submodules https://github.com/espressif/esp-idf $IdfDir
+        if ($LASTEXITCODE -ne 0) { Bad "ESP-IDF download failed" "check the connection and run this again"; exit 1 }
+        New-Item -ItemType File -Force "$IdfDir\.crosspad-installed" | Out-Null
+    }
 }
 $idfLog = "$tmp\idf-install.log"
 if (-not (Idf-Ok)) {
-    # Deleted or edited files inside ESP-IDF come back from its own git first.
-    git -C $IdfDir checkout --quiet -- . 2>$null
-    git -C $IdfDir submodule update --quiet --init --recursive --depth 1 2>$null
+    if ($ownIdf) {
+        # Deleted or edited files inside our ESP-IDF come back from its own git.
+        git -C $IdfDir checkout --quiet -- . 2>$null
+        git -C $IdfDir submodule update --quiet --init --recursive --depth 1 2>$null
+    }
+    # install.bat only adds what is missing - safe on someone else's ESP-IDF too.
     cmd /c "`"$IdfDir\install.bat`" esp32s3" *> $idfLog
-    if (-not (Idf-Ok)) {
+    if (-not (Idf-Ok) -and $ownIdf) {
         # A broken Python environment is the usual culprit; build it again.
         Remove-Item -Recurse -Force "$IdfTools\python_env\idf5.5_*" -ErrorAction SilentlyContinue
         cmd /c "`"$IdfDir\install.bat`" esp32s3" *>> $idfLog
     }
 }
-if (Idf-Ok) { Ok "ESP-IDF $(git -C $IdfDir describe --tags)" } else { Bad "ESP-IDF did not install" "the details are in $idfLog - send it on Discord (#support)" }
+if (Idf-Ok) { Ok "ESP-IDF $(git -C $IdfDir describe --tags 2>$null) at $IdfDir" }
+elseif (-not $ownIdf) { Bad "your ESP-IDF at $IdfDir does not start" "repair it with the tool you installed it with, or set CROSSPAD_IDF_DIR=C:\esp\crosspad-idf and run this again for a separate one" }
+else { Bad "ESP-IDF did not install" "the details are in $idfLog - send it on Discord (#support)" }
 
 # ---------------------------------------------------------------------------
 Step "USB access" "Windows has the drivers built in"
@@ -332,6 +438,71 @@ if ($env:CROSSPAD_NO_MCP) { Note "skipped" } else {
 }
 
 # ---------------------------------------------------------------------------
+# A second repository next to the project (PC simulator, Arduino version):
+# cloned once, then fast-forwarded when it carries nothing of yours.
+function Clone-Or-Update($dir, $repo, $branch) {
+    if ((Test-Path $dir) -and -not (Test-Path "$dir\.git")) { Move-Item $dir "$dir.broken-$(Get-Date -Format yyyyMMdd-HHmmss)" }
+    if (-not (Test-Path $dir)) {
+        git clone --quiet --branch $branch "https://github.com/$repo" $dir
+        if ($LASTEXITCODE -ne 0) { return $false }
+    } else {
+        $changes = git -C $dir status --porcelain --ignore-submodules --untracked-files=no
+        if (-not $changes) { git -C $dir pull --quiet --ff-only }
+    }
+    git -C $dir submodule update --quiet --init --recursive
+    return $LASTEXITCODE -eq 0
+}
+
+if ($WithPc) {
+    Step "PC simulator" "the CrossPad on this computer's screen - Visual Studio's C++ tools and SDL2, about 20 minutes"
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    function Find-Vcvars { if (Test-Path $vswhere) { & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find "VC\Auxiliary\Build\vcvarsall.bat" | Select-Object -First 1 } }
+    if (-not (Find-Vcvars)) {
+        Note "Installing Visual Studio's C++ build tools (Windows asks once for permission)..."
+        winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --silent --accept-package-agreements --accept-source-agreements `
+            --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended" *> "$tmp\vs-buildtools.log"
+    }
+    $vcvars = Find-Vcvars
+    if (-not $vcvars) { Bad "Visual Studio's C++ build tools did not install" "details in $tmp\vs-buildtools.log" } else {
+        Ok "C++ build tools"
+        if (-not (Test-Path "C:\vcpkg\vcpkg.exe")) {
+            if (-not (Test-Path "C:\vcpkg")) { git clone --quiet https://github.com/microsoft/vcpkg C:\vcpkg }
+            cmd /c "C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics" *> "$tmp\vcpkg.log"
+        }
+        cmd /c "C:\vcpkg\vcpkg.exe install sdl2:x64-windows" *>> "$tmp\vcpkg.log"
+        if ($LASTEXITCODE -eq 0) { Ok "SDL2 (vcpkg)" } else { Bad "SDL2 did not install" "details in $tmp\vcpkg.log" }
+        if (Clone-Or-Update $PcDir "CrossPad/crosspad-pc" $PcBranch) {
+            Ok "crosspad-pc in $PcDir"
+            # build.bat names Visual Studio Community; vswhere finds any edition.
+            cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_FREERTOS=ON && cmake --build build" *> "$tmp\pc-build.log"
+            if (Test-Path "$PcDir\bin\CrossPad.exe") { Ok "the simulator is built - start it with: crosspad-sim" }
+            else { Bad "the PC simulator did not build" "details in $tmp\pc-build.log - send it on Discord (#support)" }
+        } else { Bad "crosspad-pc did not download" "check the connection and run this again" }
+    }
+}
+
+if ($WithArduino) {
+    Step "Arduino version" "PlatformIO and the Arduino firmware - about 10 minutes"
+    $pio = "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe"
+    if (-not (Test-Path $pio)) {
+        # PlatformIO's own installer: a private Python environment, no admin.
+        Download "https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py" "$tmp\get-platformio.py"
+        & python "$tmp\get-platformio.py" *> "$tmp\pio-install.log"
+    }
+    if (Test-Path $pio) {
+        Ok "PlatformIO $((& $pio --version) -replace '.* ','')"
+        if (Clone-Or-Update $ArduinoDir "CrossPad/ESP32-S3" $ArduinoBranch) {
+            Ok "ESP32-S3 (Arduino) in $ArduinoDir"
+            Push-Location $ArduinoDir
+            & $pio run -e crosspad_rev2 *> "$tmp\arduino-build.log"
+            $built = $LASTEXITCODE -eq 0
+            Pop-Location
+            if ($built) { Ok "the Arduino firmware builds" } else { Bad "the Arduino firmware did not build" "details in $tmp\arduino-build.log" }
+        } else { Bad "the Arduino project did not download" "it needs access to CrossPad/ESP32-S3 - ask on Discord" }
+    } else { Bad "PlatformIO did not install" "details in $tmp\pio-install.log" }
+}
+
+# ---------------------------------------------------------------------------
 Step "CP Tools" "a desktop shortcut, cptools and the crosspad-* commands in any terminal"
 # One small .cmd per command: each sets up ESP-IDF itself, so nobody has to
 # remember export.bat or a path into tools\. They live in the project's bin\,
@@ -353,6 +524,12 @@ Shim "crosspad-bench" "python `"$CrossPadDir\tools\bench.py`""
 Shim "crosspad-board" "python `"$CrossPadDir\tools\crosspad_board.py`""
 Shim "crosspad-idf" "idf.py -C `"$CrossPadDir`""
 if (Test-Path "$CrossPadDir\.venv\Scripts\crosspad-hil.exe") { Shim "crosspad-hil" "`"$CrossPadDir\.venv\Scripts\crosspad-hil.exe`"" }
+if (Test-Path "$PcDir\bin\CrossPad.exe") {   # the simulator runs from its own folder
+    "@echo off`r`nrem crosspad-sim - written by the CrossPad installer`r`ncd /d `"$PcDir`" && bin\CrossPad.exe %*" | Set-Content -Encoding ASCII "$bin\crosspad-sim.cmd"
+}
+if (Test-Path "$PcDir\scripts") { Shim "crosspad-pc" "python `"$PcDir\scripts\app_manager.py`"" }
+if (Test-Path "$ArduinoDir\scripts") { Shim "crosspad-arduino" "python `"$ArduinoDir\scripts\app_manager.py`"" }
+if (Test-Path "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe") { Shim "pio" "`"$env:USERPROFILE\.platformio\penv\Scripts\pio.exe`"" }
 # cptools with no arguments opens the TUI.
 @"
 @echo off
@@ -365,7 +542,7 @@ $launcher = "$bin\cptools.cmd"
 Copy-Item $launcher "$CrossPadDir\cptools.cmd" -Force     # the path older shortcuts point at
 # Python edits the personal config: it keeps every other key (Windows
 # PowerShell 5.1 cannot round-trip JSON into a hashtable).
-& python -c "import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); c=json.loads(p.read_text()) if p.exists() else {}; c['idf_path']=sys.argv[2]; p.write_text(json.dumps(c, indent=2)+chr(10))" "$CrossPadDir\crosspad.local.json" $IdfDir
+& python -c "import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); c=json.loads(p.read_text()) if p.exists() else {}; c['idf_path']=sys.argv[2]; c['idf_tools_path']=sys.argv[3]; p.write_text(json.dumps(c, indent=2)+chr(10))" "$CrossPadDir\crosspad.local.json" $IdfDir $IdfTools
 Add-UserPath $bin
 Ok "$((Get-ChildItem $bin -Name) -replace '\.cmd$','' -join ' ') - from any new terminal"
 try {
@@ -383,7 +560,7 @@ foreach ($t in @("git", "python", "gh", "code", "node", "npx") + ((Get-ChildItem
     $found = powershell -NoProfile -Command "[bool](Get-Command $t -ErrorAction SilentlyContinue)"
     if ($found -eq "True") { Ok "$t is on PATH" } else { Bad "$t is not on PATH in a new terminal" "open a new terminal and run this installer again" }
 }
-cmd /c "set IDF_TOOLS_PATH=$IdfTools&& call `"$IdfDir\export.bat`" >nul 2>&1 && idf.py --version >nul 2>&1"
+cmd /c "set `"IDF_TOOLS_PATH=$IdfTools`" && call `"$IdfDir\export.bat`" >nul 2>&1 && idf.py --version >nul 2>&1"
 if ($LASTEXITCODE -eq 0) { Ok "idf.py works inside cptools" } else { Bad "idf.py does not start" "run this installer again" }
 # The doctor's view of the whole setup. A board that is not plugged in yet is
 # not an installation problem, so only this script's own steps decide below.
