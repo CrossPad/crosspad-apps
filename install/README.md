@@ -46,8 +46,12 @@ Next time it remembers you.
 
 ### 4. Wait while the steps tick by
 
-The installer works through 8 steps. Each one ends with a green **[OK]**. The
-longest is step 4, ESP-IDF — about 15 minutes. You can leave the window alone.
+The installer works through 10 steps. Each one ends with a green **[OK]**. The
+longest is step 4, ESP-IDF — about 15 minutes. It also installs **VS Code**
+(with the ESP-IDF extension and the CP Tools buttons) and **Node.js** with the
+CrossPad tools for AI assistants, and checks at the end that `git`, `python`,
+`gh`, `code`, `node` and `cptools` all work in a new terminal. You can leave
+the window alone.
 
 ![Steps 1 and 2 finished with [OK], step 3 working](img/win-3-steps.png)
 
@@ -142,7 +146,7 @@ Set these before running the install line:
 | `CROSSPAD_BRANCH` | `crosspad_v20` | branch of CrossPad/platform-idf |
 | `CROSSPAD_IDF_DIR` | `C:\esp\esp-idf`, `~/esp/esp-idf` | where ESP-IDF goes |
 | `CROSSPAD_YES=1` | | answer yes to every question |
-| `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, the AI-assistant tools, or opening CP Tools at the end |
+| `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_VSCODE=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, VS Code, the AI-assistant tools, or opening CP Tools at the end |
 
 Windows installs everything for your user only (no administrator needed) and
 keeps to short folders, because ESP-IDF cannot build in paths with spaces or

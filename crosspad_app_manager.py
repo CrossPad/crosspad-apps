@@ -3693,6 +3693,45 @@ class _capture_stdout:
         sys.stdout = self._old
 
 
+class _PrintUI:
+    """UpdatePipeline without a screen: one line per step change, for scripts,
+    CI, agents and the installer's own check. Never asks: local work is left
+    alone, the first board is used, a missing board revision stops Build."""
+
+    def __init__(self):
+        self._seen: dict = {}
+
+    def render(self, steps, tail, progress):
+        for st in steps:
+            state = (st.ok, st.error or st.detail)
+            if self._seen.get(st.name) == state or st.ok is None and st.detail != "…":
+                continue
+            self._seen[st.name] = state
+            mark = {True: "OK ", False: "BAD", None: "..."}[st.ok]
+            print(f"  [{mark}] {STEP_TITLES[st.name]:<20} {st.error or st.detail}", flush=True)
+
+    def ask_local_work(self, app_name: str) -> str:
+        print(f"  {app_name} has changes you made — left alone", flush=True)
+        return "leave"
+
+    def ask_board(self, revs):
+        return None
+
+    def ask_device(self, devices):
+        return devices[0].get("id") if devices else None
+
+    def wait_for_board(self, probe) -> bool:
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if probe() is not None:
+                return True
+            time.sleep(2)
+        return False
+
+    def cancelled(self) -> bool:
+        return False
+
+
 # == Standalone CLI ===========================================================
 
 def cli_main(config: PlatformConfig):
@@ -3805,6 +3844,8 @@ def cli_main(config: PlatformConfig):
     doctor_cmd = sub.add_parser("doctor", help="Check tools, board, network and "
                                                "project folder; say how to fix each")
     sub.add_parser("support", help="Save a zip with logs and findings for support")
+    sub.add_parser("update-board", help="What [1] Update my CrossPad does, without a "
+                                         "screen: download, build, flash, check")
     for p_ in (list_cmd, status_cmd, doctor_cmd, sub.choices["device"]):
         p_.add_argument("--json", action="store_true",
                         help="Machine-readable output (schema_version 1)")
@@ -3825,6 +3866,11 @@ def cli_main(config: PlatformConfig):
         bad = [r for r in rows if r["ok"] is False]
         print(f"\n  {'Ready.' if not bad else f'{len(bad)} thing(s) to fix.'}\n")
         sys.exit(1 if bad else 0)
+    if args.command == "update-board":
+        print(f"Update my CrossPad ({config.platform})", flush=True)
+        ok = UpdatePipeline(mgr, _PrintUI()).run()
+        print(f"\n  {'Your CrossPad is up to date.' if ok else 'Stopped — see above; the full log is ' + LAST_UPDATE_LOG}")
+        sys.exit(0 if ok else 1)
     if args.command == "support":
         print(f"Saved {mgr.support_bundle()}")
         print("Send it on the CrossPad Discord (#support) with a line about what you were doing.")

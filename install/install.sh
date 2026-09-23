@@ -14,7 +14,8 @@
 #   CROSSPAD_BRANCH=crosspad_v20   which branch of CrossPad/platform-idf
 #   CROSSPAD_IDF_DIR=~/esp/esp-idf where ESP-IDF goes
 #   CROSSPAD_YES=1                 answer yes to every question
-#   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1   skip those parts
+#   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_VSCODE=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
+#                                  skip the test tools, VS Code, the AI tools, opening CP Tools
 
 set -u
 
@@ -25,7 +26,7 @@ IDF_DIR="${CROSSPAD_IDF_DIR:-$HOME/esp/esp-idf}"
 IDF_VERSION="v5.5.5"          # what CI builds with
 IDF_TARGET="esp32s3"
 
-STEPS=8
+STEPS=10
 step_no=0
 failed=()
 
@@ -261,50 +262,189 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "AI assistant tools (optional)" "the CrossPad MCP server, for Claude Code"
-if [ -n "${CROSSPAD_NO_MCP:-}" ]; then
+step "VS Code" "the editor, with the ESP-IDF extension and the CP Tools buttons"
+vscode_settings() {   # write this machine's real paths into .vscode/settings.json (merged)
+    python3 - "$CROSSPAD_DIR" "$IDF_DIR" "$HOME/.espressif" <<'PY'
+import json, pathlib, re, sys
+proj, idf, tools = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+vs = proj / ".vscode"
+envs = sorted((p.name for p in (pathlib.Path(tools) / "python_env").glob("idf*_env")), reverse=True)
+py = f"{tools}/python_env/{envs[0]}/bin/python" if envs else "python3"
+settings = {}
+tpl = vs / "settings.template.json"
+if tpl.exists():
+    settings = json.loads(re.sub(r"@@IDF_PYTHON_ENV@@", envs[0] if envs else "", tpl.read_text()))
+out = vs / "settings.json"
+if out.exists():
+    try:
+        settings.update(json.loads(out.read_text()))
+    except ValueError:
+        pass
+settings.update({"idf.espIdfPath": idf, "idf.currentSetup": idf, "idf.toolsPath": tools,
+                 "idf.pythonBinPath": py})
+vs.mkdir(exist_ok=True)
+out.write_text(json.dumps(settings, indent=4) + "\n")
+PY
+}
+if [ -n "${CROSSPAD_NO_VSCODE:-}" ]; then
     note "skipped"
-elif have claude && have npx; then
-    if claude mcp get crosspad >/dev/null 2>&1; then
-        ok "Claude Code already knows the CrossPad tools"
-    elif claude mcp add --scope user crosspad -- npx -y crosspad-mcp-server >/dev/null 2>&1; then
-        ok "added to Claude Code"
-    else
-        note "could not add it — run: claude mcp add crosspad -- npx -y crosspad-mcp-server"
-    fi
 else
-    note "Claude Code or Node.js is not installed — nothing to set up (add later: claude mcp add crosspad -- npx -y crosspad-mcp-server)"
+    if ! have code; then
+        if [ "$os" = "Darwin" ] && have brew; then
+            brew install -q --cask visual-studio-code >/dev/null 2>&1
+        elif [ "$pkg" = "apt" ]; then
+            note "Installing VS Code from Microsoft's package repository."
+            install_pkgs gpg -- gnupg2 -- gnupg -- gpg2 >/dev/null 2>&1
+            $SUDO mkdir -p -m 755 /etc/apt/keyrings
+            wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor \
+                | $SUDO tee /etc/apt/keyrings/packages.microsoft.gpg >/dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
+                | $SUDO tee /etc/apt/sources.list.d/vscode.list >/dev/null
+            install_pkgs code >/dev/null 2>&1
+        elif [ "$pkg" = "dnf" ]; then
+            note "Installing VS Code from Microsoft's package repository."
+            $SUDO rpm --import https://packages.microsoft.com/keys/microsoft.asc
+            printf '[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n' \
+                | $SUDO tee /etc/yum.repos.d/vscode.repo >/dev/null
+            $SUDO dnf install -y -q code >/dev/null 2>&1
+        elif have snap; then
+            $SUDO snap install --classic code >/dev/null 2>&1
+        fi
+    fi
+    if have code; then
+        code --install-extension espressif.esp-idf-extension --install-extension ms-vscode.cpptools \
+             --install-extension spencerwmiles.vscode-task-buttons --force >/tmp/crosspad-vscode.log 2>&1 \
+            && ok "VS Code with the ESP-IDF, C/C++ and task-button extensions" \
+            || bad "VS Code extensions did not install" "details in /tmp/crosspad-vscode.log"
+        vscode_settings && ok "VS Code settings point at ESP-IDF ($IDF_DIR)"
+    else
+        bad "VS Code did not install" "get it from https://code.visualstudio.com and run this again"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
-step "CP Tools" "a launcher, then a check of everything"
+step "AI assistant tools" "Node.js and the CrossPad MCP server, for VS Code and Claude Code"
+mcp_config() {   # .vscode/mcp.json, merged: the server knows this project and ESP-IDF
+    python3 - "$CROSSPAD_DIR" "$IDF_DIR" <<'PY'
+import json, pathlib, sys
+proj, idf = pathlib.Path(sys.argv[1]), sys.argv[2]
+out = proj / ".vscode" / "mcp.json"
+cfg = {}
+if out.exists():
+    try:
+        cfg = json.loads(out.read_text())
+    except ValueError:
+        pass
+cfg.setdefault("servers", {})["crosspad"] = {
+    "type": "stdio", "command": "npx", "args": ["-y", "crosspad-mcp-server"],
+    "env": {"CROSSPAD_IDF_ROOT": str(proj), "IDF_PATH": idf}}
+out.parent.mkdir(exist_ok=True)
+out.write_text(json.dumps(cfg, indent=4) + "\n")
+PY
+}
+mcp_answers() {   # start the server the way an editor does and ask for its tools
+    python3 - "$CROSSPAD_DIR" "$IDF_DIR" <<'PY'
+import json, os, subprocess, sys
+env = dict(os.environ, CROSSPAD_IDF_ROOT=sys.argv[1], IDF_PATH=sys.argv[2])
+msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "crosspad-installer", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
+try:
+    p = subprocess.run(["npx", "-y", "crosspad-mcp-server"], env=env, timeout=240,
+                       input="".join(json.dumps(m) + "\n" for m in msgs),
+                       capture_output=True, text=True)
+except (OSError, subprocess.TimeoutExpired):
+    sys.exit(1)
+for line in p.stdout.splitlines():
+    try:
+        msg = json.loads(line)
+    except ValueError:
+        continue
+    if msg.get("id") == 2:
+        print(len(msg.get("result", {}).get("tools", [])))
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+node_ok() { have node && node -e 'process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)' 2>/dev/null; }
+if [ -n "${CROSSPAD_NO_MCP:-}" ]; then
+    note "skipped"
+else
+    if ! node_ok; then
+        if [ "$os" = "Darwin" ] && have brew; then brew install -q node >/dev/null 2>&1
+        else install_pkgs nodejs npm -- nodejs npm -- nodejs npm -- nodejs npm >/dev/null 2>&1; fi
+    fi
+    if node_ok && have npx; then
+        ok "Node.js $(node --version)"
+        mcp_config && ok "VS Code knows the CrossPad MCP server (.vscode/mcp.json)"
+        if have claude; then
+            claude mcp get crosspad >/dev/null 2>&1 \
+                || claude mcp add --scope user crosspad -e "CROSSPAD_IDF_ROOT=$CROSSPAD_DIR" \
+                       -e "IDF_PATH=$IDF_DIR" -- npx -y crosspad-mcp-server >/dev/null 2>&1
+            claude mcp get crosspad >/dev/null 2>&1 && ok "Claude Code knows it too"
+        fi
+        if n=$(mcp_answers); then ok "the MCP server starts and offers $n tools"
+        else bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server — and send what it prints on Discord (#support)"; fi
+    else
+        bad "Node.js 18 or newer is missing" "install it from https://nodejs.org and run this again"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+step "CP Tools" "a launcher you can start from any terminal"
 launcher="$CROSSPAD_DIR/cptools"
-cat > "$launcher" <<EOF
-#!/usr/bin/env bash
-# CP Tools launcher, written by the CrossPad installer. Run: $launcher [doctor|support|tui]
-cd "$CROSSPAD_DIR" || exit 1
-. "$IDF_DIR/export.sh" >/dev/null 2>&1
-exec python3 tools/app_manager.py "\${@:-tui}"
-EOF
+{
+    echo '#!/usr/bin/env bash'
+    echo '# CP Tools launcher, written by the CrossPad installer. Run: cptools [doctor|support|update-board|tui]'
+    echo "cd \"$CROSSPAD_DIR\" || exit 1"
+    echo ". \"$IDF_DIR/export.sh\" >/dev/null 2>&1"
+    echo 'exec python3 tools/app_manager.py "${@:-tui}"'
+} > "$launcher"
 chmod +x "$launcher"
-python3 - "$CROSSPAD_DIR/crosspad.local.json" "$IDF_DIR" <<'EOF'
-import json, sys, pathlib
+python3 -c 'import json, sys, pathlib
 p = pathlib.Path(sys.argv[1])
 try:
     cfg = json.loads(p.read_text())
 except (OSError, ValueError):
     cfg = {}
 cfg["idf_path"] = sys.argv[2]
-p.write_text(json.dumps(cfg, indent=2) + "\n")
-EOF
-ok "launcher: $launcher"
+p.write_text(json.dumps(cfg, indent=2) + "\n")' "$CROSSPAD_DIR/crosspad.local.json" "$IDF_DIR"
+mkdir -p "$HOME/.local/bin"
+ln -sf "$launcher" "$HOME/.local/bin/cptools"
+if ! bash -lc 'command -v cptools' >/dev/null 2>&1; then
+    # ~/.local/bin is not on a login PATH yet (macOS, some distributions).
+    rcs="$HOME/.profile"
+    [ "$os" = "Darwin" ] && rcs="$HOME/.profile $HOME/.zprofile"
+    for rc in $rcs; do
+        grep -qs 'HOME/.local/bin' "$rc" || printf '\nexport PATH="$HOME/.local/bin:$PATH"   # CrossPad\n' >> "$rc"
+    done
+fi
+ok "cptools — from any new terminal"
+
+# ---------------------------------------------------------------------------
+step "Final check" "in a new terminal, the way you will use it"
+for t in git python3 gh code node npx cptools; do
+    case "$t" in
+        code) [ -n "${CROSSPAD_NO_VSCODE:-}" ] && continue ;;
+        node|npx) [ -n "${CROSSPAD_NO_MCP:-}" ] && continue ;;
+    esac
+    if bash -lc "command -v $t" >/dev/null 2>&1; then ok "$t is on PATH"
+    else bad "$t is not on PATH in a new terminal" "open a new terminal and run this installer again"; fi
+done
+if bash -lc ". '$IDF_DIR/export.sh' >/dev/null 2>&1 && idf.py --version" >/dev/null 2>&1; then
+    ok "idf.py works inside cptools"
+else
+    bad "idf.py does not start" "run this installer again"
+fi
 # The doctor's view of the whole setup. A board that is not plugged in yet is
 # not an installation problem, so only this script's own steps decide below.
-"$launcher" doctor
+bash -lc 'cptools doctor'
 
 printf '\n'
 if [ ${#failed[@]} -eq 0 ]; then
-    printf '%sAll set.%s Next time, open CP Tools with:  %s\n' "$green" "$off" "$launcher"
+    printf '%sAll set.%s Next time, open a terminal and type:  cptools\n' "$green" "$off"
     printf 'Plug your CrossPad in with a USB cable before [1] Update my CrossPad.\n'
 else
     printf '%sAlmost:%s the lines marked ✗ above say what is left.\n' "$yellow" "$off"

@@ -13,7 +13,7 @@
 #   CROSSPAD_BRANCH=crosspad_v20   which branch of CrossPad/platform-idf
 #   CROSSPAD_IDF_DIR=C:\esp\esp-idf
 #   CROSSPAD_YES=1                 answer yes to every question
-#   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
+#   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_VSCODE=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"      # Invoke-WebRequest is 10x slower with the bar
@@ -25,7 +25,7 @@ $IdfDir      = Env-Or "CROSSPAD_IDF_DIR" "C:\esp\esp-idf"
 $IdfTools    = "C:\esp\.espressif"           # short, ASCII-only: user names break ESP-IDF tools
 $IdfVersion  = "v5.5.5"
 $Repo        = "CrossPad/platform-idf"
-$Steps = 8; $script:StepNo = 0; $script:Failed = @()
+$Steps = 10; $script:StepNo = 0; $script:Failed = @()
 
 function Step($title, $what) { $script:StepNo++; Write-Host ""; Write-Host "Step $($script:StepNo) of ${Steps}: $title" -ForegroundColor White; if ($what) { Write-Host "  $what" -ForegroundColor DarkGray } }
 function Ok($t)  { Write-Host "  [OK] $t" -ForegroundColor Green }
@@ -203,20 +203,130 @@ if ($env:CROSSPAD_NO_HIL) { Note "skipped" } else {
 }
 
 # ---------------------------------------------------------------------------
-Step "AI assistant tools (optional)" "the CrossPad MCP server, for Claude Code"
-if ($env:CROSSPAD_NO_MCP) { Note "skipped" }
-elseif ((Have claude) -and (Have npx)) {
-    claude mcp get crosspad *> $null
-    if ($LASTEXITCODE -eq 0) { Ok "Claude Code already knows the CrossPad tools" }
-    else { claude mcp add --scope user crosspad -- npx -y crosspad-mcp-server *> $null; if ($LASTEXITCODE -eq 0) { Ok "added to Claude Code" } else { Note "run: claude mcp add crosspad -- npx -y crosspad-mcp-server" } }
-} else { Note "Claude Code or Node.js is not installed - nothing to set up (add later: claude mcp add crosspad -- npx -y crosspad-mcp-server)" }
+Step "VS Code" "the editor, with the ESP-IDF extension and the CP Tools buttons"
+# This machine's real paths into .vscode\settings.json (kept, merged): the
+# template in the repository names Linux paths.
+$vsSettingsPy = @'
+import json, pathlib, re, sys
+proj, idf, tools = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+vs = proj / ".vscode"
+envs = sorted((p.name for p in (pathlib.Path(tools) / "python_env").glob("idf*_env")), reverse=True)
+py = str(pathlib.Path(tools) / "python_env" / envs[0] / "Scripts" / "python.exe") if envs else "python"
+settings = {}
+tpl = vs / "settings.template.json"
+if tpl.exists():
+    settings = json.loads(re.sub(r"@@IDF_PYTHON_ENV@@", envs[0] if envs else "", tpl.read_text()))
+out = vs / "settings.json"
+if out.exists():
+    try:
+        settings.update(json.loads(out.read_text()))
+    except ValueError:
+        pass
+settings.update({"idf.espIdfPath": idf, "idf.currentSetup": idf, "idf.toolsPath": tools,
+                 "idf.pythonBinPath": py})
+vs.mkdir(exist_ok=True)
+out.write_text(json.dumps(settings, indent=4) + "\n")
+'@
+if ($env:CROSSPAD_NO_VSCODE) { Note "skipped" } else {
+    if (-not (Have code)) {
+        Note "Installing VS Code..."
+        if (-not (Winget-Install "Microsoft.VisualStudioCode") -or -not (Have code)) {
+            Download "https://update.code.visualstudio.com/latest/win32-x64-user/stable" "$tmp\vscode.exe"
+            Start-Process "$tmp\vscode.exe" -Wait -ArgumentList "/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode,addtopath"
+            Refresh-Path
+            if (-not (Have code)) { Add-UserPath "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin" }
+        }
+    }
+    if (Have code) {
+        cmd /c "code --install-extension espressif.esp-idf-extension --install-extension ms-vscode.cpptools --install-extension spencerwmiles.vscode-task-buttons --force" *> "$tmp\vscode.log"
+        if ($LASTEXITCODE -eq 0) { Ok "VS Code with the ESP-IDF, C/C++ and task-button extensions" }
+        else { Bad "VS Code extensions did not install" "details in $tmp\vscode.log" }
+        $vsSettingsPy | Set-Content -Encoding UTF8 "$tmp\vscode_settings.py"
+        & python "$tmp\vscode_settings.py" $CrossPadDir $IdfDir $IdfTools
+        if ($LASTEXITCODE -eq 0) { Ok "VS Code settings point at ESP-IDF ($IdfDir)" }
+    } else { Bad "VS Code did not install" "get it from https://code.visualstudio.com and run this again" }
+}
 
 # ---------------------------------------------------------------------------
-Step "CP Tools" "a launcher on the desktop, then a check of everything"
+Step "AI assistant tools" "Node.js and the CrossPad MCP server, for VS Code and Claude Code"
+$mcpConfigPy = @'
+import json, pathlib, sys
+proj, idf = pathlib.Path(sys.argv[1]), sys.argv[2]
+out = proj / ".vscode" / "mcp.json"
+cfg = {}
+if out.exists():
+    try:
+        cfg = json.loads(out.read_text())
+    except ValueError:
+        pass
+cfg.setdefault("servers", {})["crosspad"] = {
+    "type": "stdio", "command": "npx", "args": ["-y", "crosspad-mcp-server"],
+    "env": {"CROSSPAD_IDF_ROOT": str(proj), "IDF_PATH": idf}}
+out.parent.mkdir(exist_ok=True)
+out.write_text(json.dumps(cfg, indent=4) + "\n")
+'@
+# Start the server the way an editor does and ask for its tools.
+$mcpAnswersPy = @'
+import json, os, shutil, subprocess, sys
+env = dict(os.environ, CROSSPAD_IDF_ROOT=sys.argv[1], IDF_PATH=sys.argv[2])
+msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "crosspad-installer", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
+npx = shutil.which("npx") or "npx"
+try:
+    p = subprocess.run([npx, "-y", "crosspad-mcp-server"], env=env, timeout=240,
+                       input="".join(json.dumps(m) + "\n" for m in msgs),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+except (OSError, subprocess.TimeoutExpired):
+    sys.exit(1)
+for line in p.stdout.splitlines():
+    try:
+        msg = json.loads(line)
+    except ValueError:
+        continue
+    if msg.get("id") == 2:
+        print(len(msg.get("result", {}).get("tools", [])))
+        sys.exit(0)
+sys.exit(1)
+'@
+function Node-Ok { if (-not (Have node)) { return $false }; node -e "process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)" 2>$null; return $LASTEXITCODE -eq 0 }
+if ($env:CROSSPAD_NO_MCP) { Note "skipped" } else {
+    if (-not (Node-Ok)) {
+        Note "Installing Node.js..."
+        if (-not (Winget-Install "OpenJS.NodeJS.LTS") -or -not (Node-Ok)) {
+            $idx = Invoke-RestMethod "https://nodejs.org/dist/index.json"
+            $ver = ($idx | Where-Object { $_.lts } | Select-Object -First 1).version
+            Download "https://nodejs.org/dist/$ver/node-$ver-win-x64.zip" "$tmp\node.zip"
+            Expand-Archive -Force "$tmp\node.zip" "$env:LOCALAPPDATA"
+            Add-UserPath "$env:LOCALAPPDATA\node-$ver-win-x64"
+        }
+    }
+    if ((Node-Ok) -and (Have npx)) {
+        Ok "Node.js $(node --version)"
+        $mcpConfigPy | Set-Content -Encoding UTF8 "$tmp\mcp_config.py"
+        & python "$tmp\mcp_config.py" $CrossPadDir $IdfDir
+        if ($LASTEXITCODE -eq 0) { Ok "VS Code knows the CrossPad MCP server (.vscode\mcp.json)" }
+        if (Have claude) {
+            claude mcp get crosspad *> $null
+            if ($LASTEXITCODE -ne 0) { claude mcp add --scope user crosspad -e "CROSSPAD_IDF_ROOT=$CrossPadDir" -e "IDF_PATH=$IdfDir" -- npx -y crosspad-mcp-server *> $null }
+            claude mcp get crosspad *> $null
+            if ($LASTEXITCODE -eq 0) { Ok "Claude Code knows it too" }
+        }
+        $mcpAnswersPy | Set-Content -Encoding UTF8 "$tmp\mcp_answers.py"
+        $n = & python "$tmp\mcp_answers.py" $CrossPadDir $IdfDir
+        if ($LASTEXITCODE -eq 0) { Ok "the MCP server starts and offers $n tools" }
+        else { Bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server - and send what it prints on Discord (#support)" }
+    } else { Bad "Node.js 18 or newer is missing" "install it from https://nodejs.org and run this again" }
+}
+
+# ---------------------------------------------------------------------------
+Step "CP Tools" "a desktop shortcut, and 'cptools' in any terminal"
 $launcher = "$CrossPadDir\cptools.cmd"
 @"
 @echo off
-rem CP Tools launcher, written by the CrossPad installer. Run: cptools [doctor^|support^|tui]
+rem CP Tools launcher, written by the CrossPad installer. Run: cptools [doctor^|support^|update-board^|tui]
 cd /d "$CrossPadDir"
 set IDF_TOOLS_PATH=$IdfTools
 call "$IdfDir\export.bat" >nul 2>&1
@@ -225,18 +335,32 @@ if "%~1"=="" (python tools\app_manager.py tui) else (python tools\app_manager.py
 # Python edits the personal config: it keeps every other key (Windows
 # PowerShell 5.1 cannot round-trip JSON into a hashtable).
 & python -c "import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); c=json.loads(p.read_text()) if p.exists() else {}; c['idf_path']=sys.argv[2]; p.write_text(json.dumps(c, indent=2)+chr(10))" "$CrossPadDir\crosspad.local.json" $IdfDir
+Add-UserPath $CrossPadDir
+Ok "cptools - from any new terminal"
 try {
     $sh = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\CP Tools.lnk")
     $sh.TargetPath = $launcher; $sh.WorkingDirectory = $CrossPadDir; $sh.Save()
     Ok "desktop shortcut 'CP Tools'"
 } catch { Note "no desktop shortcut - open $launcher instead" }
+
+# ---------------------------------------------------------------------------
+Step "Final check" "in a new terminal, the way you will use it"
+Refresh-Path              # exactly the PATH a new window gets from the registry
+foreach ($t in "git", "python", "gh", "code", "node", "npx", "cptools") {
+    if ($t -eq "code" -and $env:CROSSPAD_NO_VSCODE) { continue }
+    if (($t -eq "node" -or $t -eq "npx") -and $env:CROSSPAD_NO_MCP) { continue }
+    $found = powershell -NoProfile -Command "[bool](Get-Command $t -ErrorAction SilentlyContinue)"
+    if ($found -eq "True") { Ok "$t is on PATH" } else { Bad "$t is not on PATH in a new terminal" "open a new terminal and run this installer again" }
+}
+cmd /c "set IDF_TOOLS_PATH=$IdfTools&& call `"$IdfDir\export.bat`" >nul 2>&1 && idf.py --version >nul 2>&1"
+if ($LASTEXITCODE -eq 0) { Ok "idf.py works inside cptools" } else { Bad "idf.py does not start" "run this installer again" }
 # The doctor's view of the whole setup. A board that is not plugged in yet is
 # not an installation problem, so only this script's own steps decide below.
-cmd /c "`"$launcher`" doctor"
+cmd /c "cptools doctor"
 
 Write-Host ""
 if ($script:Failed.Count -eq 0) {
-    Write-Host "All set. Next time, open 'CP Tools' on the desktop." -ForegroundColor Green
+    Write-Host "All set. Next time, open 'CP Tools' on the desktop, or type cptools in a terminal." -ForegroundColor Green
     Write-Host "Plug your CrossPad in with a USB cable before [1] Update my CrossPad."
 } else {
     Write-Host "Almost: the lines marked [X] above say what is left." -ForegroundColor Yellow

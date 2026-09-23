@@ -289,3 +289,13 @@ def test_a_checkout_that_differs_from_the_release_builds(tmp_path):
     p = cam.UpdatePipeline(mgr, FakeUI())
     assert p.run() is True and any(c[0] == "run" for c in mgr.calls)
     assert "crosspad-sampler is on another version" in (tmp_path / cam.LAST_UPDATE_LOG).read_text()
+
+
+def test_the_screenless_ui_prints_each_step_once_and_never_asks(tmp_path, capsys):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    assert cam.UpdatePipeline(mgr, cam._PrintUI()).run() is True
+    out = capsys.readouterr().out
+    for title in ("Download updates", "Firmware components", "Build", "Flash", "Check"):
+        assert out.count(f"[OK ] {title}") == 1, out
+    assert "Dawcontrol has changes you made — left alone" in out
