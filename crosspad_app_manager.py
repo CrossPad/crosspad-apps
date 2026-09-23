@@ -3698,6 +3698,13 @@ class _capture_stdout:
 def cli_main(config: PlatformConfig):
     """Generic CLI entry point for any platform."""
     import argparse
+    # Windows writes redirected output (a log, a pipe) in the ANSI code page:
+    # an arrow in a message used to end `doctor` with UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
     parser = argparse.ArgumentParser(
         prog="crosspad-apps",
