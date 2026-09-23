@@ -216,14 +216,16 @@ try {
     $sh.TargetPath = $launcher; $sh.WorkingDirectory = $CrossPadDir; $sh.Save()
     Ok "desktop shortcut 'CP Tools'"
 } catch { Note "no desktop shortcut - open $launcher instead" }
+# The doctor's view of the whole setup. A board that is not plugged in yet is
+# not an installation problem, so only this script's own steps decide below.
 cmd /c "`"$launcher`" doctor"
-$doctorRc = $LASTEXITCODE
 
 Write-Host ""
-if ($script:Failed.Count -eq 0 -and $doctorRc -eq 0) {
+if ($script:Failed.Count -eq 0) {
     Write-Host "All set. Next time, open 'CP Tools' on the desktop." -ForegroundColor Green
+    Write-Host "Plug your CrossPad in with a USB cable before [1] Update my CrossPad."
 } else {
-    Write-Host "Almost: the lines marked [X] / BAD above say what is left." -ForegroundColor Yellow
+    Write-Host "Almost: the lines marked [X] above say what is left." -ForegroundColor Yellow
     Write-Host "Run this installer again after fixing them - it only redoes what is missing."
 }
 if (-not $env:CROSSPAD_NO_TUI) { Write-Host "Opening CP Tools..."; cmd /c "`"$launcher`"" }

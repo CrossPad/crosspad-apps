@@ -285,14 +285,16 @@ cfg["idf_path"] = sys.argv[2]
 p.write_text(json.dumps(cfg, indent=2) + "\n")
 EOF
 ok "launcher: $launcher"
+# The doctor's view of the whole setup. A board that is not plugged in yet is
+# not an installation problem, so only this script's own steps decide below.
 "$launcher" doctor
-doctor_rc=$?
 
 printf '\n'
-if [ ${#failed[@]} -eq 0 ] && [ $doctor_rc -eq 0 ]; then
+if [ ${#failed[@]} -eq 0 ]; then
     printf '%sAll set.%s Next time, open CP Tools with:  %s\n' "$green" "$off" "$launcher"
+    printf 'Plug your CrossPad in with a USB cable before [1] Update my CrossPad.\n'
 else
-    printf '%sAlmost:%s the lines marked ✗ / BAD above say what is left.\n' "$yellow" "$off"
+    printf '%sAlmost:%s the lines marked ✗ above say what is left.\n' "$yellow" "$off"
     printf 'Run this installer again after fixing them — it only redoes what is missing.\n'
 fi
 if [ -z "${CROSSPAD_NO_TUI:-}" ] && [ -t 1 ] && [ -e /dev/tty ]; then
