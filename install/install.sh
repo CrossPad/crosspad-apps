@@ -567,7 +567,11 @@ if [ -n "$WITH_ARDUINO" ]; then
         ok "PlatformIO $("$PIO" --version 2>/dev/null | awk '{print $NF}')"
         if clone_or_update "$ARDUINO_DIR" "CrossPad/ESP32-S3" "$ARDUINO_BRANCH"; then
             ok "ESP32-S3 (Arduino) in $ARDUINO_DIR"
-            if (cd "$ARDUINO_DIR" && "$PIO" run -e crosspad_rev2) >/tmp/crosspad-arduino-build.log 2>&1; then
+            # crosspad_v2 is the 2.0 board; crosspad_rev2 is the older 1.9 one,
+            # and the only one a branch without crosspad_v2 knows.
+            pio_env=crosspad_rev2
+            grep -q '^\[env:crosspad_v2\]' "$ARDUINO_DIR/platformio.ini" 2>/dev/null && pio_env=crosspad_v2
+            if (cd "$ARDUINO_DIR" && "$PIO" run -e "$pio_env") >/tmp/crosspad-arduino-build.log 2>&1; then
                 ok "the Arduino firmware builds"
             else
                 bad "the Arduino firmware did not build" "details in /tmp/crosspad-arduino-build.log"

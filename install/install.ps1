@@ -494,7 +494,10 @@ if ($WithArduino) {
         if (Clone-Or-Update $ArduinoDir "CrossPad/ESP32-S3" $ArduinoBranch) {
             Ok "ESP32-S3 (Arduino) in $ArduinoDir"
             Push-Location $ArduinoDir
-            & $pio run -e crosspad_rev2 *> "$tmp\arduino-build.log"
+            # crosspad_v2 is the 2.0 board; crosspad_rev2 is the older 1.9 one,
+            # and the only one a branch without crosspad_v2 knows.
+            $pioEnv = if (Select-String -Quiet -Pattern '^\[env:crosspad_v2\]' "$ArduinoDir\platformio.ini") { "crosspad_v2" } else { "crosspad_rev2" }
+            & $pio run -e $pioEnv *> "$tmp\arduino-build.log"
             $built = $LASTEXITCODE -eq 0
             Pop-Location
             if ($built) { Ok "the Arduino firmware builds" } else { Bad "the Arduino firmware did not build" "details in $tmp\arduino-build.log" }
