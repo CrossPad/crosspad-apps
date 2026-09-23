@@ -1276,11 +1276,21 @@ class AppManager:
         """
         st = self.app_status(app_id)
         path = st["path"]
-        if st["git"]["exists"] and (self.project_dir / path / ".git").exists():
+        folder = self.project_dir / path
+        modules = self.project_dir / ".git" / "modules" / path
+        if st["git"]["exists"] and (folder / ".git").exists():
             self.backup_app(app_id)
+        if not fresh and folder.exists() and not (folder / ".git").exists():
+            if modules.exists():
+                # The folder lost only its pointer to the repository git keeps
+                # under .git/modules; put it back (git on Windows will not).
+                rel = os.path.relpath(modules, folder).replace(os.sep, "/")
+                (folder / ".git").write_text(f"gitdir: {rel}\n")
+            else:
+                fresh = True
         if fresh:
-            shutil.rmtree(self.project_dir / path, ignore_errors=True)
-            shutil.rmtree(self.project_dir / ".git" / "modules" / path, ignore_errors=True)
+            shutil.rmtree(folder, ignore_errors=True)
+            shutil.rmtree(modules, ignore_errors=True)
         r = self._git("submodule", "update", "--init", "--force", "--", path,
                       check=False, capture=True)
         if r.returncode != 0:
