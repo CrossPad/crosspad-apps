@@ -97,7 +97,7 @@ Mouse: the wheel scrolls, clicking a `[key]` label presses it
 
 ### Prerequisites
 
-The installer above sets them up. By hand: **Git**, **Python 3.9+**, and for
+The installer above sets them up. By hand: **Git**, **Python 3.10+**, and for
 ESP-IDF, ESP-IDF 5.5. The GitHub CLI (`gh`, signed in) is needed only to
 clone the private platform repository and to publish your own apps —
 reading the catalog and updating public apps needs no account.

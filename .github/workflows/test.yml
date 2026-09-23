@@ -1,8 +1,8 @@
 name: Tests
 
 # The manager runs on whatever Python and terminal a musician has: every
-# push is checked on the three systems, at the oldest Python ESP-IDF 5.5
-# accepts and a current one. The installers are parsed on their own systems.
+# push is checked on the three systems, at the oldest Python the manager
+# supports (3.10: `X | None` in signatures) and a current one. The installers are parsed on their own systems.
 on:
   push:
     paths: ['crosspad_app_manager.py', 'tests/**', 'install/**', '.github/workflows/test.yml']
@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.9', '3.13']
+        python: ['3.10', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +23,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -q pytest
       - run: python -m pytest tests -q
+      - name: Loads the way every platform wrapper loads it
+        run: python -c "import importlib.util as u; s=u.spec_from_file_location('crosspad_app_manager','crosspad_app_manager.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print('ok')"
       - name: CLI answers without a terminal
         run: python -c "import crosspad_app_manager as c; print(c.MANAGER_VERSION)"
       - name: install.sh parses

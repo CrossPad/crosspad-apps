@@ -115,8 +115,8 @@ fi
 for t in git python3; do
     if have "$t"; then ok "$t"; else bad "$t is missing" "install $t and run this again"; exit 1; fi
 done
-if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)'; then
-    bad "Python $(python3 -V 2>&1) is too old — 3.9 or newer is needed" "install a newer python3"; exit 1
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+    bad "Python $(python3 -V 2>&1) is too old — 3.10 or newer is needed" "install a newer python3"; exit 1
 fi
 ok "Python $(python3 -c 'import platform; print(platform.python_version())')"
 
@@ -189,7 +189,7 @@ if [ -d "$IDF_DIR" ] && ! git -C "$IDF_DIR" rev-parse --git-dir >/dev/null 2>&1;
 fi
 if [ ! -d "$IDF_DIR" ]; then
     mkdir -p "$(dirname "$IDF_DIR")"
-    git clone --quiet --depth 1 --branch "$IDF_VERSION" --recursive --shallow-submodules \
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$IDF_VERSION" --recursive --shallow-submodules \
         https://github.com/espressif/esp-idf "$IDF_DIR" \
         || { bad "ESP-IDF download failed" "check the connection and run this again"; exit 1; }
 fi

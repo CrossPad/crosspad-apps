@@ -81,7 +81,7 @@ if (-not (Have git)) {
 if (Have git) { Ok "git $((git --version) -replace 'git version ','')" } else { Bad "git did not install" "install it from https://git-scm.com and run this again"; exit 1 }
 git config --global core.longpaths true      # ESP-IDF's tree is deep; this is git's half of long paths
 
-function Python-Ok { try { $v = & python -c "import sys; print(sys.version_info >= (3, 9))" 2>$null; return $v -eq "True" } catch { return $false } }
+function Python-Ok { try { $v = & python -c "import sys; print(sys.version_info >= (3, 10))" 2>$null; return $v -eq "True" } catch { return $false } }
 if (-not (Python-Ok)) {
     Note "Installing Python..."
     if (-not (Winget-Install "Python.Python.3.12") -or -not (Python-Ok)) {
@@ -90,7 +90,7 @@ if (-not (Python-Ok)) {
         Refresh-Path
     }
 }
-if (Python-Ok) { Ok "Python $(& python -c 'import platform; print(platform.python_version())')" } else { Bad "Python 3.9 or newer is missing" "install it from https://python.org (tick 'Add to PATH') and run this again"; exit 1 }
+if (Python-Ok) { Ok "Python $(& python -c 'import platform; print(platform.python_version())')" } else { Bad "Python 3.10 or newer is missing" "install it from https://python.org (tick 'Add to PATH') and run this again"; exit 1 }
 
 # ---------------------------------------------------------------------------
 Step "GitHub" "the CrossPad project is shared through GitHub"
@@ -146,7 +146,7 @@ if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.git")) {
 }
 if (-not (Test-Path $IdfDir)) {
     New-Item -ItemType Directory -Force (Split-Path $IdfDir) | Out-Null
-    git clone --quiet --depth 1 --branch $IdfVersion --recursive --shallow-submodules https://github.com/espressif/esp-idf $IdfDir
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch $IdfVersion --recursive --shallow-submodules https://github.com/espressif/esp-idf $IdfDir
     if ($LASTEXITCODE -ne 0) { Bad "ESP-IDF download failed" "check the connection and run this again"; exit 1 }
 }
 $haveVer = git -C $IdfDir describe --tags 2>$null

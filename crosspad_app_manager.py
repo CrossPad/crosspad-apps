@@ -17,8 +17,6 @@ Usage:
     mgr.list_apps()
 """
 
-from __future__ import annotations   # `X | None` annotations on Python 3.9 (ESP-IDF 5.5's floor)
-
 import json
 import os
 import shutil
@@ -5476,7 +5474,7 @@ class _TUI:
     def _dev_entries(self) -> list:
         entries = [
             ("Workspace", "per-app ownership: follow rule, git state, backups", self._workspace),
-            ("Device", "what the board runs, component by component", self._device),
+            ("Device", "what the board runs, component by component", self._device_screen),
             ("Browse registry", "every app with details and changelog", self._browse),
             ("Configure", "compile-time feature flags", self._configure),
             ("Profiles", "saved app sets", self._profiles),
@@ -5782,7 +5780,7 @@ class _TUI:
 
     # -- Device ---------------------------------------------------------------
 
-    def _device(self):
+    def _device_screen(self):
         """What the connected CrossPad reports it was built from, vs this repo.
 
         The manifest says what should be installed; this says what is actually
