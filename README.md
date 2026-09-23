@@ -40,23 +40,67 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 
 ---
 
-## Using the App Manager
+## Get started — one command
 
-The CrossPad App Manager is a shared tool that works across all platforms. It provides both a **CLI** and an **interactive TUI** for managing apps — browsing, installing, removing, updating, building, and flashing.
+Open a terminal (Windows: PowerShell) and paste the line for your system. It
+installs everything the CrossPad needs, asks for a GitHub sign-in (the
+firmware repository is private until the OS opens), and opens **CP Tools**.
+It takes 15–30 minutes the first time; run it again any time — it only
+installs or repairs what is missing.
+
+**Windows**
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/install.ps1 | iex"
+```
+
+**macOS / Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/install.sh | bash
+```
+
+Afterwards: the **CP Tools** shortcut on the Windows desktop, or
+`~/CrossPad/cptools` on macOS and Linux.
+
+## Using the App Manager (CP Tools)
+
+The CrossPad App Manager is one shared tool for every platform, with a
+**CLI** and an interactive **TUI**. The TUI is built for people who have never
+used git: it names tasks, not git operations.
+
+### The screens
+
+The first line always says what to do next — an update waiting, an update
+that stopped halfway, a board running firmware for another board revision, a
+missing tool. Under it, what each waiting update brings (the apps' own commit
+messages).
+
+| Key | Screen | What it does |
+|-----|--------|--------------|
+| `1` | Update my CrossPad | download → firmware components → build → flash → check, one log; `q` or Ctrl+C stops a step, `r` retries from it. When the project is exactly a published release, the release's image is downloaded instead of compiling |
+| `2` | Add or remove apps | type to filter; `Enter` on an app picks what it follows: the latest release, development, or one version. A broken app folder is repaired from here |
+| `3` | Something's wrong | every check with its fix: board, firmware, tools, USB, internet, disk, project folder; go back to the versions from before; switch the board to its previous firmware slot; `s` saves a report for support |
+| `4` | Developer tools | workspace, device, registry, feature flags, profiles, board revision, raw build & flash, new app, submit an app to the catalog, settings |
+| `/` | Find an action | every action by name |
+| `?` | Help | the keys of the screen you are on, and what the marks mean |
+
+Mouse: the wheel scrolls, clicking a `[key]` label presses it
+(`CROSSPAD_NO_MOUSE=1` turns that off). `NO_COLOR=1` drops colour;
+`CROSSPAD_PLAIN=1` (or `tui --plain`) prints plain text for screen readers.
 
 ### Supported Platforms
 
 | Platform | Status | App install dir | Build system |
 |----------|--------|----------------|--------------|
-| **ESP-IDF** | Full support | `components/` | `idf.py` |
-| **Arduino / PlatformIO** | Full support | `lib/` | `pio` |
-| **PC (Desktop)** | Coming soon | `components/` | CMake |
+| **ESP-IDF** | Full support: update, build, flash, check, recover | `components/` | `idf.py` |
+| **Arduino / PlatformIO** | Apps, build, USB upload | `lib/` | `pio` |
+| **PC (simulator)** | Apps and build; "Update" rebuilds the simulator | `src/apps/` | CMake |
 
 ### Prerequisites
 
-- **`gh` CLI** installed and authenticated (`gh auth login`)
-- **Git** (apps are installed as git submodules)
-- **Python 3.9+**
+The installer above sets them up. By hand: **Git**, **Python 3.9+**, and for
+ESP-IDF, ESP-IDF 5.5. The GitHub CLI (`gh`, signed in) is needed only to
+clone the private platform repository and to publish your own apps —
+reading the catalog and updating public apps needs no account.
 
 ---
 
@@ -66,44 +110,16 @@ The CrossPad App Manager is a shared tool that works across all platforms. It pr
 
 ```bash
 idf.py app-list                              # List compatible apps
-idf.py app-list --all                        # Include incompatible platform apps
 idf.py app-install --app sampler             # Install app as git submodule
 idf.py app-install --app sampler --ref v1.0  # Install specific version/branch
-idf.py app-install --app sampler --force     # Install despite platform incompatibility
 idf.py app-remove --app sampler              # Remove app submodule
-idf.py app-update --app sampler              # Update to latest
-idf.py app-update --all                      # Update all installed apps
-idf.py app-sync                              # Sync manifest with existing submodules
-idf.py app-manage                            # Launch interactive TUI
+idf.py app-update --all [--force] [--dry-run] # Update installed apps
+idf.py app-track --app sampler --mode release|development|version|mine
+idf.py app-manage                            # Launch the TUI
+python3 tools/app_manager.py doctor          # every check, with its fix (exit 1 if something is wrong)
+python3 tools/app_manager.py support         # zip of logs and findings for #support
+python3 tools/app_manager.py status --json   # also: list --json, doctor --json, device --json
 ```
-
-### Interactive TUI
-
-Launch with `idf.py app-manage` or via the VSCode toolbar button.
-
-![TUI Dashboard](docs/tui-dashboard.png)
-
-**Dashboard** — project overview with installed apps, quick actions via hotkeys:
-- `[B]` Browse & Install — categorized app browser with `/` search
-- `[U]` Update All — update all installed apps
-- `[H]` Health Check — submodule status, manifest sync, gh auth, cache age
-- `[F]` Build & Flash — idf.py build/flash/monitor with auto-detected serial port
-- `[O]` OTA Flash — one-click OTA with build state awareness (detects stale builds)
-- `[T]` Dev Tools — force refresh registry, view raw data, clear cache
-- `[Q]` Quit
-
-**App Browser** features:
-- Categorized view (music, audio, tools)
-- Live search with `/` key
-- Color-coded status: green = installed, gray = available, red = incompatible
-- `Enter` for app details, `i` to install, `r` to remove
-
-**App Detail** shows description, platforms, dependencies, disk usage, recent git commits, changelog (fetched from GitHub), with direct actions (install/remove/update/open repo).
-
-**OTA Flash** checks build state before flashing:
-- Shows binary size, build age
-- Warns if sources have been modified since last build
-- `[Enter]` Flash, `[B]` Build first, `[R]` Build + Flash combo
 
 ### VSCode Toolbar Buttons
 
@@ -154,7 +170,7 @@ python3 scripts/app_manager.py                        # Launch TUI (no args)
 
 Launch with `python3 scripts/app_manager.py` (no arguments) or via the VSCode toolbar button.
 
-Same features as ESP-IDF TUI — dashboard, browser, detail view, build & flash (using `pio` commands), OTA, health check, dev tools.
+The same screens as above; building uses `pio run`, flashing `pio run --target upload`.
 
 ### VSCode Toolbar Button
 
@@ -240,12 +256,15 @@ python3 <wrapper> track piano pinned               # freeze at the current commi
 python3 <wrapper> status                           # policy vs actual git state
 ```
 
-| mode | `update` does |
+| mode (screen word) | `update` does |
 |------|---------------|
-| `registry` (default) | follows the registry ref, fast-forward only |
-| `branch` | follows the named branch; never switches branch |
-| `pinned` | nothing; reports when newer exists |
-| `local` | nothing at all; the worktree is yours |
+| `registry` (release, default) | follows the newest `v*` release tag |
+| `branch` (development) | follows the named branch; never switches branch |
+| `pinned` (version) | nothing; reports when newer exists |
+| `local` (mine) | nothing at all; the worktree is yours |
+
+The CLI takes either word. Settings → Early features switches every app on
+the latest release to development (and back) in your personal config.
 
 The declared mode is intent. Observed git state overrides it: an app that is
 dirty, ahead of origin, on an unexpected branch, or pointing at a fork is
@@ -324,9 +343,15 @@ removed.
 
 ---
 
-## PC (Desktop) — Coming Soon
+## PC (simulator)
 
-Desktop platform support is planned. The app manager core (`crosspad_app_manager.py`) already supports a `pc` platform config. Stay tuned.
+```bash
+python3 scripts/app_manager.py            # TUI
+python3 scripts/app_manager.py list       # and every other command above
+```
+
+Apps go to `src/apps/`. "Update my CrossPad" updates the apps and rebuilds
+the simulator; Developer tools → OTA Flash runs it.
 
 ---
 
@@ -393,7 +418,10 @@ ESP32-S3/                         ← Arduino platform repo
 
 ## Adding an External (Community) App
 
-For repos outside the CrossPad org, open a PR adding your repo to `external-apps.json`:
+From CP Tools: Developer tools → **Submit an app to the catalog** checks your
+`crosspad-app.json` and repository and opens the pull request for you.
+
+By hand — for repos outside the CrossPad org, open a PR adding your repo to `external-apps.json`:
 
 ```json
 {
@@ -413,6 +441,8 @@ Your repo must also contain a `crosspad-app.json` with valid metadata.
 | `crosspad.config.json` | (in each project) Track policy + feature flags — intent |
 | `config/profiles/*.json` | (in each project) Named build recipes |
 | `crosspad_app_manager.py` | Shared core — all app management + TUI logic |
+| `install/install.sh`, `install/install.ps1` | One-command setup for macOS/Linux and Windows |
+| `tests/` | Tests of the core, run on Windows, macOS and Linux by CI |
 | `build_registry.py` | CI: discovers repos by topic, builds registry |
 | `diff_registry.py` | CI: compares registries, outputs changes for notifications |
 | `external-apps.json` | Community/third-party app repos (add via PR) |
