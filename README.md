@@ -61,6 +61,8 @@ curl -fsSL https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install
 Afterwards: the **CP Tools** shortcut on the Windows desktop, or
 `~/CrossPad/cptools` on macOS and Linux.
 
+**Step by step, with screenshots: [install/README.md](install/README.md).**
+
 ## Using the App Manager (CP Tools)
 
 The CrossPad App Manager is one shared tool for every platform, with a
