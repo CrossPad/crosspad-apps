@@ -437,7 +437,7 @@ def wrong_rows(f: dict) -> list[dict]:
     else:
         rows.append({"ok": False, "title": "Board found",
                      "detail": "No CrossPad found — plug it in over USB. Plugged in? "
-                               "On the pad: hold the encoder → Settings → USB → CDC",
+                               "On the pad: Settings → USB → Serial",
                      "fix": None, "action": None})
     tools_bad = []
     if f.get("idf_path") == "":
@@ -4698,7 +4698,7 @@ class _PipelineUI:
                           f"{pct:3d} %")
             elif s.detail == "…":
                 detail = "working…"
-            line = f" {col}{mark:<2}{_C.RST}{STEP_TITLES[s.name]:<22} "
+            line = f" {col}{mark:<3}{_C.RST}{STEP_TITLES[s.name]:<22} "
             _w(line + (f"{_C.BRED}{detail}{_C.RST}" if s.error else
                        f"{_C.GRAY if s.ok is None else ''}{detail[:w - 28]}{_C.RST}") + "\n")
         _w(f"\n {_C.DIM}{tail[:w - 4]}{_C.RST}\n")
@@ -5369,13 +5369,21 @@ class _TUI:
             self._header("Something's wrong?", self._header_right())
             _w("\n")
             w = _get_size()[0]
+            import textwrap
+            indent = " " * 29
             for i, r in enumerate(rows):
                 mark, col = {True: (G["ok"], _C.BGREEN), False: (G["fail"], _C.BRED),
                              None: (G["warn"], _C.BYELLOW)}[r["ok"]]
                 sel = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
-                _w(f" {sel} {col}{mark:<2}{_C.RST}{r['title']:<22} {r['detail'][:w - 30]}\n")
+                # Wrapped, not cut: the end of a detail is usually the part that
+                # says what to do ("… → Settings → USB → Serial").
+                lines = textwrap.wrap(r["detail"], max(w - 31, 20)) or [""]
+                _w(f" {sel} {col}{mark:<3}{_C.RST}{r['title']:<22} {lines[0]}\n")
+                for more in lines[1:]:
+                    _w(f"{indent}{more}\n")
                 if r["fix"] and r["ok"] is not True:
-                    _w(f"      {' ' * 22} {_C.BCYAN}{r['fix']}{_C.RST}\n")
+                    for fix in textwrap.wrap(r["fix"], max(w - 31, 20)):
+                        _w(f"{indent}{_C.BCYAN}{fix}{_C.RST}\n")
             self._footer("↑↓ pick   [Enter] do it   [l] open last update log   "
                          "[s] save a report for support   "
                          "[f] flash again via cable (board won't answer)   [q] back")
