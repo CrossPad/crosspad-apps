@@ -51,6 +51,9 @@ TRACK_BRANCH = "branch"       # follow the user's branch, never switch away
 TRACK_PINNED = "pinned"       # never moves
 TRACK_LOCAL = "local"         # manager does not touch the worktree at all
 TRACK_MODES = (TRACK_REGISTRY, TRACK_BRANCH, TRACK_PINNED, TRACK_LOCAL)
+# The words the screens use for the same four modes; the CLI takes either.
+TRACK_ALIASES = {"release": TRACK_REGISTRY, "development": TRACK_BRANCH,
+                 "version": TRACK_PINNED, "mine": TRACK_LOCAL}
 
 BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "origin-mismatch")
 
@@ -239,6 +242,11 @@ def wrong_rows(f: dict) -> list[dict]:
                  "detail": (f"ESP-IDF ok, gh signed in as {f.get('gh_user')}, Python {f.get('python')}"
                             if not tools_bad else "; ".join(tools_bad)),
                  "fix": "; ".join(tools_bad) or None, "action": None})
+    if f.get("pyserial") is False:
+        rows.append({"ok": False, "title": "USB serial",
+                     "detail": "the Python package pyserial is missing — without it "
+                               "nothing here can talk to the board",
+                     "fix": "[Enter] install it", "action": "install_pyserial"})
     guard = f.get("usb_guard")
     if guard == "1":
         rows.append({"ok": False, "title": "USB serial guard",
@@ -843,6 +851,7 @@ class AppManager:
 
     def set_app_policy(self, app_id: str, track: str, ref: str = None,
                        commit: str = None, local: bool = False):
+        track = TRACK_ALIASES.get(track, track)
         if track not in TRACK_MODES:
             raise ValueError(f"unknown track mode '{track}'")
         target = self._load_local_config() if local else self._load_config_raw()
@@ -2837,7 +2846,8 @@ def cli_main(config: PlatformConfig):
 
     track_cmd = sub.add_parser("track", help="Set an app's track policy")
     track_cmd.add_argument("app", help="App name")
-    track_cmd.add_argument("mode", choices=list(TRACK_MODES))
+    track_cmd.add_argument("mode", choices=list(TRACK_ALIASES) + list(TRACK_MODES),
+                           help="release | development | version | mine")
     track_cmd.add_argument("--ref", default=None,
                            help="Branch for track=branch")
     track_cmd.add_argument("--commit", default=None,
@@ -2915,7 +2925,7 @@ def cli_main(config: PlatformConfig):
         mgr.set_app_policy(args.app, args.mode, ref=args.ref,
                            commit=args.commit, local=args.local)
         where = LOCAL_CONFIG_FILE if args.local else CONFIG_FILE
-        print(f"{args.app}: track={args.mode}"
+        print(f"{args.app}: {args.mode}"
               f"{' ref=' + args.ref if args.ref else ''} -> {where}")
     elif args.command == "backup":
         dest = mgr.backup_app(args.app)
@@ -3088,6 +3098,11 @@ def _profile_cli(mgr: "AppManager", args):
 # =============================================================================
 #  Interactive TUI
 # =============================================================================
+
+def _has_module(name: str) -> bool:
+    import importlib.util
+    return importlib.util.find_spec(name) is not None
+
 
 def _is_interactive():
     """Check if stdin is a real terminal."""
@@ -3903,7 +3918,7 @@ class _TUI:
                      + [("h", "Available")] + [("a", a) for a in available])
             sel = [i for i, (k, _) in enumerate(items) if k != "h"]
             if not sel:
-                items, sel = [("h", "Nothing matches")], []
+                items, sel = [("h", f"No matches for '{search}'")], []
             cursor = min(cursor, max(len(sel) - 1, 0))
 
             _clear()
@@ -3983,6 +3998,7 @@ class _TUI:
                 "usb_guard": guard, "registry_age": self.mgr.get_cache_age(),
                 "last_update": self.mgr.last_update(),
                 "offline": self.mgr.offline,
+                "pyserial": _has_module("serial"),
                 "remembered_board": local.get("board")}
 
     def _something_wrong(self):
@@ -4002,7 +4018,7 @@ class _TUI:
                 if r["fix"] and r["ok"] is not True:
                     _w(f"      {' ' * 22} {_C.BCYAN}{r['fix']}{_C.RST}\n")
             self._footer("↑↓ pick   [Enter] do it   [l] open last update log   "
-                         "[r] flash again via cable (board won't answer)   [q] back")
+                         "[f] flash again via cable (board won't answer)   [q] back")
             key = _read_key()
             if key in ("q", "esc", "ctrl-c"):
                 return
@@ -4012,7 +4028,7 @@ class _TUI:
                 cursor = (cursor + 1) % len(rows)
             elif key == "l":
                 self._show_log_tail()
-            elif key == "r":
+            elif key == "f":
                 self._recover_flow()
                 facts = self._wrong_facts()
             elif key == "enter":
@@ -4028,6 +4044,10 @@ class _TUI:
                     self.mgr._fetch_remote_registry()
                     self.mgr.refresh_available(list(self._installed))
                     self._reload()
+                elif action == "install_pyserial":
+                    _clear()
+                    self.mgr.run_command(f'"{sys.executable}" -m pip install --user pyserial')
+                    _pause()
                 elif action == "forget_board":
                     local = self.mgr._load_local_config()
                     local.pop("board", None)
@@ -4060,6 +4080,7 @@ class _TUI:
     def _developer_tools(self):
         entries = [
             ("Workspace", "per-app ownership: follow rule, git state, backups", self._workspace),
+            ("Device", "what the board runs, component by component", self._device),
             ("Browse registry", "every app with details and changelog", self._browse),
             ("Configure", "compile-time feature flags", self._configure),
             ("Profiles", "saved app sets", self._profiles),
@@ -4143,14 +4164,14 @@ class _TUI:
                     ready = self.mgr.valid_app_id(app_id)
                     col = _C.BGREEN if ready else _C.DIM
                     _w(f"\n  {marker} {col}Create{_C.RST}"
-                       f"{'' if ready else f'{_C.DIM}   (needs a valid id){_C.RST}'}\n")
+                       f"{'' if ready else f'{_C.DIM}   (needs an id: lowercase letters, digits, dashes){_C.RST}'}\n")
                     continue
                 label, value = shown[key]
                 _w(f"  {marker} {_C.GRAY}{label:<14}{_C.RST}{value}\n")
 
             if cursor < len(rows) - 1:
-                hint = {"id": "letters, digits and dashes — becomes "
-                              "crosspad-<id>",
+                hint = {"id": "lowercase letters, digits and dashes, starting with "
+                              "a letter — becomes crosspad-<id>",
                         "name": "shown in the launcher",
                         "description": "one line, lands in crosspad-app.json",
                         "category": "music · audio · tools · other",
@@ -4172,8 +4193,13 @@ class _TUI:
                    f"{_C.GRAY} — appears in the launcher{_C.RST}\n")
                 if visibility:
                     owner = self._gh_owner()
-                    _w(f"   github.com/{owner or '<your account>'}/{component}"
-                       f" {_C.GRAY}({visibility}){_C.RST}\n")
+                    if owner:
+                        _w(f"   github.com/{owner}/{component}"
+                           f" {_C.GRAY}({visibility}){_C.RST}\n")
+                    else:
+                        _w(f"   {_C.BYELLOW}Publishing needs a GitHub sign-in:{_C.RST} "
+                           f"run {_C.BWHITE}gh auth login{_C.RST} in a terminal, "
+                           f"or choose local only\n")
             elif app_id:
                 _w(f"\n   {_C.BYELLOW}'{app_id}' is not a valid id{_C.RST}\n")
 
@@ -4208,6 +4234,10 @@ class _TUI:
                     continue
                 if app_id in self._installed:
                     error = f"'{app_id}' is already installed."
+                    continue
+                if visibility and not self._gh_owner():
+                    error = ("Not signed in to GitHub — run gh auth login in a "
+                             "terminal, or set Publish to local only.")
                     continue
                 self._create_app(app_id, fields, cls, visibility)
                 return
@@ -4314,9 +4344,8 @@ class _TUI:
             if not report.get("ok"):
                 _w(f"\n   {_C.BYELLOW}⚠{_C.RST} {report.get('error')}\n")
                 if self.config.platform != "pc":
-                    _w(f"\n   {_C.GRAY}A device in USB audio mode exposes no "
-                       f"CDC. Switch it back with\n   the SysEx "
-                       f"F0 7D 1B 00 F7 on its own MIDI port.{_C.RST}\n")
+                    _w(f"\n   {_C.GRAY}A board in USB audio mode can't answer here. "
+                       f"On the pad:\n   Settings → USB → Serial, then [r].{_C.RST}\n")
                 self._footer("[r] retry   q back")
             else:
                 label = "Binary" if self.config.platform == "pc" else "Port"
@@ -4338,8 +4367,8 @@ class _TUI:
                 if stale:
                     _w(f"\n   {_C.BYELLOW}{len(stale)} component(s) differ — "
                        f"the device is not running this checkout.{_C.RST}\n")
-                    _w(f"   {_C.GRAY}Reflash: press o (OTA) from the "
-                       f"dashboard.{_C.RST}\n")
+                    _w(f"   {_C.GRAY}Put this checkout on it: [1] Update my CrossPad "
+                       f"on the first screen.{_C.RST}\n")
                 else:
                     _w(f"\n   {_C.BGREEN}Device matches this checkout.{_C.RST}\n")
                 if any(r["device_dirty"] for r in report["rows"]):
