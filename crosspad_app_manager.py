@@ -1291,19 +1291,19 @@ class AppManager:
             dest.mkdir(parents=True, exist_ok=True)
             with tarfile.open(dest / "folder.tgz", "w:gz") as tar:
                 tar.add(folder, arcname=folder.name)
-            shutil.rmtree(folder, ignore_errors=True)
+            _rmtree(folder)
             fresh = fresh or not modules.exists()
         if fresh:
-            shutil.rmtree(folder, ignore_errors=True)
-            shutil.rmtree(modules, ignore_errors=True)
+            _rmtree(folder)
+            _rmtree(modules)
         r = self._git("submodule", "update", "--init", "--force", "--", path,
                       check=False, capture=True)
         if r.returncode != 0 and not fresh:
             # Windows git will not check a submodule out again from the
             # repository it keeps under .git/modules ('could not get a
             # repository handle'); a clean clone always works.
-            shutil.rmtree(folder, ignore_errors=True)
-            shutil.rmtree(modules, ignore_errors=True)
+            _rmtree(folder)
+            _rmtree(modules)
             fresh = True
             r = self._git("submodule", "update", "--init", "--force", "--", path,
                           check=False, capture=True)
@@ -2009,7 +2009,7 @@ class AppManager:
         if len(backups) > prune_keep:
             import shutil
             for old in backups[prune_keep:]:
-                shutil.rmtree(self.backup_dir(app_id) / old, ignore_errors=True)
+                _rmtree(self.backup_dir(app_id) / old)
 
         return str(dest)
 
@@ -2746,8 +2746,7 @@ class AppManager:
         # as its own repository before `git submodule add` can point at it.
         staging = self.project_dir / WORK_ROOT / "new" / component
         if staging.exists():
-            import shutil
-            shutil.rmtree(staging)
+            _rmtree(staging)
         staging.mkdir(parents=True)
 
         try:
@@ -3056,11 +3055,11 @@ class AppManager:
                       "cleaning up manually.")
             modules_path = self.project_dir / ".git" / "modules" / install_path
             if modules_path.exists():
-                shutil.rmtree(modules_path)
+                _rmtree(modules_path)
         # An app generated locally is a plain directory, not a submodule: the
         # submodule commands fail on it and used to leave the files behind.
         if full_path.exists():
-            shutil.rmtree(full_path, ignore_errors=True)
+            _rmtree(full_path)
 
         del manifest["installed"][app_name]
         self._save_manifest(manifest)
@@ -4048,6 +4047,30 @@ def _profile_cli(mgr: "AppManager", args):
 # =============================================================================
 #  Interactive TUI
 # =============================================================================
+
+def _rmtree(path) -> None:
+    """Delete a tree, including git's read-only object files.
+
+    On Windows shutil.rmtree cannot delete a read-only file; git writes its
+    objects read-only, so a plain rmtree of a repository (ignore_errors or
+    not) leaves .git/modules behind and the next submodule command fails
+    with 'could not get a repository handle'.
+    """
+    import stat
+
+    def unlock(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+
+    if os.path.exists(path):
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=unlock)
+        else:
+            shutil.rmtree(path, onerror=unlock)
+
 
 def _sha256(path: Path) -> str:
     import hashlib
@@ -5127,7 +5150,10 @@ class _TUI:
                 break
             elif key == "enter" and nxt["action"] == "resume":
                 self._wait_background()
-                failed = next(n for n, t in STEP_TITLES.items() if t == self._dashboard_ctx()["unfinished"])
+                # The step named on screen, not a fresh read of the record —
+                # another CP Tools may have finished the update meanwhile.
+                failed = next((n for n, t in STEP_TITLES.items()
+                               if nxt["line"].endswith(f"stopped at {t}")), None)
                 self._update_pipeline(resume_from=failed)
                 self._stale = "force"
             elif key == "1" or (key == "enter" and nxt["action"] == "update"):
@@ -5135,6 +5161,7 @@ class _TUI:
                 self._update_pipeline()
                 self._stale = "force"
             elif key == "/":
+                self._wait_background()
                 self._palette()
                 self._stale = "force"
             elif key == "2":
@@ -5142,6 +5169,7 @@ class _TUI:
                 self._apps_screen()
                 self._stale = True
             elif key == "3" or (key == "enter" and nxt["action"] == "wrong"):
+                self._wait_background()
                 self._something_wrong()
                 self._stale = True
             elif key == "4":
