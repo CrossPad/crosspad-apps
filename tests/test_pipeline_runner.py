@@ -244,3 +244,21 @@ def test_an_old_wrapper_hook_without_device_still_flashes(tmp_path):
     calls = []
     mgr.config.flash_ota = lambda rev, on_line: calls.append(rev) or 0
     assert cam.UpdatePipeline(mgr, FakeUI()).run() is True and calls == ["v2"]
+
+
+def test_a_successful_update_that_moved_apps_remembers_where_they_were(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    heads = iter([{"sampler": "aaa"}, {"sampler": "bbb"}])
+    mgr.app_heads = lambda: next(heads)
+    assert cam.UpdatePipeline(mgr, FakeUI()).run() is True
+    assert mgr.saved["previous"] == {"sampler": "aaa"} and mgr.saved["after"] == {"sampler": "bbb"}
+
+
+def test_an_update_that_moved_nothing_keeps_the_older_go_back_point(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.last_update = lambda: {"ok": True, "previous": {"sampler": "old"}, "after": {"sampler": "aaa"}}
+    mgr.app_heads = lambda: {"sampler": "aaa"}
+    assert cam.UpdatePipeline(mgr, FakeUI()).run() is True
+    assert mgr.saved["previous"] == {"sampler": "old"}

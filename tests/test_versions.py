@@ -66,3 +66,28 @@ def test_registry_policy_after_fresh_install_marks_release_current():
                             [("v0.3.0", "2026-09-14")], "abc1234", 0)
     assert rows[0].kind == "release" and rows[0].current
     assert not any(r.kind == "development" and r.current for r in rows)
+
+
+def test_version_satisfies_the_spec_forms_the_registry_uses():
+    assert cam.version_satisfies((1, 20, 0), ">=0.3.0")
+    assert not cam.version_satisfies((0, 2, 9), ">=0.3.0")
+    assert cam.version_satisfies((1, 4, 2), "^1.4") and not cam.version_satisfies((2, 0, 0), "^1.4")
+    assert cam.version_satisfies((1, 4, 9), "~1.4.1") and not cam.version_satisfies((1, 5, 0), "~1.4.1")
+    assert cam.version_satisfies((1, 2, 3), "1.2.3") and cam.version_satisfies((9, 9, 9), "*")
+    assert cam.version_satisfies(None, ">=5.0.0")          # unknown is not a refusal
+    assert not cam.version_satisfies((1, 2, 0), ">=1.0.0, <1.2.0")
+
+
+def test_unmet_requirements_name_the_component_and_both_versions():
+    have = {"crosspad-core": (1, 20, 0), "crosspad-gui": (1, 11, 1)}
+    assert cam.unmet_requirements({"crosspad-core": ">=0.3.0", "crosspad-gui": ">=0.2.1"}, have) == []
+    assert cam.unmet_requirements({"crosspad-core": ">=2.0.0"}, have) == \
+        ["needs core >=2.0.0, this project has 1.20.0"]
+    assert cam.unmet_requirements(["crosspad-core"], have) == []
+    assert cam.unmet_requirements(None, have) == []
+
+
+def test_app_row_broken_folder_is_its_own_state():
+    st = {"policy": {"track": "registry"}, "blocking": [],
+          "git": {"exists": True, "head": None, "broken": "no git data in the folder"}}
+    assert cam.app_row(st, None, True)["state"] == "broken"

@@ -214,6 +214,8 @@ def app_row(status: dict, avail: dict | None, in_registry: bool) -> dict:
     git = status["git"]
     if not git.get("exists"):
         return {"state": "missing", "installed": "", "available": ""}
+    if git.get("broken"):
+        return {"state": "broken", "installed": "", "available": ""}
     rule, target = follow_rule(status["policy"])
     if rule == "own" or not in_registry:
         return {"state": "own", "installed": git.get("head") or "", "available": ""}
@@ -238,6 +240,49 @@ def app_row(status: dict, avail: dict | None, in_registry: bool) -> dict:
 def _release_target(tags: list[tuple[str, str]], default_branch: str) -> str:
     newest = newest_release(tags)
     return newest if newest else f"origin/{default_branch}"
+
+
+def parse_semver(text: str) -> tuple[int, int, int] | None:
+    m = _re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", text or "")
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0)
+
+
+def version_satisfies(have: tuple | None, spec: str) -> bool:
+    """`>=0.3.0`, `>1.2`, `^1.4`, `1.2.3`, `*` against a (major, minor, patch).
+    Unknown `have` passes — a missing header is not a reason to refuse."""
+    spec = (spec or "*").strip()
+    if spec in ("*", "") or have is None:
+        return True
+    for part in spec.split(","):
+        part = part.strip()
+        op = _re.match(r"^(>=|<=|>|<|==|=|\^|~)?\s*(.*)$", part)
+        want = parse_semver(op.group(2))
+        if want is None:
+            continue
+        o = op.group(1) or "=="
+        ok = {">=": have >= want, "<=": have <= want, ">": have > want, "<": have < want,
+              "==": have == want, "=": have == want,
+              "^": have >= want and have[0] == want[0],
+              "~": have >= want and have[:2] == want[:2]}[o]
+        if not ok:
+            return False
+    return True
+
+
+def unmet_requirements(requires, have: dict) -> list[str]:
+    """['core 1.20.0 is older than >=2.0.0'] for each requirement the checkout misses."""
+    if isinstance(requires, list):
+        requires = {r: "*" for r in requires}
+    out = []
+    for dep, spec in (requires or {}).items():
+        v = have.get(dep)
+        if not version_satisfies(v, spec):
+            short = dep.replace("crosspad-", "")
+            out.append(f"needs {short} {spec}, this project has "
+                       f"{'.'.join(map(str, v))}")
+    return out
 
 
 def change_summary(status: dict, avail: dict | None) -> list[str]:
@@ -398,6 +443,17 @@ def wrong_rows(f: dict) -> list[dict]:
                  "detail": (f"{last['finished'][:16].replace('T', ' ')}, "
                             f"{'all versions matched' if last.get('ok') else 'failed'}") if last else "never",
                  "fix": "[l] open the log" if last else None, "action": "log" if last else None})
+    if f.get("can_go_back"):
+        rows.append({"ok": None, "title": "Go back",
+                     "detail": f"the update before changed {f['can_go_back']}",
+                     "fix": "[Enter] go back to the versions from before", "action": "go_back"})
+    prev = f.get("previous_firmware")
+    if prev:
+        rows.append({"ok": None, "title": "Previous firmware",
+                     "detail": "the board still has the one before in its second slot"
+                               + (f" ({prev})" if prev != "-" else ""),
+                     "fix": "[Enter] switch back to it — seconds, no build",
+                     "action": "switch_slot"})
     if f.get("remembered_board") and dev and dev.get("board_rev") \
             and dev["board_rev"] != f["remembered_board"]:
         rows.append({"ok": False, "title": "Remembered board",
@@ -862,6 +918,120 @@ class AppManager:
                 })
         return subs
 
+    # -- what the shared components are, and what an app asks of them ---------
+
+    VERSION_HEADERS = {
+        "crosspad-core": ("include/crosspad/CrosspadCoreVersion.hpp", "CROSSPAD_CORE_VERSION"),
+        "crosspad-gui": ("include/crosspad-gui/CrosspadGuiVersion.hpp", "CROSSPAD_GUI_VERSION"),
+    }
+
+    def component_versions(self) -> dict:
+        out = {}
+        for comp, (rel, prefix) in self.VERSION_HEADERS.items():
+            path = self.component_path(comp)
+            if not path:
+                continue
+            try:
+                text = (self.project_dir / path / rel).read_text(errors="replace")
+            except OSError:
+                continue
+            nums = [_re.search(rf"#define\s+{prefix}_{p}\s+(\d+)", text) for p in
+                    ("MAJOR", "MINOR", "PATCH")]
+            if all(nums):
+                out[comp] = tuple(int(m.group(1)) for m in nums)
+        return out
+
+    def requires_at(self, app_id: str, ref: str) -> dict | None:
+        """The requirements an app declares at a tag or commit (after a fetch)."""
+        path = self.app_status(app_id)["path"]
+        r = self._sub_git(path, "show", f"{ref}:crosspad-app.json")
+        if r.returncode != 0:
+            return None
+        try:
+            return json.loads(r.stdout).get("requires")
+        except ValueError:
+            return None
+
+    # -- going back -------------------------------------------------------------
+
+    def app_heads(self) -> dict:
+        """Full commit of every installed app on disk: what a 'go back' returns to."""
+        out = {}
+        for app_id in self._load_manifest().get("installed", {}):
+            path = self.app_status(app_id)["path"]
+            r = self._sub_git(path, "rev-parse", "HEAD")
+            if r.returncode == 0:
+                out[app_id] = r.stdout.strip()
+        return out
+
+    def rollback_plan(self) -> dict:
+        """{app_id: commit} to return to, from the last successful update."""
+        last = self.last_update() or {}
+        prev, now = last.get("previous") or {}, last.get("after") or {}
+        return {a: sha for a, sha in prev.items() if now.get(a) and now[a] != sha}
+
+    def roll_back(self) -> list[str]:
+        """Check the previous commits out again and keep them there.
+
+        Each app lands on 'stays on a version' at the commit it had — otherwise
+        the next update would carry it straight forward again. The dashboard
+        says so; picking 'Latest release' in [2] undoes it per app.
+        """
+        done = []
+        for app_id, sha in self.rollback_plan().items():
+            path = self.app_status(app_id)["path"]
+            if self._sub_git(path, "checkout", "--quiet", sha).returncode == 0:
+                self.set_app_policy(app_id, TRACK_PINNED, commit=sha)
+                self._git("add", path, check=False)
+                done.append(app_id)
+        return done
+
+    def fw_slots(self) -> list[dict] | None:
+        """The board's two firmware slots (FW_SLOTS), or None when it cannot say."""
+        ok, text = self._cdc_exchange("FW_SLOTS", "rollback=", 4.0)
+        if not ok:
+            return None
+        slots = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("FWSLOT:") and "slot=" in line:
+                slots.append(dict(t.split("=", 1) for t in line[7:].split() if "=" in t))
+        return slots or None
+
+    def previous_firmware(self) -> dict | None:
+        """The slot the board is not running, if it holds a firmware that started."""
+        for sl in self.fw_slots() or []:
+            if sl.get("running") == "0" and sl.get("state") in ("installed", "confirmed"):
+                return sl
+        return None
+
+    def switch_firmware(self) -> bool:
+        reply = self.cdc_verb("FW_SWITCH", timeout=4.0) or ""
+        return reply.startswith("OK")
+
+    # -- repair -------------------------------------------------------------------
+
+    def repair_app(self, app_id: str, fresh: bool = False) -> tuple[bool, str]:
+        """Put a broken app folder back. Local work is backed up first, always.
+
+        repair: re-check-out the commit this project records, fetching what is
+        missing — the folder stays. fresh: delete the folder and its git data
+        and clone again; for a repository git itself cannot read any more.
+        """
+        st = self.app_status(app_id)
+        path = st["path"]
+        if st["git"]["exists"] and (self.project_dir / path / ".git").exists():
+            self.backup_app(app_id)
+        if fresh:
+            shutil.rmtree(self.project_dir / path, ignore_errors=True)
+            shutil.rmtree(self.project_dir / ".git" / "modules" / path, ignore_errors=True)
+        r = self._git("submodule", "update", "--init", "--force", "--", path,
+                      check=False, capture=True)
+        if r.returncode != 0:
+            lines = (r.stderr or r.stdout or "").strip().splitlines()
+            return False, lines[-1] if lines else "git could not restore it"
+        return True, "downloaded again" if fresh else "repaired"
+
     # -- diagnosis --------------------------------------------------------------
 
     def windows_longpaths(self) -> bool | None:
@@ -893,6 +1063,8 @@ class AppManager:
         except OSError:
             free_gb = None
         is_win = sys.platform == "win32"
+        prev_fw = (self.previous_firmware()
+                   if dev and self.config.platform == "esp-idf" else None)
         return {
             "platform": self.config.platform, "device": dev,
             "board": self.board_info(refresh=True) or {},
@@ -912,6 +1084,8 @@ class AppManager:
                                            self.windows_longpaths()),
             "free_gb": free_gb,
             "defender_hint": str(self.project_dir.resolve()) if is_win else None,
+            "can_go_back": ", ".join(self.app_display_name(a) for a in self.rollback_plan()),
+            "previous_firmware": prev_fw.get("ver", "-") if prev_fw else None,
         }
 
     def support_bundle(self, facts: dict | None = None) -> Path:
@@ -1200,7 +1374,10 @@ class AppManager:
                  "upstream": None, "ahead": 0, "behind": 0, "dirty": 0,
                  "untracked": 0, "stashes": 0, "detached": False,
                  "origin": ""}
-        if not full.exists() or not (full / ".git").exists():
+        if not full.exists():
+            return state
+        if not (full / ".git").exists():
+            state["broken"] = "no git data in the folder"
             return state
 
         r = self._sub_git(path, "rev-parse", "--abbrev-ref", "HEAD")
@@ -1213,6 +1390,9 @@ class AppManager:
         r = self._sub_git(path, "rev-parse", "--short", "HEAD")
         if r.returncode == 0:
             state["head"] = r.stdout.strip()
+        else:
+            state["broken"] = "git can't read this folder"
+            return state
 
         r = self._sub_git(path, "rev-parse", "--abbrev-ref",
                           "--symbolic-full-name", "@{u}")
@@ -2958,6 +3138,9 @@ class UpdatePipeline:
 
     def retry_from(self, name: str) -> bool:
         started = datetime.now(timezone.utc)
+        if name == self.steps[0].name:
+            heads = getattr(self.mgr, "app_heads", None)
+            self.before = heads() if heads else {}
         reset = getattr(self.ui, "reset_cancel", None)
         if reset is not None:
             reset()
@@ -2988,13 +3171,23 @@ class UpdatePipeline:
                 if not ok or self.ui.cancelled():
                     ok = False
                     break
-        self.mgr.save_last_update({
+        heads = getattr(self.mgr, "app_heads", None)
+        prior = self.mgr.last_update() or {}
+        record = {
             "started": started.isoformat(),
             "finished": datetime.now(timezone.utc).isoformat(),
             "ok": ok, "installed_set": self.installed,
             "build_rev": (self.mgr.board_info() or {}).get("rev"),
             "steps": [{"name": s.name, "ok": s.ok, "seconds": round(s.seconds, 1)}
-                      for s in self.steps]})
+                      for s in self.steps]}
+        after = heads() if heads else {}
+        before = getattr(self, "before", None) or {}
+        if ok and before and before != after:
+            # What the board ran before this update, for "go back".
+            record["previous"], record["after"] = before, after
+        else:
+            record["previous"], record["after"] = prior.get("previous"), prior.get("after")
+        self.mgr.save_last_update(record)
         return ok
 
     def _render(self):
@@ -4469,7 +4662,9 @@ class _TUI:
                 elif r["state"] == "changes":
                     tail = f"{r['installed']:<8} {_C.BYELLOW}your changes{_C.RST}"
                 elif r["state"] == "missing":
-                    tail = f"{_C.BRED}missing on disk{_C.RST}"
+                    tail = f"{_C.BRED}missing on disk — [2] to repair{_C.RST}"
+                elif r["state"] == "broken":
+                    tail = f"{_C.BRED}broken — [2] to repair{_C.RST}"
                 else:
                     tail = f"{r['installed']:<8} {_C.GRAY}up to date{_C.RST}"
                 _w(f"   {name:<16} {tail}\n")
@@ -4597,6 +4792,7 @@ class _TUI:
                 if kind == "i":
                     r = self._rows.get(val, {"installed": "", "state": "current"})
                     note = {"own": "your own copy", "changes": "your changes",
+                            "broken": "broken — [Enter] to repair",
                             "update": f"{r.get('available', '')} available"}.get(r["state"], "")
                     _w(f" {mark} {_C.BGREEN}{G['ok']}{_C.RST} {name:<16} {r['installed']:<8} "
                        f"{_C.GRAY}{(note or info.get('description', ''))[:w - 34]}{_C.RST}\n")
@@ -4618,7 +4814,9 @@ class _TUI:
                 cursor = (cursor + 1) % len(sel)
             elif key == "enter" and sel:
                 kind, app_id = items[sel[cursor]]
-                if kind == "i":
+                if kind == "i" and self._rows.get(app_id, {}).get("state") in ("broken", "missing"):
+                    self._repair_flow(app_id)
+                elif kind == "i":
                     self._app_versions(app_id)
                 else:
                     info = self._apps.get(app_id, {})
@@ -4695,6 +4893,10 @@ class _TUI:
                     _clear()
                     self.mgr.run_command(f'"{sys.executable}" -m pip install --user pyserial')
                     _pause()
+                elif action == "go_back":
+                    self._go_back_flow()
+                elif action == "switch_slot":
+                    self._switch_slot_flow()
                 elif action == "forget_board":
                     local = self.mgr._load_local_config()
                     local.pop("board", None)
@@ -4702,6 +4904,68 @@ class _TUI:
                 elif action == "log":
                     self._show_log_tail()
                 facts = self._wrong_facts()
+
+    def _repair_flow(self, app_id: str):
+        name = self.mgr.app_display_name(app_id)
+        st = self.mgr.app_status(app_id)
+        _clear()
+        self._header(f"Repair {name}")
+        why = st["git"].get("broken") or "the folder is missing"
+        _w(f"\n  {name}: {why}.\n\n"
+           f"   {_C.BCYAN}[1]{_C.RST} Repair — keep the folder, fetch what is missing\n"
+           f"   {_C.BCYAN}[2]{_C.RST} Download again — delete the folder and get a fresh copy\n"
+           f"   {_C.GRAY}Either way, anything you changed is backed up first "
+           f"({BACKUP_ROOT}).{_C.RST}\n")
+        self._footer("[1] repair   [2] download again   [q] back")
+        key = _read_key_blocking()
+        if key not in ("1", "2"):
+            return
+        if key == "2" and not _confirm(f"Delete {st['path']} and download it again?"):
+            return
+        _w(f"\n  {_C.GRAY}Working…{_C.RST}\n")
+        ok, msg = self.mgr.repair_app(app_id, fresh=(key == "2"))
+        _w(f"\n  {(_C.BGREEN + G['ok']) if ok else (_C.BRED + G['fail'])}{_C.RST} {name}: {msg}\n")
+        if not ok:
+            _w(f"  {_C.GRAY}[s] on Something's wrong saves a report for support.{_C.RST}\n")
+        _pause()
+        self._reload()
+
+    def _go_back_flow(self):
+        plan = self.mgr.rollback_plan()
+        if not plan:
+            self._toast_here("Nothing to go back to — the last update changed no app.")
+            return
+        _clear()
+        self._header("Go back to the versions from before")
+        _w("\n")
+        for app_id, sha in plan.items():
+            _w(f"   {self.mgr.app_display_name(app_id):<16} {G['back']} {sha[:8]}\n")
+        _w(f"\n  {_C.GRAY}These apps will stay on those versions until you pick "
+           f"'Latest release'\n  for them in [2]. Then the firmware is built and "
+           f"flashed again.{_C.RST}\n")
+        if not _confirm("Go back?"):
+            return
+        done = self.mgr.roll_back()
+        if done:
+            self._update_pipeline()
+
+    def _switch_slot_flow(self):
+        slot = self.mgr.previous_firmware()
+        if not slot:
+            self._toast_here("The board has no earlier firmware in its second slot.")
+            return
+        ver = slot.get("ver", "-")
+        _clear()
+        self._header("Previous firmware")
+        _w(f"\n  The board keeps the firmware it ran before in its second slot"
+           f"{f' ({ver})' if ver != '-' else ''}.\n"
+           f"  Switching takes seconds and needs no build. Your computer keeps the\n"
+           f"  new versions — [1] Update my CrossPad puts them back on later.\n")
+        if not _confirm("Switch the board to the previous firmware?"):
+            return
+        ok = self.mgr.switch_firmware()
+        self._toast_here("Switched — the board is restarting." if ok else
+                         "The board refused — [s] on Something's wrong saves a report.")
 
     def _support_flow(self, facts: dict | None = None):
         _clear()
@@ -5441,11 +5705,14 @@ class _TUI:
         ref = self._latest_ref(app_id, info)
 
         _w("\n")
-        req_str = self.mgr._format_requires(info)
-        if req_str:
-            _w(f"  {_C.GRAY}Dependencies: {req_str}{_C.RST}\n")
-
-        if not _confirm(f"Install {name}?"):
+        unmet = unmet_requirements(info.get("requires"), self.mgr.component_versions())
+        if unmet:
+            _w(f"  {_C.BYELLOW}{G['warn']} {name} {'; '.join(unmet)}.{_C.RST}\n"
+               f"  {_C.GRAY}It will likely not build until the project's system "
+               f"components are updated.{_C.RST}\n")
+            if not _confirm(f"Install {name} anyway?"):
+                return
+        elif not _confirm(f"Install {name}?"):
             return
 
         _clear()
@@ -5515,8 +5782,14 @@ class _TUI:
             self._section("Version")
             h = max(_get_size()[1] - 9, 3)
             start, end = _viewport(cursor, len(rows), h)
+            have = self.mgr.component_versions()
+            unmet = {}
             for i in range(start, end):
                 r = rows[i]
+                if r.kind == "version":
+                    unmet[i] = unmet_requirements(self.mgr.requires_at(app_id, r.target), have)
+                    if unmet[i]:
+                        r.detail = f"{r.detail}  needs a newer system"
                 mark = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
                 dot = G["dot_on"] if r.current else G["dot_off"]
                 tags = []
@@ -5544,6 +5817,9 @@ class _TUI:
                     r = self._other_commit_flow(app_id)
                     if r is None:
                         continue
+                if unmet.get(cursor) and not _confirm(
+                        f"{name} {r.label} {unmet[cursor][0]} — it will likely not build. Use it anyway?"):
+                    continue
                 ok, msg = self.mgr.set_version(app_id, r)
                 _clear()
                 mark = G["ok"] if ok else G["fail"]
