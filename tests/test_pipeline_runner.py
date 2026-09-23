@@ -50,6 +50,8 @@ class FakeMgr:
         self.calls.append(("run", cmd))
         on_line("[10/20] Building CXX object x.obj")
         return self.build_rc
+    chosen_device = None
+    def devices(self): return []
     def device_probe(self): return {"ports": {"cdc": {"path": "/dev/ttyACM1"}}}
     def device_diff(self): return self.diff
     def last_update(self): return None
@@ -220,3 +222,25 @@ def test_run_streaming_cancel_stops_the_process_tree(tmp_path):
     rc = mgr.run_streaming(f'"{sys.executable}" -c "import time; print(1, flush=True); time.sleep(30)"',
                            lines.append, cancel=lambda: bool(lines))
     assert rc == cam.AppManager.CANCELLED and time.time() - t0 < 10 and lines == ["1"]
+
+
+def test_two_boards_ask_which_and_the_hook_gets_that_device(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.devices = lambda: [{"id": "dev_a"}, {"id": "dev_b"}]
+    got = {}
+    def ota(rev, on_line, device=None):
+        got["device"] = device
+        return 0
+    mgr.config.flash_ota = ota
+    mgr.device_probe = lambda: {"id": mgr.chosen_device, "ports": {"cdc": {"path": "/dev/x"}}}
+    ui = FakeUI()
+    ui.ask_device = lambda devs: "dev_b"
+    assert cam.UpdatePipeline(mgr, ui).run() is True
+    assert got["device"] == "dev_b"
+
+
+def test_an_old_wrapper_hook_without_device_still_flashes(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    calls = []
+    mgr.config.flash_ota = lambda rev, on_line: calls.append(rev) or 0
+    assert cam.UpdatePipeline(mgr, FakeUI()).run() is True and calls == ["v2"]

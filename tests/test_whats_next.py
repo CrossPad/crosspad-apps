@@ -171,3 +171,28 @@ def test_owner_repo_of_reads_every_github_spelling():
     assert cam.owner_repo_of("git@github.com:CrossPad/crosspad-mixer") == "CrossPad/crosspad-mixer"
     assert cam.owner_repo_of("https://gitlab.com/x/y") is None
     assert cam.owner_repo_of("") is None
+
+
+def test_change_summary_follows_the_rule_and_drops_commit_prefixes():
+    avail = dict(AVAIL, release_log=["fix(sampler): kit selector remembers the last kit",
+                                     "feat!: 16 levels"],
+                 dev_log=["wip: half a looper"])
+    assert cam.change_summary(status(), avail) == ["kit selector remembers the last kit", "16 levels"]
+    assert cam.change_summary(status("branch", ref="master"), avail) == ["half a looper"]
+    assert cam.change_summary(status("pinned", commit="x"), avail) == []
+    assert cam.change_summary(status(), None) == []
+
+
+def test_path_problems_catch_what_breaks_an_esp_idf_build():
+    assert cam.path_problems("/home/a/cp", "esp-idf", False, None) == []
+    assert "space" in cam.path_problems("/home/a/my projects/cp", "esp-idf", False, None)[0]
+    assert "non-English" in cam.path_problems("/home/łukasz/cp", "esp-idf", False, None)[0]
+    long_dir = "C:\\" + "x" * 120
+    assert "long paths are off" in cam.path_problems(long_dir, "esp-idf", True, False)[0]
+    assert cam.path_problems(long_dir, "esp-idf", True, True) == []
+    assert cam.path_problems("/home/a/my projects", "pc", False, None) == []
+
+
+def test_redact_blanks_secret_looking_keys_only():
+    assert cam._redact({"board": "v2", "gh_token": "abc", "nested": [{"api_key": 1}]}) == \
+        {"board": "v2", "gh_token": "***", "nested": [{"api_key": "***"}]}

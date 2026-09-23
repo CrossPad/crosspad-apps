@@ -240,6 +240,20 @@ def _release_target(tags: list[tuple[str, str]], default_branch: str) -> str:
     return newest if newest else f"origin/{default_branch}"
 
 
+def change_summary(status: dict, avail: dict | None) -> list[str]:
+    """Commit subjects an update would bring to this app, newest first.
+
+    Conventional-commit prefixes ("fix(sampler): ") are dropped — a musician
+    reads "kit selector remembers the last kit", not the scope syntax.
+    """
+    if not avail:
+        return []
+    rule, _ = follow_rule(status["policy"])
+    subjects = avail.get("release_log" if rule == "release" else "dev_log", []) \
+        if rule in ("release", "development") else []
+    return [_re.sub(r"^\w+(\([^)]*\))?!?:\s*", "", subj) for subj in subjects]
+
+
 # == What's next ==============================================================
 
 def whats_next(ctx: dict) -> dict:
@@ -1077,6 +1091,36 @@ class AppManager:
             json.dump(cfg, f, indent=2)
             f.write("\n")
 
+    # -- CP Tools' own settings (personal: crosspad.local.json) ---------------
+
+    SETTINGS_DEFAULTS = {"check_updates": True, "early_features": False}
+
+    def settings(self) -> dict:
+        return dict(self.SETTINGS_DEFAULTS, **(self._load_local_config().get("cp_tools") or {}))
+
+    def set_setting(self, key: str, value):
+        local = self._load_local_config()
+        local.setdefault("cp_tools", {})[key] = value
+        self.save_config(local, local=True)
+
+    def set_early_features(self, on: bool) -> list[str]:
+        """Early features on: apps following the latest release follow development
+        instead; off: back. Versions you picked and your own copies stay put.
+        Written to the personal config, so it is your choice, not the project's."""
+        moved = []
+        for app_id in self._load_manifest().get("installed", {}):
+            rule, _ = follow_rule(self.app_policy(app_id))
+            if on and rule == "release":
+                path = self.app_status(app_id)["path"]
+                self.set_app_policy(app_id, TRACK_BRANCH, ref=self._get_default_branch(path),
+                                    local=True)
+                moved.append(app_id)
+            elif not on and rule == "development":
+                self.set_app_policy(app_id, TRACK_REGISTRY, local=True)
+                moved.append(app_id)
+        self.set_setting("early_features", on)
+        return moved
+
     def app_policy(self, app_id: str) -> dict:
         """Track policy for one app. Defaults to registry-tracked."""
         entry = self.load_config().get("apps", {}).get(app_id)
@@ -1310,10 +1354,21 @@ class AppManager:
             exact = self._sub_git(path, "describe", "--tags", "--exact-match", "HEAD")
             if exact.returncode == 0:
                 rec["installed_tag"] = exact.stdout.strip()
+            # What an update would bring, in the authors' own words.
+            rec["release_log"] = self._subjects(path, f"HEAD..{newest}") if newest else []
+            rec["dev_log"] = self._subjects(path, f"HEAD..origin/{default}")
             records[app_id] = rec
         self.available_path.parent.mkdir(parents=True, exist_ok=True)
-        self.available_path.write_text(json.dumps(records, indent=2))
+        # Written whole and renamed into place: the dashboard reads this file
+        # while a background check is still writing it.
+        tmp = self.available_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(records, indent=2))
+        os.replace(tmp, self.available_path)
         return records
+
+    def _subjects(self, path: str, range_spec: str, limit: int = 20) -> list[str]:
+        r = self._sub_git(path, "log", "--no-merges", f"-{limit}", "--format=%s", range_spec)
+        return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
 
     def _count(self, path: str, range_spec: str) -> int:
         r = self._sub_git(path, "rev-list", "--count", range_spec)
@@ -1986,6 +2041,12 @@ class AppManager:
         ok, text = self._cdc_exchange(verb, None, timeout)
         return text.strip().splitlines()[0] if ok else None
 
+    chosen_device: str | None = None   # a device id picked when several are plugged in
+
+    def devices(self) -> list[dict]:
+        """Every CrossPad the platform can see (ESP-IDF: crosspad-hil devices)."""
+        return list((self.board_info() or {}).get("devices") or [])
+
     def device_probe(self) -> dict | None:
         """What is plugged in, through the platform's probe when it has one.
 
@@ -1997,10 +2058,10 @@ class AppManager:
         board_resolve hook, or a board that answered with an unknown
         revision).
         """
-        board = self.board_info()
-        devices = (board or {}).get("devices") or []
+        devices = self.devices()
         if devices:
-            return devices[0]
+            chosen = [d for d in devices if d.get("id") == self.chosen_device]
+            return chosen[0] if chosen else devices[0]
         probe = getattr(self.config, "device_probe", None)
         if probe is not None:
             try:
@@ -2996,6 +3057,20 @@ class UpdatePipeline:
 
     def _build(self, s: StepResult) -> bool:
         plat = self.mgr.config.platform
+        # Before minutes of compiling, the two things that make it fail at the end.
+        try:
+            free_gb = shutil.disk_usage(self.mgr.project_dir).free / 1e9
+        except OSError:
+            free_gb = None
+        if free_gb is not None and free_gb < 1:
+            s.error = f"Only {free_gb:.1f} GB free — a build needs a few GB → [r] retry after freeing some"
+            return False
+        probs = path_problems(str(Path(self.mgr.project_dir).resolve()), plat,
+                              sys.platform == "win32",
+                              getattr(self.mgr, "windows_longpaths", lambda: None)())
+        if probs:
+            s.error = f"Can't build here: {probs[0]} → move the project to a short plain folder"
+            return False
         if plat == "esp-idf":
             b = self.mgr.board_info(refresh=True)
             if b is not None and not b.get("rev"):
@@ -3039,6 +3114,13 @@ class UpdatePipeline:
         return True
 
     def _flash(self, s: StepResult) -> bool:
+        devs = self.mgr.devices()
+        if len(devs) > 1 and not self.mgr.chosen_device:
+            pick = getattr(self.ui, "ask_device", None)
+            self.mgr.chosen_device = pick(devs) if pick else None
+            if not self.mgr.chosen_device:
+                s.error = "Which CrossPad? Answer above, then [r] retry"
+                return False
         dev = self.mgr.device_probe()
         if dev is None:
             self.tail = "Plug in your CrossPad — I'll flash it when I see it"
@@ -3050,6 +3132,10 @@ class UpdatePipeline:
         rev = (self.mgr.board_info() or {}).get("rev")
         ports = dev.get("ports") or {}
         has_cdc = bool((ports.get("cdc") or {}).get("path")) or dev.get("usb_mode") == "audio"
+        if dev.get("usb_mode") == "audio":
+            self.tail = ("The board is in USB audio mode — switching it to serial; "
+                         "if it asks 'USB serial mode?', press Allow on the CrossPad")
+            self._render()
 
         def on_line(line: str):
             self.log.write(line + "\n")
@@ -3057,7 +3143,9 @@ class UpdatePipeline:
             self._line(line)
 
         if has_cdc:
-            rc = self.mgr.config.flash_ota(rev, on_line)
+            ota = self.mgr.config.flash_ota
+            rc = (ota(rev, on_line, device=dev.get("id")) if _takes(ota, "device")
+                  else ota(rev, on_line))
         else:
             console = (ports.get("console") or {}).get("path")
             uart = getattr(self.mgr.config, "flash_uart", None)
@@ -3480,6 +3568,15 @@ def _kill_tree(proc: subprocess.Popen):
         proc.wait(timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         proc.kill()
+
+
+def _takes(fn, param: str) -> bool:
+    """Does a platform hook accept this keyword? Older wrappers predate it."""
+    import inspect
+    try:
+        return param in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _has_module(name: str) -> bool:
@@ -4017,6 +4114,19 @@ class _PipelineUI:
             if key in ("esc", "q"):
                 return None
 
+    def ask_device(self, devices: list[dict]) -> str | None:
+        _w(f"\n {_C.BYELLOW}Two or more CrossPads are plugged in. Which one?{_C.RST}\n")
+        for i, d in enumerate(devices, 1):
+            _w(f"   {_C.BCYAN}[{i}]{_C.RST} {d.get('id', '?')}  "
+               f"{_C.GRAY}{d.get('board_rev') or '?'} board, firmware {d.get('fw_rev') or '?'}"
+               f"{_C.RST}\n")
+        while True:
+            key = _read_key()
+            if key.isdigit() and 1 <= int(key) <= len(devices):
+                return devices[int(key) - 1].get("id")
+            if key in ("esc", "q"):
+                return None
+
     def wait_for_board(self, probe) -> bool:
         while True:
             key = _read_key(timeout=2.0)
@@ -4092,19 +4202,35 @@ class _TUI:
         self._next = whats_next(self._dashboard_ctx())
 
     def _startup_refresh(self):
-        """One fetch per app when the cache is older than an hour."""
+        """One fetch per app when the cache is older than an hour — in the
+        background, so the first screen is there at once and fills in."""
+        import threading
         age = self.mgr.available_age()
-        if 0 <= age < AVAILABLE_MAX_AGE_SECONDS or not self._installed:
+        if (0 <= age < AVAILABLE_MAX_AGE_SECONDS or not self._installed
+                or not self.mgr.settings()["check_updates"]):
             return
-        _clear()
-        _w(f"\n  {_C.GRAY}Checking for updates…{_C.RST}\n")
-        self.mgr.refresh_available(
-            list(self._installed),
-            progress=lambda a: _w(f"   {self.mgr.app_display_name(a)}\n"))
-        if self.mgr.offline:
-            _w(f"\n  {_C.BYELLOW}No connection{_C.RST} "
-               f"{_C.GRAY}— showing what's on this computer.{_C.RST}\n")
-        self._reload()
+
+        def work():
+            try:
+                self.mgr.refresh_available(list(self._installed))
+            finally:
+                self._stale = True
+
+        self._bg = threading.Thread(target=work, daemon=True)
+        self._bg.start()
+
+    def _wait_background(self):
+        """git must not fetch into a repo the update is about to move."""
+        bg = getattr(self, "_bg", None)
+        if bg is not None and bg.is_alive():
+            _clear()
+            _w(f"\n  {_C.GRAY}Finishing the update check…{_C.RST}\n")
+            bg.join()
+
+    @property
+    def _checking(self) -> bool:
+        bg = getattr(self, "_bg", None)
+        return bg is not None and bg.is_alive()
 
     def _dashboard_ctx(self) -> dict:
         env = self._env()
@@ -4136,6 +4262,8 @@ class _TUI:
         if b.get("fw_rev"):
             bits.append(f"fw {b['fw_rev']} {G['ok'] if not b.get('mismatch') else G['fail']}")
         bits.append("connected" if self._device else "no board plugged in")
+        if self._checking:
+            bits.append("checking for updates…")
         return " · ".join(bits)
 
     @staticmethod
@@ -4306,6 +4434,18 @@ class _TUI:
             self._section("What's next")
             _w(f" {_C.BYELLOW}{G['next']}{_C.RST} {_C.BWHITE}{nxt['line']}{_C.RST}\n")
             if nxt["action"] == "update":
+                w = self._cols
+                for a, r in self._rows.items():
+                    if r["state"] != "update":
+                        continue
+                    changes = change_summary(self._statuses[a], self.mgr.available(a))
+                    if changes:
+                        more = f" (+{len(changes) - 2} more)" if len(changes) > 2 else ""
+                        line = f"{self.mgr.app_display_name(a)}: {'; '.join(changes[:2])}{more}"
+                        _w(f"   {_C.GRAY}{line[:w - 5]}{_C.RST}\n")
+                    if follow_rule(self._statuses[a]["policy"])[0] == "development":
+                        _w(f"   {_C.GRAY}  (development version — newest work, "
+                           f"may be unfinished){_C.RST}\n")
                 _w(f"   {_C.BCYAN}[Enter]{_C.RST} Update my CrossPad "
                    f"{_C.GRAY}— download, build, flash"
                    f"{self._fmt_estimate(nxt['estimate'])}{_C.RST}\n")
@@ -4355,21 +4495,30 @@ class _TUI:
             if self._stale:
                 continue          # draw the fresh numbers before waiting for a key
 
-            key = _read_key()
+            key = ""
+            while not self._stale:
+                key = _read_key(timeout=0.5 if self._checking else None)
+                if key:
+                    break
+            if not key or key == "resize":
+                continue
             if key in ("q", "ctrl-c", "esc"):
                 break
             elif key == "1" or (key == "enter" and nxt["action"] == "update"):
+                self._wait_background()
                 self._update_pipeline()
                 self._stale = "force"
             elif key == "2":
+                self._wait_background()
                 self._apps_screen()
                 self._stale = True
             elif key == "3" or (key == "enter" and nxt["action"] == "wrong"):
                 self._something_wrong()
                 self._stale = True
             elif key == "4":
+                self._wait_background()
                 self._developer_tools()
-                self._stale = "force" 
+                self._stale = "force"
 
     def _update_pipeline(self):
         ui = _PipelineUI(self)
@@ -4602,6 +4751,7 @@ class _TUI:
             ("OTA Flash", "flash the last build without rebuilding", self._quick_ota),
             ("New app", "scaffold an app from the template", self._new_app_flow),
             ("Registry tools", "refresh, inspect, clear cache, sync manifest", self._registry_tools),
+            ("Settings", "update checks, early features", self._settings),
         ]
         if getattr(self.config, "board_revs", None):
             entries.insert(4, ("Board", "choose the board revision to build for",
@@ -4612,6 +4762,44 @@ class _TUI:
                 return
             entries[idx][2]()
             self._reload()
+
+    def _settings(self):
+        cursor = 0
+        while True:
+            st = self.mgr.settings()
+            rows = [("check_updates", "Check for updates when CP Tools starts",
+                     "in the background; off: only when you ask ([3] → Registry)"),
+                    ("early_features", "Early features",
+                     "on: apps that follow the latest release follow development "
+                     "instead — newest work, may be unfinished. Versions you picked "
+                     "stay put.")]
+            _clear()
+            self._header("Settings", f"CP Tools {MANAGER_VERSION}")
+            _w("\n")
+            for i, (key, title, help_) in enumerate(rows):
+                sel = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                val = f"{_C.BGREEN}on{_C.RST}" if st[key] else f"{_C.GRAY}off{_C.RST}"
+                _w(f" {sel} {title:<42} {val}\n")
+                if i == cursor:
+                    _w(f"     {_C.GRAY}{help_}{_C.RST}\n")
+            self._footer("↑↓ pick   [Enter] switch   [q] back")
+            key = _read_key()
+            if key in ("q", "esc", "ctrl-c"):
+                return
+            if key == "up":
+                cursor = (cursor - 1) % len(rows)
+            elif key == "down":
+                cursor = (cursor + 1) % len(rows)
+            elif key in ("enter", " "):
+                name = rows[cursor][0]
+                if name == "early_features":
+                    moved = self.mgr.set_early_features(not st[name])
+                    if moved:
+                        self._toast_here(f"{len(moved)} app(s) now follow "
+                                         f"{'development' if not st[name] else 'the latest release'}"
+                                         f" — [1] Update my CrossPad puts that on the board")
+                else:
+                    self.mgr.set_setting(name, not st[name])
 
     def _choose_board(self) -> bool:
         revs = list(getattr(self.config, "board_revs", ()))
@@ -5270,6 +5458,10 @@ class _TUI:
         # Latest release (spec §4): pin the policy explicitly.
         self.mgr.ensure_config(quiet=True)
         self.mgr.set_app_policy(app_id, TRACK_REGISTRY)
+        if self.mgr.settings()["early_features"]:
+            path = self.mgr.app_status(app_id)["path"]
+            self.mgr.set_app_policy(app_id, TRACK_BRANCH,
+                                    ref=self.mgr._get_default_branch(path), local=True)
         self.mgr.refresh_available([app_id])
         _hide_cursor()
         _pause()
