@@ -1280,14 +1280,19 @@ class AppManager:
         modules = self.project_dir / ".git" / "modules" / path
         if st["git"]["exists"] and (folder / ".git").exists():
             self.backup_app(app_id)
-        if not fresh and folder.exists() and not (folder / ".git").exists():
-            if modules.exists():
-                # The folder lost only its pointer to the repository git keeps
-                # under .git/modules; put it back (git on Windows will not).
-                rel = os.path.relpath(modules, folder).replace(os.sep, "/")
-                (folder / ".git").write_text(f"gitdir: {rel}\n")
-            else:
-                fresh = True
+        if folder.exists() and not (folder / ".git").exists():
+            # Git cannot see into this folder any more, so its files go into a
+            # plain archive first; then the folder is checked out again — from
+            # the repository still kept under .git/modules when there is one
+            # (no network), else by a fresh clone. Re-attaching the folder in
+            # place works with Linux git and fails with Windows git.
+            import tarfile
+            dest = self.backup_dir(app_id) / datetime.now().strftime("%Y%m%d-%H%M%S")
+            dest.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(dest / "folder.tgz", "w:gz") as tar:
+                tar.add(folder, arcname=folder.name)
+            shutil.rmtree(folder, ignore_errors=True)
+            fresh = fresh or not modules.exists()
         if fresh:
             shutil.rmtree(folder, ignore_errors=True)
             shutil.rmtree(modules, ignore_errors=True)

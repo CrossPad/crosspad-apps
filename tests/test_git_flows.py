@@ -56,9 +56,12 @@ def test_repair_brings_back_a_folder_whose_git_data_is_gone(project):
     folder = proj / "components/crosspad-sampler"
     (folder / ".git").unlink()                        # a submodule's .git is a file
     assert mgr.app_status("sampler")["git"]["broken"]
+    (folder / "mine.txt").write_text("work")
     ok, msg = mgr.repair_app("sampler")
     assert ok, msg
     assert mgr.app_status("sampler")["git"].get("broken") is None
+    saved = list(mgr.backup_dir("sampler").glob("*/folder.tgz"))
+    assert saved, "the folder's files were not kept"
     shutil.rmtree(folder)
     ok, msg = mgr.repair_app("sampler", fresh=True)
     assert ok, msg
