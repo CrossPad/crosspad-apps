@@ -105,17 +105,27 @@ if (-not (Have gh)) {
 if (Have gh) { Ok "GitHub CLI" } else { Bad "GitHub CLI (gh) is missing" "https://cli.github.com" }
 
 # The project repository is private until the CrossPad OS is open.
-git ls-remote "https://github.com/$Repo" HEAD *> $null
-if ($LASTEXITCODE -ne 0 -and (Have gh)) {
+# Probe it with every credential helper and prompt off: a plain `git
+# ls-remote` opens Git Credential Manager's own sign-in window, and the
+# user would sign in twice (there, then in gh).
+function Can-See-Repo {
+    $env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "never"
+    git -c credential.helper= -c "credential.https://github.com.helper=!gh auth git-credential" ls-remote "https://github.com/$Repo" HEAD *> $null
+    $ok = $LASTEXITCODE -eq 0
+    Remove-Item Env:GIT_TERMINAL_PROMPT, Env:GCM_INTERACTIVE -ErrorAction SilentlyContinue
+    return $ok
+}
+$reach = Can-See-Repo
+if (-not $reach -and (Have gh)) {
     gh auth status *> $null
     if ($LASTEXITCODE -ne 0) {
         Note "Sign in to GitHub: a code appears below, your browser opens, paste the code there."
         gh auth login --hostname github.com --git-protocol https --web
     }
     gh auth setup-git *> $null
-    git ls-remote "https://github.com/$Repo" HEAD *> $null
+    $reach = Can-See-Repo
 }
-if ($LASTEXITCODE -eq 0) { Ok "CrossPad project is reachable" }
+if ($reach) { Ok "CrossPad project is reachable" }
 else { Bad "Your GitHub account can't see $Repo yet" "ask for access on the CrossPad Discord with your GitHub user name, then run this again"; exit 1 }
 
 # ---------------------------------------------------------------------------

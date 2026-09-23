@@ -139,8 +139,15 @@ fi
 if have gh; then ok "GitHub CLI"; else bad "GitHub CLI (gh) is missing" "https://cli.github.com — install it and run this again"; fi
 
 # The project repository is private until the CrossPad OS is open: cloning it
-# needs a GitHub account with access. Reading apps does not.
-if git ls-remote "https://github.com/$CROSSPAD_REPO" HEAD >/dev/null 2>&1; then
+# needs a GitHub account with access. Reading apps does not. The probe never
+# prompts: git would ask for a user name, or open a credential manager's own
+# sign-in window, and the user would sign in twice.
+can_see_repo() {
+    GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git -c credential.helper= \
+        -c 'credential.https://github.com.helper=!gh auth git-credential' \
+        ls-remote "https://github.com/$CROSSPAD_REPO" HEAD >/dev/null 2>&1
+}
+if can_see_repo; then
     ok "CrossPad project is reachable"
 elif have gh; then
     if ! gh auth status >/dev/null 2>&1; then
@@ -148,7 +155,7 @@ elif have gh; then
         gh auth login --hostname github.com --git-protocol https --web </dev/tty || true
     fi
     gh auth setup-git >/dev/null 2>&1 || true
-    if git ls-remote "https://github.com/$CROSSPAD_REPO" HEAD >/dev/null 2>&1; then
+    if can_see_repo; then
         ok "Signed in to GitHub as $(gh api user --jq .login 2>/dev/null)"
     else
         bad "Your GitHub account can't see $CROSSPAD_REPO yet" \
