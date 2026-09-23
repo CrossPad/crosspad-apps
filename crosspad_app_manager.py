@@ -17,6 +17,8 @@ Usage:
     mgr.list_apps()
 """
 
+from __future__ import annotations   # `X | None` annotations on Python 3.9 (ESP-IDF 5.5's floor)
+
 import json
 import os
 import shutil
@@ -824,6 +826,10 @@ class AppManager:
         p = os.environ.get("IDF_PATH", "")
         if p and os.path.isdir(p):
             return p
+        # 1b. Where the CrossPad installer put it
+        p = self._load_local_config().get("idf_path", "")
+        if p and os.path.isdir(p):
+            return p
         # 2. VSCode settings (idf.espIdfPath)
         vscode_settings = self.project_dir / ".vscode" / "settings.json"
         if vscode_settings.exists():
@@ -840,6 +846,7 @@ class AppManager:
             Path.home() / "esp" / "esp-idf",
             Path.home() / "esp" / "v5.5" / "esp-idf",
             Path("/opt/esp-idf"),
+            Path("C:/esp/esp-idf"),        # the installer's short path on Windows
         ]:
             if candidate.is_dir():
                 return str(candidate)
@@ -1043,15 +1050,33 @@ class AppManager:
             if e.offline:
                 self._offline = True
                 return None
-            data = {}                                 # 404: nothing published yet
+            # 404: nothing published — or a private repo, which gh can still see.
+            data = self._gh_json("api", f"repos/{repo}/releases/latest") or {}
+            if data.get("tag_name"):
+                data["_via_gh"] = repo
         except ValueError:
             data = {}
-        rel = ({"tag": data["tag_name"],
+        rel = ({"tag": data["tag_name"], "repo": repo, "private": bool(data.get("_via_gh")),
                 "assets": {a["name"]: a["browser_download_url"] for a in data.get("assets", [])}}
                if data.get("tag_name") else {})
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(rel))
         return rel or None
+
+    def _release_asset(self, rel: dict, name: str, timeout: float = 120) -> bytes:
+        """One release file: anonymous for public repos, `gh release download`
+        for private ones (the platform repo is private until the OS opens)."""
+        if not rel.get("private"):
+            return http_get(rel["assets"][name], timeout=timeout)
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run(["gh", "release", "download", rel["tag"], "-R", rel["repo"],
+                                "-p", name, "-D", d], capture_output=True, text=True,
+                               check=False, timeout=timeout)
+            f = Path(d) / name
+            if r.returncode != 0 or not f.exists():
+                raise NetError(f"gh release download {name} failed", offline=False)
+            return f.read_bytes()
 
     def submodule_heads(self) -> dict:
         """{path: full commit} for every submodule checked out here."""
@@ -1069,7 +1094,7 @@ class AppManager:
         if not url:
             return False, "the release does not list its components"
         try:
-            components = json.loads(http_get(url)).get("components", {})
+            components = json.loads(self._release_asset(rel, name, 30)).get("components", {})
         except (NetError, ValueError):
             return False, "couldn't read the release's component list"
         dirty = [p for p in components if (self.project_dir / p).exists()
@@ -1085,14 +1110,14 @@ class AppManager:
             return None
         dest = self.project_dir / FIRMWARE_DIR / rel["tag"] / names["image"]
         try:
-            sums = parse_sha256sums(http_get(assets[names["sums"]]).decode())
+            sums = parse_sha256sums(self._release_asset(rel, names["sums"], 30).decode())
             want = sums.get(names["image"])
             if not want:
                 return None
             if not (dest.exists() and _sha256(dest) == want):
                 if on_line:
                     on_line(f"downloading {names['image']}")
-                blob = http_get(assets[names["image"]], timeout=120)
+                blob = self._release_asset(rel, names["image"])
                 import hashlib
                 if hashlib.sha256(blob).hexdigest() != want:
                     if on_line:
@@ -4825,6 +4850,7 @@ class _TUI:
         _hide_cursor()
         _install_resize_handler()
         try:
+            self._welcome()
             self._dashboard()
         except KeyboardInterrupt:
             pass
@@ -4832,6 +4858,32 @@ class _TUI:
             _restore_terminal()
             _clear()
             _alt_screen_off()
+
+    def _welcome(self):
+        """Once per project: what this is and the four things it does."""
+        marker = self.mgr.project_dir / WORK_ROOT / "welcomed"
+        if marker.exists():
+            return
+        _clear()
+        self._header("Welcome to CP Tools", f"version {MANAGER_VERSION}")
+        _w(f"""
+  This keeps your CrossPad up to date and lets you choose its apps.
+  Everything happens with a number key and Enter.
+
+   {_C.BCYAN}[1]{_C.RST} Update my CrossPad   downloads what is new and puts it on the board
+   {_C.BCYAN}[2]{_C.RST} Add or remove apps   and choose a version for each
+   {_C.BCYAN}[3]{_C.RST} Something's wrong    every check, with what to do about it
+   {_C.BCYAN}[4]{_C.RST} Developer tools      for people who write apps
+
+  The first line on the next screen always says what to do next.
+  {_C.BCYAN}?{_C.RST} shows help on any screen, {_C.BCYAN}q{_C.RST} goes back.
+
+  Plug your CrossPad in with a USB cable now.
+""")
+        self._footer("any key: start")
+        _read_key_blocking()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(datetime.now(timezone.utc).isoformat())
 
     # -- formatting -----------------------------------------------------------
 
