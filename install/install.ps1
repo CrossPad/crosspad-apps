@@ -215,17 +215,17 @@ py = str(pathlib.Path(tools) / "python_env" / envs[0] / "Scripts" / "python.exe"
 settings = {}
 tpl = vs / "settings.template.json"
 if tpl.exists():
-    settings = json.loads(re.sub(r"@@IDF_PYTHON_ENV@@", envs[0] if envs else "", tpl.read_text()))
+    settings = json.loads(re.sub(r"@@IDF_PYTHON_ENV@@", envs[0] if envs else "", tpl.read_text(encoding="utf-8")))
 out = vs / "settings.json"
 if out.exists():
     try:
-        settings.update(json.loads(out.read_text()))
+        settings.update(json.loads(out.read_text(encoding="utf-8")))
     except ValueError:
         pass
 settings.update({"idf.espIdfPath": idf, "idf.currentSetup": idf, "idf.toolsPath": tools,
                  "idf.pythonBinPath": py})
 vs.mkdir(exist_ok=True)
-out.write_text(json.dumps(settings, indent=4) + "\n")
+out.write_text(json.dumps(settings, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
 '@
 if ($env:CROSSPAD_NO_VSCODE) { Note "skipped" } else {
     if (-not (Have code)) {
@@ -332,21 +332,42 @@ if ($env:CROSSPAD_NO_MCP) { Note "skipped" } else {
 }
 
 # ---------------------------------------------------------------------------
-Step "CP Tools" "a desktop shortcut, and 'cptools' in any terminal"
-$launcher = "$CrossPadDir\cptools.cmd"
+Step "CP Tools" "a desktop shortcut, cptools and the crosspad-* commands in any terminal"
+# One small .cmd per command: each sets up ESP-IDF itself, so nobody has to
+# remember export.bat or a path into tools\. They live in the project's bin\,
+# which goes on the user PATH.
+$bin = "$CrossPadDir\bin"
+New-Item -ItemType Directory -Force $bin | Out-Null
+function Shim($name, $target) {
 @"
 @echo off
-rem CP Tools launcher, written by the CrossPad installer. Run: cptools [doctor^|support^|update-board^|tui]
-cd /d "$CrossPadDir"
+rem $name - written by the CrossPad installer
 set IDF_TOOLS_PATH=$IdfTools
 call "$IdfDir\export.bat" >nul 2>&1
-if "%~1"=="" (python tools\app_manager.py tui) else (python tools\app_manager.py %*)
-"@ | Set-Content -Encoding ASCII $launcher
+$target %*
+"@ | Set-Content -Encoding ASCII "$bin\$name.cmd"
+}
+Shim "crosspad-flash" "python `"$CrossPadDir\tools\ota_flash.py`""
+Shim "crosspad-files" "python `"$CrossPadDir\tools\fs_transfer.py`""
+Shim "crosspad-bench" "python `"$CrossPadDir\tools\bench.py`""
+Shim "crosspad-board" "python `"$CrossPadDir\tools\crosspad_board.py`""
+Shim "crosspad-idf" "idf.py -C `"$CrossPadDir`""
+if (Test-Path "$CrossPadDir\.venv\Scripts\crosspad-hil.exe") { Shim "crosspad-hil" "`"$CrossPadDir\.venv\Scripts\crosspad-hil.exe`"" }
+# cptools with no arguments opens the TUI.
+@"
+@echo off
+rem cptools - written by the CrossPad installer. Run: cptools [doctor^|support^|update-board^|list^|...]
+set IDF_TOOLS_PATH=$IdfTools
+call "$IdfDir\export.bat" >nul 2>&1
+if "%~1"=="" (python "$CrossPadDir\tools\app_manager.py" tui) else (python "$CrossPadDir\tools\app_manager.py" %*)
+"@ | Set-Content -Encoding ASCII "$bin\cptools.cmd"
+$launcher = "$bin\cptools.cmd"
+Copy-Item $launcher "$CrossPadDir\cptools.cmd" -Force     # the path older shortcuts point at
 # Python edits the personal config: it keeps every other key (Windows
 # PowerShell 5.1 cannot round-trip JSON into a hashtable).
 & python -c "import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); c=json.loads(p.read_text()) if p.exists() else {}; c['idf_path']=sys.argv[2]; p.write_text(json.dumps(c, indent=2)+chr(10))" "$CrossPadDir\crosspad.local.json" $IdfDir
-Add-UserPath $CrossPadDir
-Ok "cptools - from any new terminal"
+Add-UserPath $bin
+Ok "$((Get-ChildItem $bin -Name) -replace '\.cmd$','' -join ' ') - from any new terminal"
 try {
     $sh = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\CP Tools.lnk")
     $sh.TargetPath = $launcher; $sh.WorkingDirectory = $CrossPadDir; $sh.Save()
@@ -356,7 +377,7 @@ try {
 # ---------------------------------------------------------------------------
 Step "Final check" "in a new terminal, the way you will use it"
 Refresh-Path              # exactly the PATH a new window gets from the registry
-foreach ($t in "git", "python", "gh", "code", "node", "npx", "cptools") {
+foreach ($t in @("git", "python", "gh", "code", "node", "npx") + ((Get-ChildItem $bin -Name) -replace '\.cmd$','')) {
     if ($t -eq "code" -and $env:CROSSPAD_NO_VSCODE) { continue }
     if (($t -eq "node" -or $t -eq "npx") -and $env:CROSSPAD_NO_MCP) { continue }
     $found = powershell -NoProfile -Command "[bool](Get-Command $t -ErrorAction SilentlyContinue)"

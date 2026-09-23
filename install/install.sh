@@ -273,17 +273,17 @@ py = f"{tools}/python_env/{envs[0]}/bin/python" if envs else "python3"
 settings = {}
 tpl = vs / "settings.template.json"
 if tpl.exists():
-    settings = json.loads(re.sub(r"@@IDF_PYTHON_ENV@@", envs[0] if envs else "", tpl.read_text()))
+    settings = json.loads(re.sub(r"@@IDF_PYTHON_ENV@@", envs[0] if envs else "", tpl.read_text(encoding="utf-8")))
 out = vs / "settings.json"
 if out.exists():
     try:
-        settings.update(json.loads(out.read_text()))
+        settings.update(json.loads(out.read_text(encoding="utf-8")))
     except ValueError:
         pass
 settings.update({"idf.espIdfPath": idf, "idf.currentSetup": idf, "idf.toolsPath": tools,
                  "idf.pythonBinPath": py})
 vs.mkdir(exist_ok=True)
-out.write_text(json.dumps(settings, indent=4) + "\n")
+out.write_text(json.dumps(settings, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 }
 if [ -n "${CROSSPAD_NO_VSCODE:-}" ]; then
@@ -404,16 +404,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "CP Tools" "a launcher you can start from any terminal"
-launcher="$CROSSPAD_DIR/cptools"
-{
-    echo '#!/usr/bin/env bash'
-    echo '# CP Tools launcher, written by the CrossPad installer. Run: cptools [doctor|support|update-board|tui]'
-    echo "cd \"$CROSSPAD_DIR\" || exit 1"
-    echo ". \"$IDF_DIR/export.sh\" >/dev/null 2>&1"
-    echo 'exec python3 tools/app_manager.py "${@:-tui}"'
-} > "$launcher"
-chmod +x "$launcher"
+step "CP Tools" "cptools and the crosspad-* commands, in any terminal"
+# One small script per command: each sets up ESP-IDF itself, so nobody has to
+# remember `. export.sh` or a path into tools/. They live in the project's bin/
+# and are linked into ~/.local/bin.
+bin="$CROSSPAD_DIR/bin"
+mkdir -p "$bin"
+shim() {   # shim NAME TARGET...  — TARGET run with the user's arguments
+    local name="$1"; shift
+    {
+        echo '#!/usr/bin/env bash'
+        echo "# $name — written by the CrossPad installer"
+        echo ". \"$IDF_DIR/export.sh\" >/dev/null 2>&1"
+        echo "exec $* \"\$@\""
+    } > "$bin/$name"
+    chmod +x "$bin/$name"
+}
+shim cptools          python3 "\"$CROSSPAD_DIR/tools/app_manager.py\""
+shim crosspad-flash   python3 "\"$CROSSPAD_DIR/tools/ota_flash.py\""
+shim crosspad-files   python3 "\"$CROSSPAD_DIR/tools/fs_transfer.py\""
+shim crosspad-bench   python3 "\"$CROSSPAD_DIR/tools/bench.py\""
+shim crosspad-board   python3 "\"$CROSSPAD_DIR/tools/crosspad_board.py\""
+shim crosspad-idf     idf.py -C "\"$CROSSPAD_DIR\""
+[ -x "$CROSSPAD_DIR/.venv/bin/crosspad-hil" ] && shim crosspad-hil "\"$CROSSPAD_DIR/.venv/bin/crosspad-hil\""
+# cptools with no arguments opens the TUI (the app manager's own default).
+ln -sf "$bin/cptools" "$CROSSPAD_DIR/cptools"
 python3 -c 'import json, sys, pathlib
 p = pathlib.Path(sys.argv[1])
 try:
@@ -423,7 +438,7 @@ except (OSError, ValueError):
 cfg["idf_path"] = sys.argv[2]
 p.write_text(json.dumps(cfg, indent=2) + "\n")' "$CROSSPAD_DIR/crosspad.local.json" "$IDF_DIR"
 mkdir -p "$HOME/.local/bin"
-ln -sf "$launcher" "$HOME/.local/bin/cptools"
+for f in "$bin"/*; do ln -sf "$f" "$HOME/.local/bin/$(basename "$f")"; done
 if ! bash -lc 'command -v cptools' >/dev/null 2>&1; then
     # ~/.local/bin is not on a login PATH yet (macOS, some distributions).
     rcs="$HOME/.profile"
@@ -432,11 +447,11 @@ if ! bash -lc 'command -v cptools' >/dev/null 2>&1; then
         grep -qs 'HOME/.local/bin' "$rc" || printf '\nexport PATH="$HOME/.local/bin:$PATH"   # CrossPad\n' >> "$rc"
     done
 fi
-ok "cptools — from any new terminal"
+ok "$(ls "$bin" | tr '\n' ' ')— from any new terminal"
 
 # ---------------------------------------------------------------------------
 step "Final check" "in a new terminal, the way you will use it"
-for t in git python3 gh code node npx cptools; do
+for t in git python3 gh code node npx $(ls "$bin"); do
     case "$t" in
         code) [ -n "${CROSSPAD_NO_VSCODE:-}" ] && continue ;;
         node|npx) [ -n "${CROSSPAD_NO_MCP:-}" ] && continue ;;
@@ -463,5 +478,5 @@ else
 fi
 if [ -z "${CROSSPAD_NO_TUI:-}" ] && [ -t 1 ] && [ -e /dev/tty ]; then
     printf '\nOpening CP Tools…\n'
-    exec "$launcher" tui </dev/tty
+    exec "$bin/cptools" </dev/tty
 fi

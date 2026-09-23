@@ -66,3 +66,15 @@ def test_repair_brings_back_a_folder_whose_git_data_is_gone(project):
     ok, msg = mgr.repair_app("sampler", fresh=True)
     assert ok, msg
     assert (folder / "a.txt").read_text() == "2"
+
+
+def test_a_detached_app_that_follows_development_gets_onto_its_branch(project):
+    # What every fresh clone looks like: the submodule on the recorded commit,
+    # no branch. 'Follows development' must still update it.
+    mgr, proj, first, second = project
+    sub = proj / "components/crosspad-sampler"
+    git(sub, "checkout", "-q", first)
+    mgr.set_app_policy("sampler", "branch", ref="main")
+    mgr.update(app_name="sampler")
+    assert git(sub, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert git(sub, "rev-parse", "HEAD") == second

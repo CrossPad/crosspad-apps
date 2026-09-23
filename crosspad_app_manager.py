@@ -3142,8 +3142,20 @@ class AppManager:
             if track == TRACK_BRANCH:
                 # Follow the branch the user parked this app on: fast-forward
                 # in place, never check something else out.
+                if st["git"]["branch"] is None and self._sub_git(
+                        install_path, "merge-base", "--is-ancestor", "HEAD",
+                        f"origin/{ref}").returncode == 0:
+                    # A fresh clone checks submodules out detached, on the
+                    # commit the project records. Nothing is lost by putting
+                    # the app on the branch it follows — that commit is on it —
+                    # and without this it would never update at all.
+                    self._sub_git(install_path, "checkout", "--quiet", "-B", ref,
+                                  f"origin/{ref}")
+                    self._sub_git(install_path, "branch", "--quiet",
+                                  f"--set-upstream-to=origin/{ref}", ref)
+                    st["git"]["branch"] = ref
                 if st["git"]["branch"] != ref:
-                    skipped.append((name, f"on {st['git']['branch']}, "
+                    skipped.append((name, f"on {st['git']['branch'] or 'no branch'}, "
                                           f"config says {ref}"))
                     continue
                 r = self._sub_git(install_path, "merge", "--ff-only",
