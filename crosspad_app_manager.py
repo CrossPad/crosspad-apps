@@ -327,6 +327,26 @@ def checkout_matches_release(components: dict, local_heads: dict, dirty: list[st
     return True, ""
 
 
+CATALOG_REQUIRED = ("id", "name", "version", "description", "platforms")
+
+
+def catalog_problems(meta: dict | None, visibility: str | None, owner_repo: str | None,
+                     listed: list[str]) -> list[str]:
+    """Why an app could not go into the catalog yet, in the author's terms."""
+    if not owner_repo:
+        return ["the app has no GitHub repository — publish it first (New app → public repo)"]
+    if meta is None:
+        return ["crosspad-app.json is missing from the app folder"]
+    out = [f"crosspad-app.json has no \"{k}\"" for k in CATALOG_REQUIRED if not meta.get(k)]
+    if meta.get("version") and not parse_semver(str(meta["version"])):
+        out.append(f"version \"{meta['version']}\" is not like 1.2.3")
+    if visibility and visibility.lower() != "public":
+        out.append("the repository is private — other people could not install it")
+    if owner_repo.lower() in (r.lower() for r in listed):
+        out.append("it is already in the catalog")
+    return out
+
+
 def change_summary(status: dict, avail: dict | None) -> list[str]:
     """Commit subjects an update would bring to this app, newest first.
 
@@ -349,6 +369,9 @@ def whats_next(ctx: dict) -> dict:
         return {"line": f"The board runs {ctx['fw_rev']} firmware on a "
                         f"{ctx['board_rev']} board",
                 "action": "update", "estimate": ctx.get("estimate")}
+    if ctx.get("unfinished"):
+        return {"line": f"The last update stopped at {ctx['unfinished']}",
+                "action": "resume", "estimate": None}
     updates = ctx.get("updates") or []
     if updates:
         n = len(updates)
@@ -1082,6 +1105,85 @@ class AppManager:
                 on_line(f"download failed: {e}")
             return None
         return dest
+
+    # -- the catalog ------------------------------------------------------------
+
+    def _gh_json(self, *args) -> dict | list | None:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, check=False,
+                           timeout=30)
+        if r.returncode != 0:
+            return None
+        try:
+            return json.loads(r.stdout) if r.stdout.strip() else {}
+        except ValueError:
+            return None
+
+    def catalog_check(self, app_id: str) -> tuple[list[str], str | None, dict | None]:
+        """(problems, owner/repo, crosspad-app.json) for submitting one app."""
+        path = self.app_status(app_id)["path"]
+        meta = None
+        try:
+            meta = json.loads((self.project_dir / path / "crosspad-app.json").read_text())
+        except (OSError, ValueError):
+            pass
+        owner_repo = owner_repo_of(self.app_git_state(path).get("origin", ""))
+        vis = None
+        if owner_repo:
+            info = self._gh_json("repo", "view", owner_repo, "--json", "visibility")
+            vis = (info or {}).get("visibility")
+        try:
+            listed = [r["repo"] for r in json.loads(http_get(raw_url(
+                REMOTE_REGISTRY_REPO, "external-apps.json", "main"))).get("repos", [])]
+        except (NetError, ValueError, KeyError):
+            listed = []
+        listed += [owner_repo_of(i.get("repo", "")) or "" for i in
+                   self._load_registry().get("apps", {}).values()]
+        return catalog_problems(meta, vis, owner_repo, listed), owner_repo, meta
+
+    def submit_to_catalog(self, app_id: str) -> tuple[bool, str]:
+        """Open a pull request that adds the app to external-apps.json.
+
+        Through gh: fork CrossPad/crosspad-apps (once), a branch in the fork
+        with the one-line addition, and the PR. The registry job picks the
+        app up after the merge. Returns (ok, PR URL or the reason).
+        """
+        problems, owner_repo, meta = self.catalog_check(app_id)
+        if problems:
+            return False, problems[0]
+        me = (self._gh_json("api", "user") or {}).get("login")
+        if not me:
+            return False, "not signed in to GitHub — run gh auth login in a terminal"
+        subprocess.run(["gh", "repo", "fork", REMOTE_REGISTRY_REPO, "--clone=false"],
+                       capture_output=True, check=False, timeout=60)
+        fork = f"{me}/{REMOTE_REGISTRY_REPO.split('/')[1]}"
+        cur = self._gh_json("api", f"repos/{REMOTE_REGISTRY_REPO}/contents/external-apps.json")
+        base = self._gh_json("api", f"repos/{REMOTE_REGISTRY_REPO}/git/ref/heads/main")
+        if not cur or not base:
+            return False, "couldn't read the catalog on GitHub"
+        import base64
+        data = json.loads(base64.b64decode(cur["content"]).decode())
+        data.setdefault("repos", []).append({"repo": owner_repo})
+        branch = f"add-{app_id}"
+        self._gh_json("api", "-X", "POST", f"repos/{fork}/git/refs",
+                      "-f", f"ref=refs/heads/{branch}", "-f", f"sha={base['object']['sha']}")
+        in_fork = self._gh_json("api", f"repos/{fork}/contents/external-apps.json?ref={branch}")
+        body = base64.b64encode((json.dumps(data, indent=2) + "\n").encode()).decode()
+        put = self._gh_json("api", "-X", "PUT", f"repos/{fork}/contents/external-apps.json",
+                            "-f", f"message=Add {meta.get('name', app_id)} to the catalog",
+                            "-f", f"content={body}", "-f", f"branch={branch}",
+                            "-f", f"sha={(in_fork or cur)['sha']}")
+        if put is None:
+            return False, "couldn't write the change to your fork"
+        r = subprocess.run(["gh", "pr", "create", "-R", REMOTE_REGISTRY_REPO,
+                            "--head", f"{me}:{branch}",
+                            "--title", f"Add {meta.get('name', app_id)}",
+                            "--body", f"{meta.get('description', '')}\n\n"
+                                      f"https://github.com/{owner_repo}\n\n"
+                                      f"Submitted from CP Tools {MANAGER_VERSION}."],
+                           capture_output=True, text=True, check=False, timeout=60)
+        if r.returncode != 0:
+            return False, (r.stderr.strip().splitlines() or ["gh pr create failed"])[-1]
+        return True, r.stdout.strip()
 
     # -- going back -------------------------------------------------------------
 
@@ -4052,14 +4154,25 @@ def _enable_windows_vt():
         pass
 
 
+# Mouse: the wheel scrolls, a click on a "[key]" label presses that key.
+# POSIX terminals only — the Windows console path reads keys through msvcrt,
+# which does not see mouse reports. CROSSPAD_NO_MOUSE=1 keeps it off (then
+# the terminal's own text selection works without holding Shift).
+MOUSE = sys.platform != "win32" and not os.environ.get("CROSSPAD_NO_MOUSE")
+
+
 def _alt_screen_on():
     _enable_windows_vt()
     if not PLAIN:
         _w("\033[?1049h\033[H")
+        if MOUSE:
+            _w("\033[?1000h\033[?1006h")
 
 
 def _alt_screen_off():
     if not PLAIN:
+        if MOUSE:
+            _w("\033[?1006l\033[?1000l")
         _w("\033[?1049l")
 
 
@@ -4074,10 +4187,47 @@ def _viewport(cursor: int, total: int, height: int) -> tuple[int, int]:
     return start, start + height
 
 
+_ANSI_RE = _re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+_LABEL_RE = _re.compile(r"\[([^\]\s]{1,8})\]")
+_LABEL_KEYS = {"enter": "enter", "esc": "esc", "q/esc": "q", "space": " ",
+               "backspace": "backspace", "arrows": ""}
+_hotspots: list[tuple[int, int, int, str]] = []    # (row, first col, last col, key)
+_cur = [1, 1]                                        # 1-based row, col of the next char
+
+
+def _track(text: str):
+    """Follow where text lands on screen and remember every [key] label."""
+    plain = _ANSI_RE.sub("", text)
+    pos = 0
+    for line_i, chunk in enumerate(plain.split("\n")):
+        if line_i:
+            _cur[0] += 1
+            _cur[1] = 1
+        if "\r" in chunk:
+            chunk = chunk.rsplit("\r", 1)[1]
+            _cur[1] = 1
+        for m in _LABEL_RE.finditer(chunk):
+            label = m.group(1).lower()
+            key = _LABEL_KEYS.get(label, label if len(label) == 1 else "")
+            if key:
+                _hotspots.append((_cur[0], _cur[1] + m.start(), _cur[1] + m.end() - 1, key))
+        _cur[1] += len(chunk)
+        pos += len(chunk) + 1
+
+
 def _w(s: str):
     """Write to stdout without newline."""
+    if MOUSE:
+        _track(s)
     sys.stdout.write(s)
     sys.stdout.flush()
+
+
+def _hotspot_key(col: int, row: int) -> str:
+    for r, c0, c1, key in reversed(_hotspots):
+        if r == row and c0 <= col <= c1:
+            return key
+    return ""
 
 
 def _get_size() -> tuple[int, int]:
@@ -4090,7 +4240,11 @@ def _get_size() -> tuple[int, int]:
 
 
 def _clear():
+    _hotspots.clear()
+    _cur[0], _cur[1] = 1, 1
     _w("\n" + "=" * 40 + "\n" if PLAIN else "\033[2J\033[H")
+    if not PLAIN:
+        _cur[0], _cur[1] = 1, 1
 
 
 def _hide_cursor():
@@ -4198,6 +4352,27 @@ def _decode_key(ch: str) -> str:
         code = _read_within(0.05)
         if code is None:
             return "esc"
+        if code == "<":
+            # SGR mouse report: ESC [ < button ; col ; row (M press | m release)
+            body = ""
+            while True:
+                c = _read_within(0.05)
+                if c is None:
+                    return ""
+                if c in "Mm":
+                    break
+                body += c
+            try:
+                btn, col, row = (int(v) for v in body.split(";"))
+            except ValueError:
+                return ""
+            if btn == 64:
+                return "up"
+            if btn == 65:
+                return "down"
+            if c == "M" and btn == 0:
+                return _hotspot_key(col, row)
+            return ""
         simple = {"A": "up", "B": "down", "C": "right", "D": "left",
                   "H": "home", "F": "end"}
         if code in simple:
@@ -4611,7 +4786,10 @@ class _TUI:
         if self.mgr.cert_problem:
             missing.append("Python can't verify GitHub's certificate")
         can_flash = getattr(self.config, "flash_ota", None) is not None
-        return {"board_rev": b.get("rev"), "fw_rev": b.get("fw_rev"),
+        failed = next((st["name"] for st in (last or {}).get("steps", [])
+                       if st.get("ok") is False), None) if last and not last.get("ok") else None
+        return {"unfinished": STEP_TITLES.get(failed) if failed else None,
+                "board_rev": b.get("rev"), "fw_rev": b.get("fw_rev"),
                 "mismatch": bool(b.get("mismatch")), "updates": updates,
                 "apps_changed": apps_changed, "components_moved": moved,
                 "tools_missing": missing, "offline": self.mgr.offline,
@@ -4815,6 +4993,9 @@ class _TUI:
             elif nxt["action"] == "wrong":
                 _w(f"   {_C.BCYAN}[Enter]{_C.RST} Something's wrong "
                    f"{_C.GRAY}— see what to do{_C.RST}\n")
+            elif nxt["action"] == "resume":
+                _w(f"   {_C.BCYAN}[Enter]{_C.RST} Continue from there   "
+                   f"{_C.BCYAN}[1]{_C.RST} start over   {_C.BCYAN}[3]{_C.RST} Something's wrong\n")
 
             self._section("Apps on your CrossPad")
             if not self._installed:
@@ -4846,12 +5027,13 @@ class _TUI:
                f"{_C.BCYAN}[2]{_C.RST} Add or remove apps\n")
             _w(f" {_C.BCYAN}[3]{_C.RST} Something's wrong      "
                f"{_C.BCYAN}[4]{_C.RST} Developer tools\n")
-            _w(f" {_C.BCYAN}[q]{_C.RST} Quit                   {_C.BCYAN}[?]{_C.RST} Help\n")
+            _w(f" {_C.BCYAN}[q]{_C.RST} Quit                   {_C.BCYAN}[?]{_C.RST} Help   "
+               f"{_C.BCYAN}[/]{_C.RST} Find an action\n")
             global _screen_hints
             _screen_hints = ("[1] Update my CrossPad — download, build, flash, check   "
                              "[2] Add or remove apps, or pick a version   "
                              "[3] Something's wrong — every check, with its fix   "
-                             "[4] Developer tools   [q] Quit")
+                             "[4] Developer tools   [/] find any action by name   [q] Quit")
 
             # Everything below returns to a dashboard drawn from what we
             # already know; the refresh happens at the top of the next pass,
@@ -4869,9 +5051,17 @@ class _TUI:
                 continue
             if key in ("q", "ctrl-c", "esc"):
                 break
+            elif key == "enter" and nxt["action"] == "resume":
+                self._wait_background()
+                failed = next(n for n, t in STEP_TITLES.items() if t == self._dashboard_ctx()["unfinished"])
+                self._update_pipeline(resume_from=failed)
+                self._stale = "force"
             elif key == "1" or (key == "enter" and nxt["action"] == "update"):
                 self._wait_background()
                 self._update_pipeline()
+                self._stale = "force"
+            elif key == "/":
+                self._palette()
                 self._stale = "force"
             elif key == "2":
                 self._wait_background()
@@ -4885,10 +5075,58 @@ class _TUI:
                 self._developer_tools()
                 self._stale = "force"
 
-    def _update_pipeline(self):
+    def _actions(self) -> list[tuple[str, str, object]]:
+        """Every action CP Tools has, flat: what `/` searches."""
+        out = [("Update my CrossPad", "download, build, flash, check", self._update_pipeline),
+               ("Add or remove apps", "and pick a version for each", self._apps_screen),
+               ("Something's wrong", "every check, with its fix", self._something_wrong),
+               ("Report for support", "one zip with logs and findings", self._support_flow),
+               ("Go back to the versions from before", "undo the last update", self._go_back_flow),
+               ("Previous firmware", "switch the board to its second slot", self._switch_slot_flow)]
+        for title, what, fn in self._dev_entries():
+            out.append((title, what, fn))
+        return out
+
+    def _palette(self):
+        search, cursor = "", 0
+        global _help_suspended
+        while True:
+            acts = [a for a in self._actions()
+                    if search.lower() in (a[0] + " " + a[1]).lower()]
+            cursor = min(cursor, max(len(acts) - 1, 0))
+            _clear()
+            self._header("Find an action", "type to filter")
+            _w(f"\n  {_C.BYELLOW}/{_C.RST} {_C.BWHITE}{search}{_C.RST}\n\n")
+            for i, (title, what, _fn) in enumerate(acts[:max(_get_size()[1] - 8, 3)]):
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
+                _w(f" {mark} {title:<38} {_C.GRAY}{what}{_C.RST}\n")
+            if not acts:
+                _w(f"   {_C.GRAY}No matches for '{search}'{_C.RST}\n")
+            self._footer("type to filter   ↑↓ pick   [Enter] run   [Esc] back")
+            _help_suspended = True
+            try:
+                key = _read_key()
+            finally:
+                _help_suspended = False
+            if key in ("esc", "ctrl-c"):
+                return
+            if key == "up" and acts:
+                cursor = (cursor - 1) % len(acts)
+            elif key == "down" and acts:
+                cursor = (cursor + 1) % len(acts)
+            elif key == "enter" and acts:
+                acts[cursor][2]()
+                return
+            elif key == "backspace":
+                search = search[:-1]
+            elif len(key) == 1 and key.isprintable():
+                search += key
+
+    def _update_pipeline(self, resume_from: str | None = None):
         ui = _PipelineUI(self)
         pipe = UpdatePipeline(self.mgr, ui)
-        ok = pipe.run()
+        start = resume_from if resume_from in [s.name for s in pipe.steps] else None
+        ok = pipe.retry_from(start) if start else pipe.run()
         while True:
             ui.render(pipe.steps, pipe.tail, None)
             failed = next((s for s in pipe.steps if s.ok is False), None)
@@ -5175,6 +5413,15 @@ class _TUI:
         _pause()
 
     def _developer_tools(self):
+        entries = self._dev_entries()
+        while True:
+            idx = _menu_select("Developer tools", [e[0] for e in entries], [e[1] for e in entries])
+            if idx < 0:
+                return
+            entries[idx][2]()
+            self._reload()
+
+    def _dev_entries(self) -> list:
         entries = [
             ("Workspace", "per-app ownership: follow rule, git state, backups", self._workspace),
             ("Device", "what the board runs, component by component", self._device),
@@ -5185,17 +5432,43 @@ class _TUI:
             ("OTA Flash", "flash the last build without rebuilding", self._quick_ota),
             ("New app", "scaffold an app from the template", self._new_app_flow),
             ("Registry tools", "refresh, inspect, clear cache, sync manifest", self._registry_tools),
+            ("Submit an app to the catalog", "so other CrossPad owners can install it",
+             self._submit_flow),
             ("Settings", "update checks, early features", self._settings),
         ]
         if getattr(self.config, "board_revs", None):
             entries.insert(4, ("Board", "choose the board revision to build for",
                                lambda: self._choose_board()))
-        while True:
-            idx = _menu_select("Developer tools", [e[0] for e in entries], [e[1] for e in entries])
-            if idx < 0:
-                return
-            entries[idx][2]()
-            self._reload()
+        return entries
+
+    def _submit_flow(self):
+        own = [a for a in self._installed if a not in self._apps]
+        if not own:
+            self._toast_here("Every app here is already in the catalog. Make one with New app.")
+            return
+        idx = _menu_select("Which app?", [self.mgr.app_display_name(a) for a in own])
+        if idx < 0:
+            return
+        app_id = own[idx]
+        _clear()
+        self._header(f"Submit {self.mgr.app_display_name(app_id)}")
+        _w(f"\n  {_C.GRAY}Checking…{_C.RST}\n")
+        problems, owner_repo, meta = self.mgr.catalog_check(app_id)
+        _clear()
+        self._header(f"Submit {self.mgr.app_display_name(app_id)}", owner_repo or "")
+        if problems:
+            _w(f"\n  Not yet:\n")
+            for pr in problems:
+                _w(f"   {_C.BRED}{G['fail']}{_C.RST} {pr}\n")
+            _pause()
+            return
+        _w(f"\n  This opens a pull request on CrossPad/crosspad-apps that adds\n"
+           f"  {owner_repo} to the catalog. Once it is merged, the app shows up\n"
+           f"  under [2] for everyone within a few hours.\n")
+        if not _confirm("Submit it?"):
+            return
+        ok, msg = self.mgr.submit_to_catalog(app_id)
+        self._toast_here(f"Pull request: {msg}" if ok else f"Couldn't: {msg}")
 
     def _settings(self):
         cursor = 0
@@ -5802,6 +6075,8 @@ class _TUI:
             else:
                 acts.append("[i] Install")
             acts.append("[o] Open repo")
+            if info.get("screenshot"):
+                acts.append("[p] Picture")
             acts.append("[l] Changelog")
             acts.append("q back")
             self._footer("   ".join(acts))
@@ -5827,6 +6102,11 @@ class _TUI:
                 _pause()
             elif key == "o" and repo:
                 self._open_url(repo)
+            elif key == "p" and info.get("screenshot"):
+                shot = info["screenshot"]
+                owner_repo = owner_repo_of(repo)
+                self._open_url(shot if shot.startswith("http") or not owner_repo
+                               else raw_url(owner_repo, shot))
             elif key == "l":
                 self._show_changelog(app_id)
 

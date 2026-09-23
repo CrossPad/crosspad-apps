@@ -196,3 +196,9 @@ def test_path_problems_catch_what_breaks_an_esp_idf_build():
 def test_redact_blanks_secret_looking_keys_only():
     assert cam._redact({"board": "v2", "gh_token": "abc", "nested": [{"api_key": 1}]}) == \
         {"board": "v2", "gh_token": "***", "nested": [{"api_key": "***"}]}
+
+
+def test_an_unfinished_update_is_offered_first_after_a_mismatch():
+    n = cam.whats_next(ctx(unfinished="Build", updates=["Sampler"]))
+    assert n == {"line": "The last update stopped at Build", "action": "resume", "estimate": None}
+    assert cam.whats_next(ctx(unfinished="Build", mismatch=True, fw_rev="v1"))["action"] == "update"

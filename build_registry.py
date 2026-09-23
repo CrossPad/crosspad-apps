@@ -135,6 +135,9 @@ def build_app_entry(meta: dict, clone_url: str, stars: int, source: str) -> dict
         "category": meta.get("category", ""),
         "platforms": meta.get("platforms", []),
         "requires": requires,
+        # A picture of the app (a path in its repo, or a URL): CP Tools opens
+        # it from the app's page, so a musician picks by what it looks like.
+        **({"screenshot": meta["screenshot"]} if meta.get("screenshot") else {}),
         "changelog": meta.get("changelog", []),
         "stars": stars,
         "source": source,

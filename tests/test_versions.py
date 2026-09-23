@@ -91,3 +91,16 @@ def test_app_row_broken_folder_is_its_own_state():
     st = {"policy": {"track": "registry"}, "blocking": [],
           "git": {"exists": True, "head": None, "broken": "no git data in the folder"}}
     assert cam.app_row(st, None, True)["state"] == "broken"
+
+
+def test_catalog_problems_say_what_an_author_must_fix():
+    meta = {"id": "fishtank", "name": "Fish Tank", "version": "0.1.0",
+            "description": "fish", "platforms": ["esp-idf"]}
+    assert cam.catalog_problems(meta, "PUBLIC", "me/crosspad-fishtank", []) == []
+    assert "no GitHub repository" in cam.catalog_problems(meta, None, None, [])[0]
+    assert "private" in cam.catalog_problems(meta, "PRIVATE", "me/x", [])[0]
+    assert cam.catalog_problems(dict(meta, version="soon"), "PUBLIC", "me/x", []) == \
+        ['version "soon" is not like 1.2.3']
+    assert 'no "platforms"' in cam.catalog_problems(dict(meta, platforms=[]), "PUBLIC", "me/x", [])[0]
+    assert "already" in cam.catalog_problems(meta, "PUBLIC", "Me/X", ["me/x"])[0]
+    assert "missing" in cam.catalog_problems(None, "PUBLIC", "me/x", [])[0]
