@@ -336,7 +336,7 @@ if out.exists():
     except ValueError:
         pass
 cfg.setdefault("servers", {})["crosspad"] = {
-    "type": "stdio", "command": "npx", "args": ["-y", "crosspad-mcp-server"],
+    "type": "stdio", "command": "npx", "args": ["-y", "crosspad-mcp-server@latest"],
     "env": {"CROSSPAD_IDF_ROOT": str(proj), "IDF_PATH": idf}}
 out.parent.mkdir(exist_ok=True)
 out.write_text(json.dumps(cfg, indent=4) + "\n")
@@ -344,28 +344,39 @@ PY
 }
 mcp_answers() {   # start the server the way an editor does and ask for its tools
     python3 - "$CROSSPAD_DIR" "$IDF_DIR" <<'PY'
-import json, os, subprocess, sys
+import json, os, shutil, subprocess, sys, threading
 env = dict(os.environ, CROSSPAD_IDF_ROOT=sys.argv[1], IDF_PATH=sys.argv[2])
 msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2024-11-05", "capabilities": {},
             "clientInfo": {"name": "crosspad-installer", "version": "1"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
+# stdin stays open until the answer: a stdio server ends when its client does.
 try:
-    p = subprocess.run(["npx", "-y", "crosspad-mcp-server"], env=env, timeout=240,
-                       input="".join(json.dumps(m) + "\n" for m in msgs),
-                       capture_output=True, text=True)
-except (OSError, subprocess.TimeoutExpired):
+    p = subprocess.Popen([shutil.which("npx") or "npx", "-y", "crosspad-mcp-server@latest"],
+                         env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+except OSError:
     sys.exit(1)
-for line in p.stdout.splitlines():
-    try:
-        msg = json.loads(line)
-    except ValueError:
-        continue
-    if msg.get("id") == 2:
-        print(len(msg.get("result", {}).get("tools", [])))
-        sys.exit(0)
-sys.exit(1)
+p.stdin.write("".join(json.dumps(m) + "\n" for m in msgs))
+p.stdin.flush()
+found = []
+def read():
+    for line in p.stdout:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("id") == 2:
+            found.append(len(msg.get("result", {}).get("tools", [])))
+            return
+t = threading.Thread(target=read, daemon=True)
+t.start()
+t.join(240)
+p.kill()
+if not found:
+    sys.exit(1)
+print(found[0])
 PY
 }
 node_ok() { have node && node -e 'process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)' 2>/dev/null; }
@@ -382,11 +393,11 @@ else
         if have claude; then
             claude mcp get crosspad >/dev/null 2>&1 \
                 || claude mcp add --scope user crosspad -e "CROSSPAD_IDF_ROOT=$CROSSPAD_DIR" \
-                       -e "IDF_PATH=$IDF_DIR" -- npx -y crosspad-mcp-server >/dev/null 2>&1
+                       -e "IDF_PATH=$IDF_DIR" -- npx -y crosspad-mcp-server@latest >/dev/null 2>&1
             claude mcp get crosspad >/dev/null 2>&1 && ok "Claude Code knows it too"
         fi
         if n=$(mcp_answers); then ok "the MCP server starts and offers $n tools"
-        else bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server — and send what it prints on Discord (#support)"; fi
+        else bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server@latest — and send what it prints on Discord (#support)"; fi
     else
         bad "Node.js 18 or newer is missing" "install it from https://nodejs.org and run this again"
     fi
