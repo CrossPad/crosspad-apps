@@ -139,7 +139,9 @@ if (-not (Test-Path $CrossPadDir)) {
     git clone --branch $Branch "https://github.com/$Repo" $CrossPadDir
     if ($LASTEXITCODE -ne 0) { Bad "Download failed" "check the connection and run this again"; exit 1 }
 } else {
-    $changes = git -C $CrossPadDir status --porcelain --ignore-submodules
+    # Only edits to tracked files are "yours": the launcher and .venv this
+    # script writes into the folder are untracked and must not block updates.
+    $changes = git -C $CrossPadDir status --porcelain --ignore-submodules --untracked-files=no
     if (-not $changes) { git -C $CrossPadDir pull --ff-only --quiet } else { Note "the project has changes of yours - not updating it, only filling in what is missing" }
 }
 git -C $CrossPadDir submodule update --init --recursive

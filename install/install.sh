@@ -175,7 +175,9 @@ if [ ! -d "$CROSSPAD_DIR" ]; then
     git clone --branch "$CROSSPAD_BRANCH" "https://github.com/$CROSSPAD_REPO" "$CROSSPAD_DIR" \
         || { bad "Download failed" "check the connection and run this again"; exit 1; }
 else
-    if [ -z "$(git -C "$CROSSPAD_DIR" status --porcelain --ignore-submodules)" ]; then
+    # Only edits to tracked files are "yours": the launcher and .venv this
+    # script writes into the folder are untracked and must not block updates.
+    if [ -z "$(git -C "$CROSSPAD_DIR" status --porcelain --ignore-submodules --untracked-files=no)" ]; then
         git -C "$CROSSPAD_DIR" pull --ff-only --quiet || note "left the project as it is (it has its own commits)"
     else
         note "the project has changes of yours — not updating it, only filling in what is missing"
