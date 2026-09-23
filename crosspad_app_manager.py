@@ -1298,6 +1298,15 @@ class AppManager:
             shutil.rmtree(modules, ignore_errors=True)
         r = self._git("submodule", "update", "--init", "--force", "--", path,
                       check=False, capture=True)
+        if r.returncode != 0 and not fresh:
+            # Windows git will not check a submodule out again from the
+            # repository it keeps under .git/modules ('could not get a
+            # repository handle'); a clean clone always works.
+            shutil.rmtree(folder, ignore_errors=True)
+            shutil.rmtree(modules, ignore_errors=True)
+            fresh = True
+            r = self._git("submodule", "update", "--init", "--force", "--", path,
+                          check=False, capture=True)
         if r.returncode != 0:
             lines = (r.stderr or r.stdout or "").strip().splitlines()
             return False, lines[-1] if lines else "git could not restore it"
