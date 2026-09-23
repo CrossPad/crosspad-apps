@@ -115,6 +115,8 @@ function Can-See-Repo {
     Remove-Item Env:GIT_TERMINAL_PROMPT, Env:GCM_INTERACTIVE -ErrorAction SilentlyContinue
     return $ok
 }
+# git itself must use the gh sign-in for github.com (clone, submodules, pip).
+if (Have gh) { gh auth status *> $null; if ($LASTEXITCODE -eq 0) { gh auth setup-git *> $null } }
 $reach = Can-See-Repo
 if (-not $reach -and (Have gh)) {
     gh auth status *> $null

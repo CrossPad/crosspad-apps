@@ -147,6 +147,10 @@ can_see_repo() {
         -c 'credential.https://github.com.helper=!gh auth git-credential' \
         ls-remote "https://github.com/$CROSSPAD_REPO" HEAD >/dev/null 2>&1
 }
+# git itself must use the gh sign-in for github.com (clone, submodules, pip).
+if have gh && gh auth status >/dev/null 2>&1; then
+    gh auth setup-git >/dev/null 2>&1 || true
+fi
 if can_see_repo; then
     ok "CrossPad project is reachable"
 elif have gh; then
