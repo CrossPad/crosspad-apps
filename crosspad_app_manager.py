@@ -60,6 +60,11 @@ TRACK_ALIASES = {"release": TRACK_REGISTRY, "development": TRACK_BRANCH,
 BLOCKING_FLAGS = ("dirty", "ahead", "branch-mismatch", "origin-mismatch")
 
 RAW_BASE = "https://raw.githubusercontent.com"
+API_BASE = "https://api.github.com"
+# Where each platform's CI publishes ready-built firmware (tag → release).
+RELEASE_REPOS = {"esp-idf": "CrossPad/platform-idf"}
+RELEASE_FILE = ".crosspad/official-release.json"
+FIRMWARE_DIR = ".crosspad/firmware"
 HTTP_TIMEOUT_SECONDS = 15
 
 
@@ -283,6 +288,43 @@ def unmet_requirements(requires, have: dict) -> list[str]:
             out.append(f"needs {short} {spec}, this project has "
                        f"{'.'.join(map(str, v))}")
     return out
+
+
+def release_asset_names(tag: str, rev: str) -> dict:
+    """The file names platform-idf's release job gives its outputs."""
+    return {"image": f"CrossPad-{tag}-{rev}.bin",
+            "components": f"CrossPad-{tag}-components.json",
+            "sums": "SHA256SUMS.txt"}
+
+
+def parse_sha256sums(text: str) -> dict:
+    out = {}
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) == 2 and len(parts[0]) == 64:
+            out[parts[1].lstrip("*")] = parts[0].lower()
+    return out
+
+
+def checkout_matches_release(components: dict, local_heads: dict, dirty: list[str],
+                             overrides: list[str]) -> tuple[bool, str]:
+    """Is this checkout exactly what the release was built from?
+
+    Only then may a downloaded image stand in for a build: same commit in
+    every component the release lists, nothing uncommitted, no feature flag
+    set differently. The reason names the first difference.
+    """
+    if overrides:
+        return False, "feature flags differ from the defaults"
+    if dirty:
+        return False, f"{dirty[0]} has changes"
+    for path, sha in components.items():
+        local = local_heads.get(path)
+        if not local:
+            return False, f"{path} is not in this project"
+        if not (local.startswith(sha) or sha.startswith(local)):
+            return False, f"{path.rsplit('/', 1)[-1]} is on another version"
+    return True, ""
 
 
 def change_summary(status: dict, avail: dict | None) -> list[str]:
@@ -951,6 +993,95 @@ class AppManager:
             return json.loads(r.stdout).get("requires")
         except ValueError:
             return None
+
+    # -- ready-built firmware ---------------------------------------------------
+
+    def official_release(self, refresh: bool = False) -> dict | None:
+        """The newest published release of this platform: tag + asset URLs.
+
+        GitHub's anonymous API, cached for an hour. None when the platform
+        publishes nothing, nothing is published yet, or there is no network.
+        """
+        repo = getattr(self.config, "release_repo", None) or RELEASE_REPOS.get(self.config.platform)
+        if not repo:
+            return None
+        cache = self.project_dir / RELEASE_FILE
+        if not refresh and cache.exists() and \
+                time.time() - cache.stat().st_mtime < CACHE_MAX_AGE_SECONDS:
+            try:
+                return json.loads(cache.read_text()) or None
+            except ValueError:
+                pass
+        if self._offline:
+            return None
+        try:
+            data = json.loads(http_get(f"{API_BASE}/repos/{repo}/releases/latest"))
+        except NetError as e:
+            if e.offline:
+                self._offline = True
+                return None
+            data = {}                                 # 404: nothing published yet
+        except ValueError:
+            data = {}
+        rel = ({"tag": data["tag_name"],
+                "assets": {a["name"]: a["browser_download_url"] for a in data.get("assets", [])}}
+               if data.get("tag_name") else {})
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(rel))
+        return rel or None
+
+    def submodule_heads(self) -> dict:
+        """{path: full commit} for every submodule checked out here."""
+        out = {}
+        for sub in self.get_all_submodules():
+            r = self._sub_git(sub["path"], "rev-parse", "HEAD")
+            if r.returncode == 0:
+                out[sub["path"]] = r.stdout.strip()
+        return out
+
+    def release_match(self, rel: dict) -> tuple[bool, str]:
+        """Can the release's image replace a build of this checkout?"""
+        name = release_asset_names(rel["tag"], "")["components"]
+        url = rel.get("assets", {}).get(name)
+        if not url:
+            return False, "the release does not list its components"
+        try:
+            components = json.loads(http_get(url)).get("components", {})
+        except (NetError, ValueError):
+            return False, "couldn't read the release's component list"
+        dirty = [p for p in components if (self.project_dir / p).exists()
+                 and self.get_submodule_dirty(p)]
+        return checkout_matches_release(components, self.submodule_heads(), dirty,
+                                        self.feature_overrides())
+
+    def download_release_image(self, rel: dict, rev: str, on_line=None) -> Path | None:
+        """The release's app image for this board revision, checksum verified."""
+        names = release_asset_names(rel["tag"], rev)
+        assets = rel.get("assets", {})
+        if names["image"] not in assets or names["sums"] not in assets:
+            return None
+        dest = self.project_dir / FIRMWARE_DIR / rel["tag"] / names["image"]
+        try:
+            sums = parse_sha256sums(http_get(assets[names["sums"]]).decode())
+            want = sums.get(names["image"])
+            if not want:
+                return None
+            if not (dest.exists() and _sha256(dest) == want):
+                if on_line:
+                    on_line(f"downloading {names['image']}")
+                blob = http_get(assets[names["image"]], timeout=120)
+                import hashlib
+                if hashlib.sha256(blob).hexdigest() != want:
+                    if on_line:
+                        on_line("the download is damaged (checksum differs)")
+                    return None
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(blob)
+        except NetError as e:
+            if on_line:
+                on_line(f"download failed: {e}")
+            return None
+        return dest
 
     # -- going back -------------------------------------------------------------
 
@@ -3277,6 +3408,8 @@ class UpdatePipeline:
                 except Exception:
                     s.error = error_line("build", "no-board")
                     return False
+            if self._use_release_image(s):
+                return True
             a = self.mgr.idf_args()
             cmd = f"idf.py {a}fullclean && idf.py {a}build" if self.plan["fullclean"] \
                 else f"idf.py {a}build"
@@ -3304,6 +3437,30 @@ class UpdatePipeline:
                                          build_failure_where(self.log_tail, dirs))
             return False
         s.detail = "firmware ready"
+        return True
+
+    image: Path | None = None       # a downloaded release image standing in for a build
+
+    def _use_release_image(self, s: StepResult) -> bool:
+        """When this checkout is exactly a published release, download its
+        image instead of compiling for minutes. Anything else builds."""
+        ota = getattr(self.mgr.config, "flash_ota", None)
+        rel_fn = getattr(self.mgr, "official_release", None)
+        if ota is None or rel_fn is None or not _takes(ota, "image"):
+            return False
+        rel = rel_fn()
+        if not rel:
+            return False
+        ok, why = self.mgr.release_match(rel)
+        self.log.write(f"release {rel['tag']}: {'matches' if ok else why}\n")
+        if not ok:
+            return False
+        rev = (self.mgr.board_info() or {}).get("rev")
+        path = self.mgr.download_release_image(rel, rev, self._line) if rev else None
+        if path is None:
+            return False
+        self.image = path
+        s.detail = f"ready-built {rel['tag']} — no build needed"
         return True
 
     def _flash(self, s: StepResult) -> bool:
@@ -3337,8 +3494,12 @@ class UpdatePipeline:
 
         if has_cdc:
             ota = self.mgr.config.flash_ota
-            rc = (ota(rev, on_line, device=dev.get("id")) if _takes(ota, "device")
-                  else ota(rev, on_line))
+            kw = {}
+            if _takes(ota, "device"):
+                kw["device"] = dev.get("id")
+            if self.image is not None:
+                kw["image"] = str(self.image)
+            rc = ota(rev, on_line, **kw)
         else:
             console = (ports.get("console") or {}).get("path")
             uart = getattr(self.mgr.config, "flash_uart", None)
@@ -3738,6 +3899,15 @@ def _profile_cli(mgr: "AppManager", args):
 # =============================================================================
 #  Interactive TUI
 # =============================================================================
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 
 def _redact(obj):
     """Blank anything that looks like a secret before it leaves the machine."""
@@ -6293,7 +6463,9 @@ class _TUI:
             ota_cmd = self.mgr.ota_command()
             build_cmd = f"idf.py {self.mgr.idf_args()}build"
         elif self.config.platform == "arduino":
-            ota_cmd = "python3 scripts/ota_flash.py"
+            # The Arduino firmware has no OTA-over-CDC tool of its own; PlatformIO
+            # uploads over USB (the STM bridge's DTR/RTS reach EN and GPIO0).
+            ota_cmd = "pio run --target upload"
             build_cmd = "pio run"
         elif self.config.platform == "pc":
             # PC: "OTA" = run simulator directly

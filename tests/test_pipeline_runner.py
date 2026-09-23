@@ -262,3 +262,30 @@ def test_an_update_that_moved_nothing_keeps_the_older_go_back_point(tmp_path):
     mgr.app_heads = lambda: {"sampler": "aaa"}
     assert cam.UpdatePipeline(mgr, FakeUI()).run() is True
     assert mgr.saved["previous"] == {"sampler": "old"}
+
+
+def test_a_checkout_equal_to_the_release_flashes_its_image_without_building(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    got = {}
+    def ota(rev, on_line, device=None, image=None):
+        got["image"] = image
+        return 0
+    mgr.config.flash_ota = ota
+    mgr.official_release = lambda: {"tag": "v1.0.2", "assets": {}}
+    mgr.release_match = lambda rel: (True, "")
+    mgr.download_release_image = lambda rel, rev, on_line=None: tmp_path / "CrossPad-v1.0.2-v2.bin"
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True
+    assert not any(c[0] == "run" for c in mgr.calls)             # no compile
+    assert got["image"].endswith("CrossPad-v1.0.2-v2.bin")
+    assert "ready-built v1.0.2" in p.step("build").detail
+
+
+def test_a_checkout_that_differs_from_the_release_builds(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line, device=None, image=None: 0
+    mgr.official_release = lambda: {"tag": "v1.0.2", "assets": {}}
+    mgr.release_match = lambda rel: (False, "crosspad-sampler is on another version")
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True and any(c[0] == "run" for c in mgr.calls)
+    assert "crosspad-sampler is on another version" in (tmp_path / cam.LAST_UPDATE_LOG).read_text()
