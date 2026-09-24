@@ -3755,6 +3755,10 @@ class _PrintUI:
 
 # == Standalone CLI ===========================================================
 
+# The command the installer puts on PATH for each platform, so --help names it.
+CLI_NAMES = {"esp-idf": "cptools", "pc": "crosspad-pc", "arduino": "crosspad-arduino"}
+
+
 def cli_main(config: PlatformConfig):
     """Generic CLI entry point for any platform."""
     import argparse
@@ -3767,7 +3771,7 @@ def cli_main(config: PlatformConfig):
             pass
 
     parser = argparse.ArgumentParser(
-        prog="crosspad-apps",
+        prog=CLI_NAMES.get(config.platform, "crosspad-apps"),
         description="CrossPad App Package Manager",
     )
     sub = parser.add_subparsers(dest="command")
