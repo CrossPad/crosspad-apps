@@ -94,6 +94,18 @@ def test_wrong_rows_without_board_and_with_guard_on():
     assert next(r for r in rows if r["title"] == "Tools")["ok"] is True
 
 
+def test_wrong_rows_do_not_claim_a_firmware_nobody_reported():
+    # A board seen only over MIDI says nothing about its firmware.
+    rows = cam.wrong_rows({"device": {"id": "dev_6dd8", "board_rev": None, "fw_rev": None,
+                                      "usb_mode": "unknown"},
+                           "board": {"rev": "v2", "source": "memory", "mismatch": False},
+                           "idf_path": "/x", "gh_ok": True, "gh_user": "matixan",
+                           "python": "3.12.3", "usb_guard": None, "registry_age": 10,
+                           "last_update": None, "remembered_board": "v2"})
+    fw = next(r for r in rows if r["title"] == "Firmware")
+    assert "matches" not in fw["detail"] and "not known yet" in fw["detail"]
+
+
 def test_wrong_rows_usb_guard_and_mismatch():
     rows = cam.wrong_rows({"device": {"id": "dev_31ea", "board_rev": "v2", "fw_rev": "v1",
                                       "usb_mode": "default"},

@@ -432,7 +432,9 @@ def wrong_rows(f: dict) -> list[dict]:
                          "detail": f"{b.get('fw_rev')} firmware on a {b.get('rev')} board",
                          "fix": "[Enter] Update my CrossPad", "action": "update"})
         else:
-            rows.append({"ok": True, "title": "Firmware", "detail": "matches the board",
+            rows.append({"ok": True, "title": "Firmware",
+                         "detail": "matches the board" if dev.get("fw_rev") else
+                                   "not known yet — [1] Update my CrossPad checks it",
                          "fix": None, "action": None})
     else:
         rows.append({"ok": False, "title": "Board found",
