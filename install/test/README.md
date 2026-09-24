@@ -40,6 +40,7 @@ windows/wintest.sh job windows/jobs/run-test.ps1             # fresh + broken, l
 WINTEST_USB=1 windows/wintest.sh start
 windows/wintest.sh job windows/jobs/run-board.ps1            # with the real board: update-board
 windows/wintest.sh fl            # golden-fl + the board: full setup with both extras, then fl-check.ps1
+windows/wintest.sh job windows/jobs/arduino-upload.ps1      # after fl: pio upload on the board, update-board back, smoke
 windows/wintest.sh stop          # the board goes back to the host
 ```
 
