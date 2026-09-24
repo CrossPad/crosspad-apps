@@ -5,7 +5,8 @@ opens **CP Tools** — the program that updates the CrossPad and chooses its app
 
 **You need:**
 
-- a Windows, Mac or Linux computer with about **10 GB free**
+- a Windows, Mac or Linux computer with about **10 GB free** (about **25 GB**
+  with the PC simulator and the Arduino version)
 - the **USB-C cable** of your CrossPad
 - a **GitHub account** that has access to CrossPad (ask on the CrossPad Discord
   with your GitHub user name if you don't have access yet)
