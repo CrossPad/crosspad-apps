@@ -28,9 +28,11 @@ $IdfTools    = "C:\esp\.espressif"           # short, ASCII-only: user names bre
 $IdfVersion  = "v5.5.5"
 $Repo        = "CrossPad/platform-idf"
 $PcDir       = Env-Or "CROSSPAD_PC_DIR" "C:\CrossPad-PC"
-$PcBranch    = Env-Or "CROSSPAD_PC_BRANCH" "master"
+# The simulator and the Arduino version live on their development branches:
+# master/main there predate the app manager and the 2.0 board.
+$PcBranch    = Env-Or "CROSSPAD_PC_BRANCH" "feat/virtual-audio-on-pipeline"
 $ArduinoDir  = Env-Or "CROSSPAD_ARDUINO_DIR" "C:\CrossPad-Arduino"
-$ArduinoBranch = Env-Or "CROSSPAD_ARDUINO_BRANCH" "main"
+$ArduinoBranch = Env-Or "CROSSPAD_ARDUINO_BRANCH" "feat/audio-module-arduino"
 $WithPc      = [bool]$env:CROSSPAD_WITH_PC
 $WithArduino = [bool]$env:CROSSPAD_WITH_ARDUINO
 $Steps = 10; $script:StepNo = 0; $script:Failed = @()

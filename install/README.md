@@ -183,6 +183,7 @@ Set these before running the install line:
 | `CROSSPAD_BRANCH` | `crosspad_v20` | branch of CrossPad/platform-idf |
 | `CROSSPAD_IDF_DIR` | an ESP-IDF 5.5 already here, else `C:\esp\esp-idf`, `~/esp/esp-idf` | which ESP-IDF to use or where it goes |
 | `CROSSPAD_WITH_PC=1`, `CROSSPAD_WITH_ARDUINO=1` | | set up the PC simulator / the Arduino version without asking |
+| `CROSSPAD_PC_BRANCH`, `CROSSPAD_ARDUINO_BRANCH` | `feat/virtual-audio-on-pipeline`, `feat/audio-module-arduino` | branches of CrossPad/crosspad-pc and CrossPad/ESP32-S3 |
 | `CROSSPAD_PC_DIR`, `CROSSPAD_ARDUINO_DIR` | `C:\CrossPad-PC`, `~/CrossPad-PC`; `C:\CrossPad-Arduino`, `~/CrossPad-Arduino` | where they go |
 | `CROSSPAD_YES=1` | | answer yes to every question (the PC and Arduino extras stay off) |
 | `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_VSCODE=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, VS Code, the AI-assistant tools, or opening CP Tools at the end |

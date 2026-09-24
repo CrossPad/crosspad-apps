@@ -28,9 +28,11 @@ IDF_DIR="${CROSSPAD_IDF_DIR:-$HOME/esp/esp-idf}"
 IDF_VERSION="v5.5.5"          # what CI builds with
 IDF_TARGET="esp32s3"
 PC_DIR="${CROSSPAD_PC_DIR:-$HOME/CrossPad-PC}"
-PC_BRANCH="${CROSSPAD_PC_BRANCH:-master}"
+# The simulator and the Arduino version live on their development branches:
+# master/main there predate the app manager and the 2.0 board.
+PC_BRANCH="${CROSSPAD_PC_BRANCH:-feat/virtual-audio-on-pipeline}"
 ARDUINO_DIR="${CROSSPAD_ARDUINO_DIR:-$HOME/CrossPad-Arduino}"
-ARDUINO_BRANCH="${CROSSPAD_ARDUINO_BRANCH:-main}"
+ARDUINO_BRANCH="${CROSSPAD_ARDUINO_BRANCH:-feat/audio-module-arduino}"
 WITH_PC="${CROSSPAD_WITH_PC:-}"
 WITH_ARDUINO="${CROSSPAD_WITH_ARDUINO:-}"
 
