@@ -34,6 +34,9 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Cro
 
 ![The install line pasted into PowerShell](img/win-2-paste.png)
 
+Paste it into **PowerShell**, not into the *Run* box (Win+R): Windows Defender
+treats a PowerShell line pasted there as an attack ("ClickFix") and stops it.
+
 ### 2½. Two questions: PC and Arduino
 
 Right at the start the installer asks whether to also set up the **PC
