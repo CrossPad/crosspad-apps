@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "dawcontrol": {
       "name": "DAW Control",
       "version": "0.3.0",
@@ -32,6 +16,22 @@
       "requires": {
         "crosspad-core": ">=1.17.0",
         "crosspad-gui": ">=1.3.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.2.0",
+      "description": "MIDI step sequencer with recording, playback, overdub",
+      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
       }
     },
     "appstore": {

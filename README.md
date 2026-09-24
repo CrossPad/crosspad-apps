@@ -10,8 +10,8 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 - **DAW Control v0.3.0** — control layout on a double tap of the case — pads report as `pad` frames, FL script maps them to transport/pattern/metronome/undo and eight channel mutes lit by the mixer track meter; metronome pad blinks with the beat and runs the tempo at a rate set by where it is pressed, snapping to a multiple of 5 only after a long run (`pan`, core 1.17 onPadPan); host `ping`, 5 s host timeout with hello retry; device->host `mode`
 - **Mixer v0.2.1** — Merge lvgl.h include fix + PlatformIO library.json with MixerPadLogic registration
 - **Sampler v0.2.1** — Fix pad editor file browser off-screen, params panel scroll, pad-editor playback silence, live start/end trim preview
-- **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **DAW Control v0.2.0** — host row (CPU, RAM, clock) and firmware row, fed by crosspad-hil's MIDI hub over companion SysEx
+- **Sequencer v0.2.0** — Pad logic refactor, portable UI components
 - **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
 <!-- LATEST_UPDATES_END -->
 
