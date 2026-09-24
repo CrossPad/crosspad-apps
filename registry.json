@@ -17,6 +17,23 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "dawcontrol": {
+      "name": "DAW Control",
+      "version": "0.3.0",
+      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton)",
+      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
+      "component_path": "components/crosspad-dawcontrol",
+      "icon": "dawcontrol.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.17.0",
+        "crosspad-gui": ">=1.3.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -27,22 +44,6 @@
       "category": "tools",
       "platforms": [
         "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
@@ -76,6 +77,22 @@
       "category": "tools",
       "platforms": [
         "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",

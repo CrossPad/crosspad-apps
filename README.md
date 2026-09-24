@@ -7,12 +7,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
+- **DAW Control v0.3.0** — control layout on a double tap of the case — pads report as `pad` frames, FL script maps them to transport/pattern/metronome/undo and eight channel mutes lit by the mixer track meter; metronome pad blinks with the beat and runs the tempo at a rate set by where it is pressed, snapping to a multiple of 5 only after a long run (`pan`, core 1.17 onPadPan); host `ping`, 5 s host timeout with hello retry; device->host `mode`
 - **Mixer v0.2.1** — Merge lvgl.h include fix + PlatformIO library.json with MixerPadLogic registration
 - **Sampler v0.2.1** — Fix pad editor file browser off-screen, params panel scroll, pad-editor playback silence, live start/end trim preview
 - **Sequencer v0.2.0** — Pad logic refactor, portable UI components
+- **DAW Control v0.2.0** — host row (CPU, RAM, clock) and firmware row, fed by crosspad-hil's MIDI hub over companion SysEx
 - **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
-- **Instructions v0.2.0** — Cross-platform support — ESP-IDF, Arduino, PC
-- **Sampler v0.2.0** — Wire SamplerPadLogic, EventBus audio bridge, kit load task, end=0 normalization
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -21,6 +21,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
 | **App Store** | 0.1.0 | Browse, install, and manage CrossPad apps from the registry | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
+| **DAW Control** | 0.3.0 | DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton) | esp-idf, pc | core >=1.17.0, gui >=1.3.0 | [CrossPad/crosspad-dawcontrol](https://github.com/CrossPad/crosspad-dawcontrol) |
 | **Instructions** | 0.2.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
 | **Mixer** | 0.2.1 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
@@ -29,7 +30,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*8 official app(s)*
+*9 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps
