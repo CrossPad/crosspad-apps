@@ -627,6 +627,7 @@ shim() {   # shim NAME TARGET...  — TARGET run with the user's arguments
     {
         echo '#!/usr/bin/env bash'
         echo "# $name — written by the CrossPad installer"
+        [ -n "${SHIM_DIR:-}" ] && echo "cd \"$SHIM_DIR\" || exit 1"
         echo "export IDF_TOOLS_PATH=\"$IDF_TOOLS\""
         echo ". \"$IDF_DIR/export.sh\" >/dev/null 2>&1"
         echo "exec $* \"\$@\""
@@ -638,7 +639,8 @@ shim crosspad-flash   python3 "\"$CROSSPAD_DIR/tools/ota_flash.py\""
 shim crosspad-files   python3 "\"$CROSSPAD_DIR/tools/fs_transfer.py\""
 shim crosspad-bench   python3 "\"$CROSSPAD_DIR/tools/bench.py\""
 shim crosspad-board   python3 "\"$CROSSPAD_DIR/tools/crosspad_board.py\""
-shim crosspad-idf     idf.py -C "\"$CROSSPAD_DIR\""
+# idf.py runs in the project, so a relative -B build_v2 / -DSDKCONFIG=sdkconfig.v2 lands there.
+SHIM_DIR="$CROSSPAD_DIR" shim crosspad-idf idf.py
 [ -x "$CROSSPAD_DIR/.venv/bin/crosspad-hil" ] && shim crosspad-hil "\"$CROSSPAD_DIR/.venv/bin/crosspad-hil\""
 if [ -x "$PC_DIR/bin/CrossPad" ]; then   # the simulator runs from its own folder
     printf '#!/usr/bin/env bash\n# crosspad-sim — written by the CrossPad installer\ncd "%s" && exec bin/CrossPad "$@"\n' "$PC_DIR" > "$bin/crosspad-sim"

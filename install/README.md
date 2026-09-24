@@ -145,7 +145,7 @@ Every command works in any new terminal (PowerShell, cmd, Terminal) — no
 | `crosspad-flash` | put the last build on the board over USB |
 | `crosspad-files` | files on the board: `crosspad-files ls /sdcard`, `push`, `pull`, `assets` |
 | `crosspad-board` | which board version is plugged in |
-| `crosspad-idf` | `idf.py` for the project, e.g. `crosspad-idf build` |
+| `crosspad-idf` | `idf.py` in the project folder, e.g. `crosspad-idf board`, then `crosspad-idf -B build_v2 -DSDKCONFIG=sdkconfig.v2 build` (every build names the board version) |
 | `crosspad-hil` | the board's test tools, e.g. `crosspad-hil devices` |
 | `crosspad-bench` | the developer bench: `check`, `ready`, `flash`, `test smoke` |
 | `crosspad-sim`, `crosspad-pc` | the PC simulator and its app manager (if you said yes to it) |
@@ -188,7 +188,7 @@ task-button extensions, and points it at the ESP-IDF it set up.
 
    ![Workspace Trust: click Trust](img/vscode-1-trust.png)
 
-3. The bottom bar now shows **ESP-IDF v5.5.5** and the **CP Tools** button
+3. The bottom bar now shows **ESP-IDF v5.5** (v5.5.5 when the installer set it up) and the **CP Tools** button
    (plus **UART** and **OTA** to put a build on the board). The **CP Tools**
    button opens the same CP Tools as the desktop shortcut.
 
@@ -297,7 +297,8 @@ Set these before running the install line:
 | `CROSSPAD_YES=1` | | answer yes to every question (the PC and Arduino extras stay off) |
 | `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_VSCODE=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, VS Code, the AI-assistant tools, or opening CP Tools at the end |
 
-Windows installs everything for your user only (no administrator needed) and
+Windows installs everything for your user only (no administrator needed — except
+Visual Studio's C++ tools for the PC simulator, which Windows asks for once) and
 keeps to short folders, because ESP-IDF cannot build in paths with spaces or
 non-English letters.
 </details>

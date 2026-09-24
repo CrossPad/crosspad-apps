@@ -6,7 +6,8 @@
 #
 # Safe to run again at any time: every step checks what is already there and
 # only installs or repairs what is missing or broken. No administrator rights
-# needed: everything goes into your user account and C:\esp, C:\CrossPad.
+# needed: everything goes into your user account and C:\esp, C:\CrossPad. The
+# one exception is the PC simulator's Visual Studio C++ tools (Windows asks once).
 #
 # Options (environment variables):
 #   CROSSPAD_DIR=C:\CrossPad       where the project goes (short, no spaces)
@@ -556,7 +557,8 @@ Shim "crosspad-flash" "python `"$CrossPadDir\tools\ota_flash.py`""
 Shim "crosspad-files" "python `"$CrossPadDir\tools\fs_transfer.py`""
 Shim "crosspad-bench" "python `"$CrossPadDir\tools\bench.py`""
 Shim "crosspad-board" "python `"$CrossPadDir\tools\crosspad_board.py`""
-Shim "crosspad-idf" "idf.py -C `"$CrossPadDir`""
+# idf.py runs in the project, so a relative -B build_v2 / -DSDKCONFIG=sdkconfig.v2 lands there.
+Shim "crosspad-idf" "cd /d `"$CrossPadDir`" && idf.py"
 if (Test-Path "$CrossPadDir\.venv\Scripts\crosspad-hil.exe") { Shim "crosspad-hil" "`"$CrossPadDir\.venv\Scripts\crosspad-hil.exe`"" }
 if (Test-Path "$PcDir\bin\CrossPad.exe") {   # the simulator runs from its own folder
     "@echo off`r`nrem crosspad-sim - written by the CrossPad installer`r`ncd /d `"$PcDir`" && bin\CrossPad.exe %*" | Set-Content -Encoding ASCII "$bin\crosspad-sim.cmd"
