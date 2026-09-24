@@ -332,6 +332,11 @@ if out.exists():
         pass
 settings.update({"idf.espIdfPath": idf, "idf.currentSetup": idf, "idf.toolsPath": tools,
                  "idf.pythonBinPath": py})
+# ESP-IDF extension 2.x finds a setup only through EIM's records or these
+# variables; idf.currentSetup must equal IDF_PATH for it to be the one used.
+extra = settings.get("idf.customExtraVars") or {}
+extra.update({"IDF_PATH": idf, "IDF_TOOLS_PATH": tools, "IDF_PYTHON_ENV_PATH": str(pathlib.Path(tools) / "python_env" / envs[0]) if envs else ""})
+settings["idf.customExtraVars"] = extra
 vs.mkdir(exist_ok=True)
 out.write_text(json.dumps(settings, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
 '@
