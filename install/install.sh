@@ -662,6 +662,15 @@ if ! bash -lc 'command -v cptools' >/dev/null 2>&1; then
     done
 fi
 ok "$(ls "$bin" | tr '\n' ' ')— from any new terminal"
+# FL Studio on a Mac reads controller scripts from ~/Documents/Image-Line; the
+# DAW Control script goes there, so FL finds the board by itself.
+fl_hw="$HOME/Documents/Image-Line/FL Studio/Settings/Hardware"
+fl_script="$CROSSPAD_DIR/components/crosspad-dawcontrol/host/fl_studio"
+if [ "$os" = "Darwin" ] && { [ -d "$fl_hw" ] || ls -d /Applications/FL\ Studio*.app >/dev/null 2>&1; } \
+        && [ -f "$fl_script/device_CrossPad.py" ]; then
+    mkdir -p "$fl_hw/CrossPad" && cp -R "$fl_script/." "$fl_hw/CrossPad/" \
+        && ok "FL Studio's CrossPad script — FL picks the board up on its next start"
+fi
 
 # ---------------------------------------------------------------------------
 step "Final check" "in a new terminal, the way you will use it"

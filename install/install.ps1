@@ -578,6 +578,15 @@ try {
     $sh.TargetPath = $launcher; $sh.WorkingDirectory = $CrossPadDir; $sh.Save()
     Ok "desktop shortcut 'CP Tools'"
 } catch { Note "no desktop shortcut - open $launcher instead" }
+# FL Studio reads controller scripts from Documents\Image-Line; with FL on this
+# computer the DAW Control script goes there, so FL finds the board by itself.
+$flHw = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "Image-Line\FL Studio\Settings\Hardware"
+$flScript = "$CrossPadDir\components\crosspad-dawcontrol\host\fl_studio"
+if (((Test-Path "$env:ProgramFiles\Image-Line") -or (Test-Path $flHw)) -and (Test-Path "$flScript\device_CrossPad.py")) {
+    New-Item -ItemType Directory -Force "$flHw\CrossPad" | Out-Null
+    Copy-Item "$flScript\*" "$flHw\CrossPad\" -Recurse -Force
+    Ok "FL Studio's CrossPad script - FL picks the board up on its next start"
+}
 
 # ---------------------------------------------------------------------------
 Step "Final check" "in a new terminal, the way you will use it"
