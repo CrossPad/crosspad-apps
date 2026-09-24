@@ -225,12 +225,16 @@ idf_ok() { ( export IDF_TOOLS_PATH="$IDF_TOOLS"; . "$IDF_DIR/export.sh" >/dev/nu
 # An ESP-IDF 5.5 that is already here (EIM, the VS Code extension, a manual
 # install) is used as it is. One of another version is left alone and 5.5 goes
 # next to it. Only an ESP-IDF this installer made itself is ever repaired.
-idf_found="$(python3 - 5.5 <<'FINDIDF'
+recorded_tools="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("idf_tools_path", ""))
+except Exception: print("")' "$CROSSPAD_DIR/crosspad.local.json")"
+idf_found="$(python3 - 5.5 "$recorded_tools" <<'FINDIDF'
 import glob, json, os, re, sys
 # Every ESP-IDF already on this machine, the one to use first.
 # Prints JSON: {"use": {path, tools, version} or null, "others": ["5.3.1 at …", …]}
 home = os.path.expanduser("~")
 want = sys.argv[1] if len(sys.argv) > 1 else "5.5"
+recorded = sys.argv[2] if len(sys.argv) > 2 else ""   # idf_tools_path from crosspad.local.json
 found = []
 
 
@@ -286,10 +290,23 @@ for settings in ("~/.config/Code/User/settings.json",
     add(s.get("idf.espIdfPathWin") if os.name == "nt" else s.get("idf.espIdfPath"),
         s.get("idf.toolsPathWin") if os.name == "nt" else s.get("idf.toolsPath"))
 
+
+
+def tools_for(path, version):
+    """The tools directory that holds this ESP-IDF's Python environment: an
+    install found without one (a folder by name) must not get a fresh set."""
+    mm = ".".join(version.split(".")[:2])
+    for t in (os.environ.get("IDF_TOOLS_PATH"), recorded,
+              os.path.join(os.path.dirname(path), ".espressif"), os.path.join(home, ".espressif")):
+        if t and glob.glob(os.path.join(t, "python_env", "idf%s_*" % mm)):
+            return t
+    return None
+
+
 good = [f for f in found if f[2] == want or f[2].startswith(want + ".")]
 use = max(good, key=lambda f: [int(x) for x in f[2].split(".")]) if good else None
 print(json.dumps({
-    "use": {"path": use[0], "tools": use[1] or os.environ.get("IDF_TOOLS_PATH")
+    "use": {"path": use[0], "tools": use[1] or tools_for(use[0], use[2]) or os.environ.get("IDF_TOOLS_PATH")
             or os.path.join(home, ".espressif"), "version": use[2]} if use else None,
     "others": [f"{v} at {p}" for p, _, v in found if not use or p != use[0]]}))
 FINDIDF

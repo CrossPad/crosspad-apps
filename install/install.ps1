@@ -181,6 +181,7 @@ import glob, json, os, re, sys
 # Prints JSON: {"use": {path, tools, version} or null, "others": ["5.3.1 at …", …]}
 home = os.path.expanduser("~")
 want = sys.argv[1] if len(sys.argv) > 1 else "5.5"
+recorded = sys.argv[2] if len(sys.argv) > 2 else ""   # idf_tools_path from crosspad.local.json
 found = []
 
 
@@ -236,17 +237,34 @@ for settings in ("~/.config/Code/User/settings.json",
     add(s.get("idf.espIdfPathWin") if os.name == "nt" else s.get("idf.espIdfPath"),
         s.get("idf.toolsPathWin") if os.name == "nt" else s.get("idf.toolsPath"))
 
+
+
+def tools_for(path, version):
+    """The tools directory that holds this ESP-IDF's Python environment: an
+    install found without one (a folder by name) must not get a fresh set."""
+    mm = ".".join(version.split(".")[:2])
+    for t in (os.environ.get("IDF_TOOLS_PATH"), recorded,
+              os.path.join(os.path.dirname(path), ".espressif"), os.path.join(home, ".espressif")):
+        if t and glob.glob(os.path.join(t, "python_env", "idf%s_*" % mm)):
+            return t
+    return None
+
+
 good = [f for f in found if f[2] == want or f[2].startswith(want + ".")]
 use = max(good, key=lambda f: [int(x) for x in f[2].split(".")]) if good else None
 print(json.dumps({
-    "use": {"path": use[0], "tools": use[1] or os.environ.get("IDF_TOOLS_PATH")
+    "use": {"path": use[0], "tools": use[1] or tools_for(use[0], use[2]) or os.environ.get("IDF_TOOLS_PATH")
             or os.path.join(home, ".espressif"), "version": use[2]} if use else None,
     "others": [f"{v} at {p}" for p, _, v in found if not use or p != use[0]]}))
 '@
 $ownIdf = $true
 if (-not $env:CROSSPAD_IDF_DIR) {
     $findIdfPy | Set-Content -Encoding UTF8 "$tmp\find_idf.py"
-    $found = (& python "$tmp\find_idf.py" 5.5) | ConvertFrom-Json
+    $recorded = ""
+    if (Test-Path "$CrossPadDir\crosspad.local.json") {
+        try { $recorded = [string](Get-Content "$CrossPadDir\crosspad.local.json" -Raw | ConvertFrom-Json).idf_tools_path } catch {}
+    }
+    $found = (& python "$tmp\find_idf.py" 5.5 $recorded) | ConvertFrom-Json
     if ($found.use) {
         $IdfDir = $found.use.path; $IdfTools = $found.use.tools
         if (-not (Test-Path "$IdfDir\.crosspad-installed")) {
