@@ -13,6 +13,11 @@ opens **CP Tools** — the program that updates the CrossPad and chooses its app
 
 You type one line. Everything else happens by itself.
 
+**In this guide:** [Windows](#windows) · [Mac and Linux](#mac-and-linux) ·
+[Commands you get](#commands-you-get) · [CP Tools](#the-first-time-in-cp-tools) ·
+[VS Code](#vs-code) · [FL Studio](#fl-studio) · [The PC simulator](#the-pc-simulator) ·
+[The Arduino version](#the-arduino-version) · [If something goes wrong](#if-something-goes-wrong)
+
 ---
 
 ## Windows
@@ -43,6 +48,9 @@ Right at the start the installer asks whether to also set up the **PC
 simulator** (the CrossPad on your computer's screen) and the **Arduino**
 version of the firmware. Press **Enter** for *no* if you only want to update
 your CrossPad — you can run the install line again later and answer *y*.
+Answer them and the rest runs without you.
+
+![Both questions answered with y, steps 1 and 2 already done](img/win-7-extras.png)
 
 ### 3. Sign in to GitHub (once)
 
@@ -67,6 +75,12 @@ Code), and checks at the end that every command below works in a new
 terminal. You can leave the window alone.
 
 ![Steps 1 and 2 finished with [OK], step 3 working](img/win-3-steps.png)
+
+With both extras the list is longer — the PC simulator needs Visual Studio's
+C++ build tools (about 20 minutes the first time, Windows asks once for
+permission) and the Arduino version brings PlatformIO:
+
+![Steps 4 to 10 with [OK]: ESP-IDF, USB, test tools, VS Code, AI tools, PC simulator, Arduino](img/win-8-extras-steps.png)
 
 ### 5. "All set"
 
@@ -137,10 +151,6 @@ Every command works in any new terminal (PowerShell, cmd, Terminal) — no
 | `crosspad-sim`, `crosspad-pc` | the PC simulator and its app manager (if you said yes to it) |
 | `crosspad-arduino`, `pio` | the Arduino version's app manager and PlatformIO (if you said yes to it) |
 
-**VS Code:** open the `CrossPad` folder. The ESP-IDF extension already knows
-where ESP-IDF is, and `.vscode/mcp.json` gives Copilot the CrossPad MCP server.
-Claude Code gets the same server (`claude mcp list` shows `crosspad`).
-
 ---
 
 ## The first time in CP Tools
@@ -154,10 +164,107 @@ Plug your CrossPad in and press **1** to put the newest version on it.
 
 ![The CP Tools first screen](img/cp-2-dashboard.png)
 
+With the board plugged in, the top right says which board it is and whether
+its firmware fits, and the list shows every app on it:
+
+![CP Tools with a v2 board connected: everything is up to date](img/cp-4-board.png)
+
 - **1** Update my CrossPad — downloads, builds and puts it on the board
 - **2** Add or remove apps
 - **3** Something's wrong — every check, with what to do about it
 - **?** help on any screen · **q** back
+
+---
+
+## VS Code
+
+The installer puts VS Code on the computer with the ESP-IDF, C/C++ and
+task-button extensions, and points it at the ESP-IDF it set up.
+
+1. Open VS Code, **File → Open Folder…**, pick `C:\CrossPad` (Mac/Linux:
+   `~/CrossPad`).
+2. VS Code asks whether you trust the folder. Click **Trust** — without it the
+   extensions stay off.
+
+   ![Workspace Trust: click Trust](img/vscode-1-trust.png)
+
+3. The bottom bar now shows **ESP-IDF v5.5.5** and the **CP Tools** button
+   (plus **UART** and **OTA** to put a build on the board). The **CP Tools**
+   button opens the same CP Tools as the desktop shortcut.
+
+   ![The CrossPad project in VS Code: ESP-IDF v5.5.5 and CP Tools in the bottom bar, the MCP server in .vscode/mcp.json](img/vscode-2-project.png)
+
+**AI assistants:** `.vscode/mcp.json` gives Copilot's agent mode the CrossPad
+MCP server — build, flash, check the board, search the code. Claude Code gets
+the same server (`claude mcp list` shows `crosspad`). The server starts on
+its own the first time an assistant asks for it (Node.js, installed in step 8).
+
+---
+
+## FL Studio
+
+With **FL Studio** installed, the installer also puts the CrossPad controller
+script where FL looks for it (`Documents\Image-Line\FL Studio\Settings\Hardware\CrossPad`).
+Nothing to set up by hand:
+
+1. On the CrossPad, open **DAW Control**.
+2. Start FL Studio with the CrossPad plugged in. **Close FL's welcome window** —
+   while it is open FL does not answer the board.
+3. The CrossPad shows the selected channel, the pattern and the tempo, and its
+   pads play the selected channel.
+
+FL finds the port by itself. In **Options → MIDI Settings** (F10) the
+*Crosspad* input is enabled, with controller type **CrossPad** and the same
+port number as the *Crosspad* output:
+
+![FL's MIDI settings: the Crosspad input enabled, controller type CrossPad](img/fl-1-midi-settings.png)
+
+**View → Script output**, tab *Crosspad*, says *DAW Control app connected*
+when the two are talking:
+
+![FL's script output: DAW Control app connected](img/fl-2-script-output.png)
+
+**Double-tap the CrossPad's case** to switch between playing and the control
+layout: transport (play, stop, record, loop), pattern up/down, metronome, undo,
+and mutes for the first eight channels, lit by how loud each one plays.
+
+If FL was installed after CrossPad, run the install line again — it only adds
+what is missing.
+
+---
+
+## The PC simulator
+
+If you said *y* to the PC simulator, the whole CrossPad — screen, pads, knob —
+runs on your computer:
+
+```
+crosspad-sim
+```
+
+![The CrossPad simulator on Windows, next to FL Studio](img/pc-1-simulator.png)
+
+Its app manager is `crosspad-pc` (same commands as CP Tools: `crosspad-pc
+status`, `crosspad-pc update --all`). The project is in `C:\CrossPad-PC`
+(Mac/Linux: `~/CrossPad-PC`).
+
+---
+
+## The Arduino version
+
+If you said *y* to the Arduino version, `C:\CrossPad-Arduino` (Mac/Linux:
+`~/CrossPad-Arduino`) holds the Arduino firmware with PlatformIO, already
+built once. For the 2.0 board:
+
+```
+cd C:\CrossPad-Arduino
+pio run -e crosspad_v2
+```
+
+`pio run -e crosspad_v2 -t upload` puts the Arduino firmware **on the board in
+place of the regular one**; **[1] Update my CrossPad** in CP Tools puts the
+regular one back. `crosspad_rev2` is the older 1.9 board — never flash it on a
+2.0. The app manager of this version is `crosspad-arduino`.
 
 ---
 
@@ -166,6 +273,8 @@ Plug your CrossPad in and press **1** to put the newest version on it.
 - **Run the install line again.** It only redoes what is missing or broken,
   and never overwrites your own changes.
 - In CP Tools press **3** (*Something's wrong*). Every red line says what to do.
+  A **?** line is advice, not an error — e.g. *Windows Defender* only means
+  builds could be twice as fast with the project folder excluded.
 - Still stuck? In *Something's wrong* press **s**. It saves one file with
   everything a helper needs (no passwords). Send it on the CrossPad Discord,
   channel **#support**, with one line about what you were doing.
