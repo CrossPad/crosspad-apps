@@ -312,6 +312,8 @@ print(json.dumps({
 FINDIDF
 )"
 own_idf=1
+# An ESP-IDF named by CROSSPAD_IDF_DIR that this installer did not make is used as it is.
+[ -n "${CROSSPAD_IDF_DIR:-}" ] && [ -e "$IDF_DIR" ] && [ ! -e "$IDF_DIR/.crosspad-installed" ] && own_idf=0
 if [ -z "${CROSSPAD_IDF_DIR:-}" ] && [ -n "$idf_found" ]; then
     use_path=$(python3 -c 'import json,sys; u=json.loads(sys.argv[1])["use"]; print(u["path"] if u else "")' "$idf_found")
     others=$(python3 -c 'import json,sys; print("; ".join(json.loads(sys.argv[1])["others"]))' "$idf_found")
@@ -382,7 +384,12 @@ if [ -n "${CROSSPAD_NO_HIL:-}" ]; then
 else
     venv="$CROSSPAD_DIR/.venv"
     if [ -x "$venv/bin/crosspad-hil" ] && "$venv/bin/crosspad-hil" --help >/dev/null 2>&1; then
-        ok "crosspad-hil"
+        # It knows the firmware's commands, so it moves with the project.
+        if "$venv/bin/pip" install -q --upgrade "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
+            ok "crosspad-hil (up to date)"
+        else
+            note "crosspad-hil could not be updated — the one already here stays"
+        fi
     else
         rm -rf "$venv"
         if python3 -m venv "$venv" && "$venv/bin/pip" install -q "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
@@ -400,7 +407,7 @@ vscode_settings() {   # write this machine's real paths into .vscode/settings.js
 import json, pathlib, re, sys
 proj, idf, tools = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 vs = proj / ".vscode"
-envs = sorted((p.name for p in (pathlib.Path(tools) / "python_env").glob("idf*_env")), reverse=True)
+envs = sorted((p.name for p in (pathlib.Path(tools) / "python_env").glob("idf5.5_*_env")), reverse=True)
 py = f"{tools}/python_env/{envs[0]}/bin/python" if envs else "python3"
 settings = {}
 tpl = vs / "settings.template.json"

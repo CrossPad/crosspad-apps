@@ -163,7 +163,7 @@ if (-not (Test-Path $CrossPadDir)) {
     # Only edits to tracked files are "yours": the launcher and .venv this
     # script writes into the folder are untracked and must not block updates.
     $changes = git -C $CrossPadDir status --porcelain --ignore-submodules --untracked-files=no
-    if (-not $changes) { git -C $CrossPadDir pull --ff-only --quiet } else { Note "the project has changes of yours - not updating it, only filling in what is missing" }
+    if (-not $changes) { git -C $CrossPadDir pull --ff-only --quiet; if ($LASTEXITCODE -ne 0) { Note "left the project as it is (it has its own commits)" } } else { Note "the project has changes of yours - not updating it, only filling in what is missing" }
 }
 git -C $CrossPadDir submodule update --init --recursive
 if ($LASTEXITCODE -eq 0) { Ok "project and its components" } else { Bad "some components did not download" "run this again" }
@@ -258,7 +258,9 @@ print(json.dumps({
     "others": [f"{v} at {p}" for p, _, v in found if not use or p != use[0]]}))
 '@
 $ownIdf = $true
-if (-not $env:CROSSPAD_IDF_DIR) {
+if ($env:CROSSPAD_IDF_DIR) {
+    if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.crosspad-installed")) { $ownIdf = $false }
+} else {
     $findIdfPy | Set-Content -Encoding UTF8 "$tmp\find_idf.py"
     $recorded = ""
     if (Test-Path "$CrossPadDir\crosspad.local.json") {
@@ -320,7 +322,11 @@ if ($lp -ne 1) { Note "Windows long paths are off; the short folders above keep 
 Step "Test tools (optional)" "crosspad-hil: lets CP Tools and AI agents check the board automatically"
 if ($env:CROSSPAD_NO_HIL) { Note "skipped" } else {
     $venv = "$CrossPadDir\.venv"
-    if ((Test-Path "$venv\Scripts\crosspad-hil.exe")) { Ok "crosspad-hil" } else {
+    if ((Test-Path "$venv\Scripts\crosspad-hil.exe")) {
+        # It knows the firmware's commands, so it moves with the project.
+        & "$venv\Scripts\pip.exe" install -q --upgrade "git+https://github.com/CrossPad/crosspad-hil" *> "$tmp\hil-install.log"
+        if ($LASTEXITCODE -eq 0) { Ok "crosspad-hil (up to date)" } else { Note "crosspad-hil could not be updated - the one already here stays" }
+    } else {
         Remove-Item -Recurse -Force $venv -ErrorAction SilentlyContinue
         & python -m venv $venv
         & "$venv\Scripts\pip.exe" install -q "git+https://github.com/CrossPad/crosspad-hil" *> "$tmp\hil-install.log"
@@ -336,7 +342,7 @@ $vsSettingsPy = @'
 import json, pathlib, re, sys
 proj, idf, tools = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 vs = proj / ".vscode"
-envs = sorted((p.name for p in (pathlib.Path(tools) / "python_env").glob("idf*_env")), reverse=True)
+envs = sorted((p.name for p in (pathlib.Path(tools) / "python_env").glob("idf5.5_*_env")), reverse=True)
 py = str(pathlib.Path(tools) / "python_env" / envs[0] / "Scripts" / "python.exe") if envs else "python"
 settings = {}
 tpl = vs / "settings.template.json"
@@ -500,7 +506,7 @@ if ($WithPc) {
             Ok "crosspad-pc in $PcDir"
             # build.bat names Visual Studio Community; vswhere finds any edition.
             cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_FREERTOS=ON && cmake --build build" *> "$tmp\pc-build.log"
-            if (Test-Path "$PcDir\bin\CrossPad.exe") { Ok "the simulator is built - start it with: crosspad-sim" }
+            if ($LASTEXITCODE -eq 0 -and (Test-Path "$PcDir\bin\CrossPad.exe")) { Ok "the simulator is built - start it with: crosspad-sim" }
             else { Bad "the PC simulator did not build" "details in $tmp\pc-build.log - send it on Discord (#support)" }
         } else { Bad "crosspad-pc did not download" "check the connection and run this again" }
     }
