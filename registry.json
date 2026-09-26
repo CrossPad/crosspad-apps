@@ -1,37 +1,21 @@
 {
   "version": 1,
   "apps": {
-    "dawcontrol": {
-      "name": "DAW Control",
-      "version": "0.3.0",
-      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton)",
-      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
-      "component_path": "components/crosspad-dawcontrol",
-      "icon": "dawcontrol.png",
-      "category": "tools",
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.2.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
       "platforms": [
         "esp-idf",
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.17.0",
-        "crosspad-gui": ">=1.3.0"
-      }
-    },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.2.0",
-      "description": "MIDI step sequencer with recording, playback, overdub",
-      "repo": "https://github.com/CrossPad/crosspad-sequencer.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
+        "crosspad-core": ">=1.21.0",
+        "crosspad-gui": ">=1.12.0"
       }
     },
     "appstore": {
@@ -50,9 +34,43 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "dawcontrol": {
+      "name": "DAW Control",
+      "version": "0.3.0",
+      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton)",
+      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
+      "component_path": "components/crosspad-dawcontrol",
+      "icon": "dawcontrol.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.17.0",
+        "crosspad-gui": ">=1.3.0"
+      }
+    },
+    "song": {
+      "name": "Song",
+      "version": "0.2.0",
+      "description": "Arrange scenes on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-song.git",
+      "component_path": "components/crosspad-song",
+      "icon": "song.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.21.0",
+        "crosspad-gui": ">=1.12.0"
+      }
+    },
     "mixer": {
       "name": "Mixer",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
       "repo": "https://github.com/CrossPad/crosspad-mixer.git",
       "component_path": "components/crosspad-mixer",
@@ -83,20 +101,21 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
+    "pad-mixer": {
+      "name": "Pad Mixer",
+      "version": "0.2.0",
+      "description": "Sixteen faders, one per pad",
+      "repo": "https://github.com/CrossPad/crosspad-pad-mixer.git",
+      "component_path": "components/crosspad-pad-mixer",
+      "icon": "pad-mixer.png",
+      "category": "audio",
       "platforms": [
-        "arduino"
+        "esp-idf",
+        "pc"
       ],
       "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
+        "crosspad-core": ">=1.21.0",
+        "crosspad-gui": ">=1.12.0"
       }
     },
     "instructions": {
@@ -117,6 +136,39 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.2.0",
+      "description": "Record, loop and erase scenes on the pads",
+      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.21.0",
+        "crosspad-gui": ">=1.12.0"
+      }
+    },
     "piano": {
       "name": "Piano",
       "version": "0.1.0",
@@ -135,7 +187,7 @@
     },
     "sampler": {
       "name": "Sampler",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "description": "Sample player with 16 pads, waveform editing, kit management",
       "repo": "https://github.com/CrossPad/crosspad-sampler.git",
       "component_path": "components/crosspad-sampler",
