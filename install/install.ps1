@@ -11,7 +11,7 @@
 #
 # Options (environment variables):
 #   CROSSPAD_DIR=C:\CrossPad       where the project goes (short, no spaces)
-#   CROSSPAD_BRANCH=crosspad_v20   which branch of CrossPad/platform-idf
+#   CROSSPAD_BRANCH=main           which branch of CrossPad/platform-idf
 #   CROSSPAD_IDF_DIR=C:\esp\esp-idf   (default: an ESP-IDF 5.5 already here, else this)
 #   CROSSPAD_YES=1                 answer yes to every question (extras stay off)
 #   CROSSPAD_WITH_PC=1             also set up the PC simulator (C:\CrossPad-PC)
@@ -23,7 +23,7 @@ $ProgressPreference = "SilentlyContinue"      # Invoke-WebRequest is 10x slower 
 
 function Env-Or($name, $default) { $v = [Environment]::GetEnvironmentVariable($name); if ($v) { $v } else { $default } }
 $CrossPadDir = Env-Or "CROSSPAD_DIR" "C:\CrossPad"
-$Branch      = Env-Or "CROSSPAD_BRANCH" "crosspad_v20"
+$Branch      = Env-Or "CROSSPAD_BRANCH" "main"
 $IdfDir      = Env-Or "CROSSPAD_IDF_DIR" "C:\esp\esp-idf"
 $IdfTools    = "C:\esp\.espressif"           # short, ASCII-only: user names break ESP-IDF tools
 $IdfVersion  = "v5.5.5"
@@ -164,7 +164,15 @@ if (-not (Test-Path $CrossPadDir)) {
     # Only edits to tracked files are "yours": the launcher and .venv this
     # script writes into the folder are untracked and must not block updates.
     $changes = git -C $CrossPadDir status --porcelain --ignore-submodules --untracked-files=no
-    if (-not $changes) { git -C $CrossPadDir pull --ff-only --quiet; if ($LASTEXITCODE -ne 0) { Note "left the project as it is (it has its own commits)" } } else { Note "the project has changes of yours - not updating it, only filling in what is missing" }
+    if (-not $changes) {
+        # crosspad_v20 was folded into main at v1.1.0-rc1 and removed; a pull
+        # on it would stay on the last v20 commit and say nothing.
+        if ((git -C $CrossPadDir branch --show-current) -eq "crosspad_v20") {
+            git -C $CrossPadDir fetch --quiet origin main
+            if ($LASTEXITCODE -eq 0) { git -C $CrossPadDir switch --quiet -C main --track origin/main }
+            if ($LASTEXITCODE -eq 0) { Note "moved the project from crosspad_v20 to main" }
+        }
+        git -C $CrossPadDir pull --ff-only --quiet; if ($LASTEXITCODE -ne 0) { Note "left the project as it is (it has its own commits)" } } else { Note "the project has changes of yours - not updating it, only filling in what is missing" }
 }
 git -C $CrossPadDir submodule update --init --recursive
 if ($LASTEXITCODE -eq 0) { Ok "project and its components" } else { Bad "some components did not download" "run this again" }

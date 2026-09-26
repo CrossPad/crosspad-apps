@@ -11,7 +11,7 @@
 #
 # Options (environment variables):
 #   CROSSPAD_DIR=~/CrossPad        where the project goes
-#   CROSSPAD_BRANCH=crosspad_v20   which branch of CrossPad/platform-idf
+#   CROSSPAD_BRANCH=main           which branch of CrossPad/platform-idf
 #   CROSSPAD_IDF_DIR=~/esp/esp-idf where ESP-IDF goes (default: an ESP-IDF 5.5 already here, else this)
 #   CROSSPAD_YES=1                 answer yes to every question (extras stay off)
 #   CROSSPAD_WITH_PC=1             also set up the PC simulator (~/CrossPad-PC)
@@ -22,7 +22,7 @@
 set -u
 
 CROSSPAD_DIR="${CROSSPAD_DIR:-$HOME/CrossPad}"
-CROSSPAD_BRANCH="${CROSSPAD_BRANCH:-crosspad_v20}"
+CROSSPAD_BRANCH="${CROSSPAD_BRANCH:-main}"
 CROSSPAD_REPO="CrossPad/platform-idf"
 IDF_DIR="${CROSSPAD_IDF_DIR:-$HOME/esp/esp-idf}"
 IDF_VERSION="v5.5.5"          # what CI builds with
@@ -208,6 +208,13 @@ else
     # Only edits to tracked files are "yours": the launcher and .venv this
     # script writes into the folder are untracked and must not block updates.
     if [ -z "$(git -C "$CROSSPAD_DIR" status --porcelain --ignore-submodules --untracked-files=no)" ]; then
+        # crosspad_v20 was folded into main at v1.1.0-rc1 and removed; a pull
+        # on it would stay on the last v20 commit and say nothing.
+        if [ "$(git -C "$CROSSPAD_DIR" branch --show-current)" = "crosspad_v20" ]; then
+            git -C "$CROSSPAD_DIR" fetch --quiet origin main \
+                && git -C "$CROSSPAD_DIR" switch --quiet -C main --track origin/main \
+                && note "moved the project from crosspad_v20 to main"
+        fi
         git -C "$CROSSPAD_DIR" pull --ff-only --quiet || note "left the project as it is (it has its own commits)"
     else
         note "the project has changes of yours — not updating it, only filling in what is missing"

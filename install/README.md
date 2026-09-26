@@ -290,7 +290,7 @@ Set these before running the install line:
 | Variable | Default | What |
 |---|---|---|
 | `CROSSPAD_DIR` | `C:\CrossPad`, `~/CrossPad` | where the project goes (no spaces) |
-| `CROSSPAD_BRANCH` | `crosspad_v20` | branch of CrossPad/platform-idf |
+| `CROSSPAD_BRANCH` | `main` | branch of CrossPad/platform-idf (a checkout still on `crosspad_v20` is moved to `main`) |
 | `CROSSPAD_IDF_DIR` | an ESP-IDF 5.5 already here, else `C:\esp\esp-idf`, `~/esp/esp-idf` | which ESP-IDF to use or where it goes |
 | `CROSSPAD_WITH_PC=1`, `CROSSPAD_WITH_ARDUINO=1` | | set up the PC simulator / the Arduino version without asking |
 | `CROSSPAD_PC_BRANCH`, `CROSSPAD_ARDUINO_BRANCH` | `feat/virtual-audio-on-pipeline`, `feat/audio-module-arduino` | branches of CrossPad/crosspad-pc and CrossPad/ESP32-S3 |
