@@ -17,6 +17,7 @@ Usage:
     mgr.list_apps()
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -3409,6 +3410,10 @@ def error_line(step: str, reason: str, subject: str = "") -> str:
     return table.get((step, reason), f"{STEP_TITLES.get(step, step)} failed → [r] retry").replace("{s}", subject)
 
 
+# Output lines the pipeline keeps for the screen; it shows as many as fit.
+TAIL_LINES = 50
+
+
 class UpdatePipeline:
     """Download → components → build → flash → check, rendered through `ui`.
 
@@ -3423,7 +3428,7 @@ class UpdatePipeline:
         can_flash = getattr(mgr.config, "flash_ota", None) is not None
         self.plan = plan_update(mgr.last_update(), self.installed, can_flash)
         self.steps = [StepResult(n, detail=STEP_IDLE[n]) for n in self.plan["steps"]]
-        self.tail = ""
+        self.tail: list[str] = []
         self.progress = None
         self.log = None
         self.log_tail: list[str] = []
@@ -3456,6 +3461,7 @@ class UpdatePipeline:
                 if not begun:
                     continue
                 s.ok, s.error, s.detail = None, "", "…"
+                self.tail = []
                 self._render()
                 t0 = time.time()
                 self.log.write(f"\n== {STEP_TITLES[s.name]} ==\n")
@@ -3494,7 +3500,7 @@ class UpdatePipeline:
         self.ui.render(self.steps, self.tail, self.progress)
 
     def _line(self, line: str):
-        self.tail = line[-110:]
+        self.tail = (self.tail + [line])[-TAIL_LINES:]
         self.log_tail = (self.log_tail + [line])[-40:]
         p = parse_ninja_progress(line)
         if p:
@@ -3521,7 +3527,7 @@ class UpdatePipeline:
                 # need to also back up here (that took two identical
                 # snapshots per confirmation).
                 force = True
-            self.tail = f"{name}: fetching"
+            self.tail = [f"{name}: fetching"]
             self._render()
             with _capture_stdout(self.log):
                 self.mgr.update(app_name=app_id, force=force)
@@ -3642,7 +3648,7 @@ class UpdatePipeline:
                 return False
         dev = self.mgr.device_probe()
         if dev is None:
-            self.tail = "Plug in your CrossPad — I'll flash it when I see it"
+            self.tail = ["Plug in your CrossPad — I'll flash it when I see it"]
             self._render()
             if not self.ui.wait_for_board(self.mgr.device_probe):
                 s.error = "Cancelled before the flash"
@@ -3652,8 +3658,8 @@ class UpdatePipeline:
         ports = dev.get("ports") or {}
         has_cdc = bool((ports.get("cdc") or {}).get("path")) or dev.get("usb_mode") == "audio"
         if dev.get("usb_mode") == "audio":
-            self.tail = ("The board is in USB audio mode — switching it to serial; "
-                         "if it asks 'USB serial mode?', press Allow on the CrossPad")
+            self.tail = [("The board is in USB audio mode — switching it to serial; "
+                         "if it asks 'USB serial mode?', press Allow on the CrossPad")]
             self._render()
 
         def on_line(line: str):
@@ -4363,12 +4369,39 @@ def _track(text: str):
         pos += len(chunk) + 1
 
 
+_frame_buf: list[str] | None = None
+
+
 def _w(s: str):
     """Write to stdout without newline."""
     if MOUSE:
         _track(s)
+    if _frame_buf is not None:
+        _frame_buf.append(s)
+        return
     sys.stdout.write(s)
     sys.stdout.flush()
+
+
+@contextlib.contextmanager
+def _frame():
+    """Draw a whole screen in one write, over the previous one.
+
+    A screen redrawn many times a second (the build) as erase-then-write, one
+    flush per line, lets the terminal paint the erased state in between: the
+    window blinks empty. Here _clear() only homes the cursor, every line
+    clears its own remainder and the end clears what is left below.
+    """
+    global _frame_buf
+    _frame_buf = []
+    try:
+        yield
+    finally:
+        text, _frame_buf = "".join(_frame_buf), None
+        if not PLAIN:
+            text = text.replace("\n", "\033[K\n") + "\033[J"
+        sys.stdout.write(text)
+        sys.stdout.flush()
 
 
 def _hotspot_key(col: int, row: int) -> str:
@@ -4390,7 +4423,8 @@ def _get_size() -> tuple[int, int]:
 def _clear():
     _hotspots.clear()
     _cur[0], _cur[1] = 1, 1
-    _w("\n" + "=" * 40 + "\n" if PLAIN else "\033[2J\033[H")
+    _w("\n" + "=" * 40 + "\n" if PLAIN else
+       "\033[H" if _frame_buf is not None else "\033[2J\033[H")
     if not PLAIN:
         _cur[0], _cur[1] = 1, 1
 
@@ -4746,6 +4780,10 @@ class _PipelineUI:
         self._cancel = False
 
     def render(self, steps, tail, progress):
+        with _frame():
+            self._draw(steps, tail, progress)
+
+    def _draw(self, steps, tail, progress):
         _clear()
         self.tui._header("Update my CrossPad", self.tui._header_right())
         _w("\n")
@@ -4772,7 +4810,12 @@ class _PipelineUI:
             line = f" {col}{mark:<3}{_C.RST}{STEP_TITLES[s.name]:<22} "
             _w(line + (f"{_C.BRED}{detail}{_C.RST}" if s.error else
                        f"{_C.GRAY if s.ok is None else ''}{detail[:w - 28]}{_C.RST}") + "\n")
-        _w(f"\n {_C.DIM}{tail[:w - 4]}{_C.RST}\n")
+        # Header 3, blank lines 3, [q] stop 1, and 3 kept free for what the
+        # screen after the run writes below this — nothing may scroll.
+        room = max(_get_size()[1] - len(steps) - 10, 1)
+        _w("\n")
+        for line in tail[-room:]:
+            _w(f" {_C.DIM}{line[:w - 4]}{_C.RST}\n")
         global _screen_hints
         _screen_hints = "[q] stop the step that is running (Ctrl+C does the same)"
         _w(f"\n{' ' * max(w - 14, 0)}{_C.GRAY}[q] stop{_C.RST}\n")
