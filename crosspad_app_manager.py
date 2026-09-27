@@ -2690,13 +2690,16 @@ class AppManager:
                       "crosspad.local.json", ".DS_Store"}
         written = 0
         for path in sorted(src.rglob("*")):
-            if path.is_dir() or "/.git/" in str(path):
+            if path.is_dir():
                 continue
             # Never ship working data that happened to land in the template
             # directory — a generated app must contain only the template.
-            if path.name in skip_names or ".crosspad" in path.parts:
+            # Judged inside the template: a platform wrapper keeps the template
+            # itself under <project>/.crosspad/, and every file would match.
+            inner = path.relative_to(src)
+            if path.name in skip_names or ".crosspad" in inner.parts or ".git" in inner.parts:
                 continue
-            rel = substitute(str(path.relative_to(src)))
+            rel = substitute(str(inner))
             if rel.endswith(".tmpl"):
                 rel = rel[:-len(".tmpl")]
             target = dest / rel
