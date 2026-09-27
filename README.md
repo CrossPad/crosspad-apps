@@ -9,10 +9,10 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- LATEST_UPDATES_START -->
 - **Mixer v0.5.0 (0.4.1 merged in** — builds on the PC against LVGL 9.4): MONITOR on every input (MON on its row, a Monitor row in its window): off, 1/2, 3/4 or both -- the outputs the engine marks heard; outputs named 1/2 (speakers) and 3/4 (phones); AudioMixerEngine::setOutputHeard/isOutputHeard
 - **Arrange v0.4.1** — builds on the PC against LVGL 9.4 (0.2.1 merged in); requires core 1.25 and gui 1.15
+- **Recorder v0.4.0** — USB input -- what the computer plays into the board over USB audio, before the mixer's fader; says so when the board is not in its USB audio profile; requires core 1.28
 - **Arrange v0.4.0** — MOVE across tracks with arrows at the block; EDIT menu: a loop region (L/R turned, LOOP goes round it), copy / paste / duplicate x2 of the region, merge tracks or all tracks into one clip, song length; requires core 1.25 and gui 1.15
 - **Mixer v0.4.0** — IN / SOURCES / OUT / ROUTE tabs along the bottom, a row per channel with a long fader, the channel window (input gain, pan, sends); requires core 1.25 (IInputGain) and gui 1.14
 - **Sequencer v0.3.1** — builds on the PC against LVGL 9.4 (0.2.1 merged in)
-- **Arrange v0.3.0** — a click on a block takes the encoder to MOVE/DUP/DEL (MOVE is turned a bar per detent, the next click comes back; DUP and DEL come back at once; the power button's click too); wider track numbers; the songs list edits the open song's tempo and name, as requests; requires core 1.23 and gui 1.13
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -27,13 +27,15 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Mixer** | 0.5.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.25.0, gui >=1.14.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Pad Mixer** | 0.2.0 | Sixteen faders, one per pad | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-pad-mixer](https://github.com/CrossPad/crosspad-pad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
+| **Recorder** | 0.4.0 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=1.28.0, gui >=1.14.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
 | **Sampler** | 0.3.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=0.3.0, gui >=0.2.1 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.3.1 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.23.0, gui >=1.13.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
 | **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
+| **Slicer** | 0.2.0 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=1.27.0, gui >=1.14.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
 | **Song** | 0.2.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*12 official app(s)*
+*14 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps
