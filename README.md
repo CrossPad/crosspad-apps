@@ -7,12 +7,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
+- **Arrange v0.4.1** — builds on the PC against LVGL 9.4 (0.2.1 merged in); requires core 1.25 and gui 1.15
+- **Arrange v0.4.0** — MOVE across tracks with arrows at the block; EDIT menu: a loop region (L/R turned, LOOP goes round it), copy / paste / duplicate x2 of the region, merge tracks or all tracks into one clip, song length; requires core 1.25 and gui 1.15
+- **Mixer v0.4.0** — IN / SOURCES / OUT / ROUTE tabs along the bottom, a row per channel with a long fader, the channel window (input gain, pan, sends); requires core 1.25 (IInputGain) and gui 1.14
+- **Sequencer v0.3.1** — builds on the PC against LVGL 9.4 (0.2.1 merged in)
+- **Arrange v0.3.0** — a click on a block takes the encoder to MOVE/DUP/DEL (MOVE is turned a bar per detent, the next click comes back; DUP and DEL come back at once; the power button's click too); wider track numbers; the songs list edits the open song's tempo and name, as requests; requires core 1.23 and gui 1.13
 - **DAW Control v0.3.0** — control layout on a double tap of the case — pads report as `pad` frames, FL script maps them to transport/pattern/metronome/undo and eight channel mutes lit by the mixer track meter; metronome pad blinks with the beat and runs the tempo at a rate set by where it is pressed, snapping to a multiple of 5 only after a long run (`pan`, core 1.17 onPadPan); host `ping`, 5 s host timeout with hello retry; device->host `mode`
-- **Mixer v0.2.1** — Merge lvgl.h include fix + PlatformIO library.json with MixerPadLogic registration
-- **Sampler v0.2.1** — Fix pad editor file browser off-screen, params panel scroll, pad-editor playback silence, live start/end trim preview
-- **Arrange v0.2.0** — project list, clip list and opening a song are requests to the song engine (core 1.21 ISongEngine), filled in when the card answers; a song that cannot be read is left untouched; blocks drawn per track; the selection follows the exact block an edit moved
-- **Mixer v0.2.0** — Dynamic IAudioNode-based channels (up to 16 × 8 outputs); ESP-IDF build target
-- **Pad Mixer v0.2.0** — pad levels through IPadMix (core 1.21) instead of the Sampler's platform callbacks; faders follow a kit swapped while open; a sequenced hit is told apart with PadManager::pressSource()
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -21,14 +21,14 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
 | **App Store** | 0.1.0 | Browse, install, and manage CrossPad apps from the registry | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
-| **Arrange** | 0.2.1 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
+| **Arrange** | 0.4.1 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=1.25.0, gui >=1.15.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
 | **DAW Control** | 0.4.0 | DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub | esp-idf, pc | core >=1.23.0, gui >=1.3.0 | [CrossPad/crosspad-dawcontrol](https://github.com/CrossPad/crosspad-dawcontrol) |
 | **Instructions** | 0.2.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
-| **Mixer** | 0.3.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
+| **Mixer** | 0.4.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.25.0, gui >=1.14.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Pad Mixer** | 0.2.0 | Sixteen faders, one per pad | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-pad-mixer](https://github.com/CrossPad/crosspad-pad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
 | **Sampler** | 0.3.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=0.3.0, gui >=0.2.1 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
-| **Sequencer** | 0.2.1 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
+| **Sequencer** | 0.3.1 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.23.0, gui >=1.13.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
 | **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Song** | 0.2.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
