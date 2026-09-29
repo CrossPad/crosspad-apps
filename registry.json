@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "recorder": {
       "name": "Recorder",
       "version": "0.4.1",
@@ -34,21 +18,20 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.6.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.0",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
       "platforms": [
-        "esp-idf",
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.31.0",
-        "crosspad-gui": ">=1.15.0"
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
       }
     },
     "instructions": {
@@ -69,6 +52,23 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.8.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.34.0",
+        "crosspad-gui": ">=1.15.0"
+      }
+    },
     "slicer": {
       "name": "Slicer",
       "version": "0.3.0",
@@ -84,6 +84,39 @@
       "requires": {
         "crosspad-core": ">=1.31.0",
         "crosspad-gui": ">=1.14.0"
+      }
+    },
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.3.2",
+      "description": "Record, loop and erase scenes on the pads",
+      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.23.0",
+        "crosspad-gui": ">=1.13.0"
       }
     },
     "mixer": {
@@ -170,39 +203,6 @@
         "crosspad-gui": ">=1.12.0"
       }
     },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.3.2",
-      "description": "Record, loop and erase scenes on the pads",
-      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.23.0",
-        "crosspad-gui": ">=1.13.0"
-      }
-    },
     "piano": {
       "name": "Piano",
       "version": "0.1.0",
@@ -221,7 +221,7 @@
     },
     "sampler": {
       "name": "Sampler",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "description": "Sample player with 16 pads, waveform editing, kit management",
       "repo": "https://github.com/CrossPad/crosspad-sampler.git",
       "component_path": "components/crosspad-sampler",
@@ -233,7 +233,7 @@
       ],
       "requires": {
         "crosspad-core": ">=1.31.0",
-        "crosspad-gui": ">=0.2.1"
+        "crosspad-gui": ">=1.16.0"
       }
     }
   }
