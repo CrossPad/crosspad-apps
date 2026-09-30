@@ -18,6 +18,23 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.8.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.34.0",
+        "crosspad-gui": ">=1.15.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -52,40 +69,6 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.8.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.34.0",
-        "crosspad-gui": ">=1.15.0"
-      }
-    },
-    "slicer": {
-      "name": "Slicer",
-      "version": "0.3.0",
-      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
-      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
-      "component_path": "components/crosspad-slicer",
-      "icon": "slicer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.31.0",
-        "crosspad-gui": ">=1.14.0"
-      }
-    },
     "synthesizer": {
       "name": "Synthesizer",
       "version": "0.1.0",
@@ -117,6 +100,23 @@
       "requires": {
         "crosspad-core": ">=1.23.0",
         "crosspad-gui": ">=1.13.0"
+      }
+    },
+    "slicer": {
+      "name": "Slicer",
+      "version": "0.3.0",
+      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
+      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
+      "component_path": "components/crosspad-slicer",
+      "icon": "slicer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.31.0",
+        "crosspad-gui": ">=1.14.0"
       }
     },
     "mixer": {
