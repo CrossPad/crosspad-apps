@@ -54,8 +54,10 @@ def test_error_lines_say_what_to_do():
         "The board still runs the old Sampler → [r] flash again"
     assert cam.error_line("build", "no-tools") == \
         "Build tools are missing → [3] Something's wrong"
-    assert cam.error_line("components", "failed") == \
-        "Couldn't fetch firmware components → [r] retry"
+    assert cam.error_line("components", "failed", "core, gui") == \
+        "Couldn't update the firmware (core, gui) → [r] retry"
+    assert cam.error_line("components", "clash", "your edit to main/x.cpp clashes") == \
+        "The firmware can't update: your edit to main/x.cpp clashes → commit or undo it, then [r] retry"
 
 
 def test_release_image_only_for_the_exact_checkout():

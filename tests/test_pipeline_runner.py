@@ -40,6 +40,8 @@ class FakeMgr:
     def update(self, app_name=None, update_all=False, force=False, dry_run=False):
         self.calls.append(("update", app_name, force))
     def infra_submodules(self): return ["components/crosspad-core"]
+    project = ("current", "up to date")
+    def update_project(self): return self.project
     def _git(self, *args, check=True, capture=False):
         self.calls.append(("git",) + args)
         class R: returncode = 0; stdout = ""
@@ -299,3 +301,23 @@ def test_the_screenless_ui_prints_each_step_once_and_never_asks(tmp_path, capsys
     for title in ("Download updates", "Firmware components", "Build", "Flash", "Check"):
         assert out.count(f"[OK ] {title}") == 1, out
     assert "Dawcontrol has changes you made — left alone" in out
+
+
+def test_a_project_update_forces_a_clean_build(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.last_update = lambda: {"ok": True, "installed_set": ["sampler", "dawcontrol"], "steps": []}
+    mgr.project = ("updated", "20 new commits")
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.plan["fullclean"] is False
+    assert p.run() is True
+    assert p.step("components").detail.startswith("project: 20 new commits")
+    assert any(c[0] == "run" and "fullclean" in c[1] for c in mgr.calls)
+
+
+def test_a_project_that_cannot_update_stops_before_the_build(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.project = ("clash", "your edit to main/x.cpp clashes with 3 new commits")
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is False
+    assert "main/x.cpp" in p.step("components").error
+    assert not any(c[0] == "run" for c in mgr.calls)

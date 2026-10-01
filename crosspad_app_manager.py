@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1884,6 +1885,75 @@ class AppManager:
     def infra_submodules(self) -> list[str]:
         return [s["path"] for s in self.get_all_submodules() if s["infra"]]
 
+    def update_project(self) -> tuple[str, str]:
+        """Fast-forward the project itself to its upstream, carrying local edits.
+
+        The apps follow their own branches; the core and gui they are written
+        against come with the project. Updating the apps alone moved them past
+        that core and the build failed. Never merges and never discards: local
+        commits, or an edit that clashes with an incoming one, leave the
+        project where it is. Returns (state, message), state one of current,
+        updated, no-upstream, local-commits, clash, failed.
+        """
+        def out(*args) -> str:
+            r = self._git(*args, check=False, capture=True)
+            return r.stdout if r.returncode == 0 else ""
+
+        if not out("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").strip():
+            return "no-upstream", "the project follows no branch"
+        if self._git("fetch", "--quiet", "origin", check=False, capture=True).returncode != 0:
+            return "failed", "can't reach the project's origin"
+        counts = out("rev-list", "--left-right", "--count", "@{u}...HEAD").split()
+        behind, ahead = (int(counts[0]), int(counts[1])) if len(counts) == 2 else (0, 0)
+        if not behind:
+            return "current", "up to date"
+        if ahead:
+            return "local-commits", f"{behind} new commits, but yours are not pushed"
+
+        # The pointers update() stages when it moves an app would clash with
+        # the project's own; the app folders keep their commits either way.
+        subs = {s["path"] for s in self.get_all_submodules()}
+        staged = [p for p in out("diff", "--cached", "--name-only").splitlines() if p in subs]
+        if staged:
+            self._git("reset", "-q", "--", *staged, check=False, capture=True)
+
+        incoming = set(out("diff", "--name-only", "HEAD", "@{u}").splitlines())
+        untracked = set(out("ls-files", "--others", "--exclude-standard").splitlines())
+        if untracked & incoming:
+            return "clash", f"your new file {sorted(untracked & incoming)[0]} is also new upstream"
+        edited = out("diff", "--name-only", "--ignore-submodules=all", "HEAD").splitlines()
+        carry = [p for p in edited if p in incoming]
+        for p in carry:
+            if not self._merges_cleanly(p):
+                return "clash", f"your edit to {p} clashes with {behind} new commits"
+
+        if carry:
+            self._git("stash", "push", "--quiet", "-m", "cptools: project update", "--", *carry,
+                      check=False, capture=True)
+        moved = self._git("merge", "--ff-only", "--quiet", "@{u}", check=False, capture=True)
+        if carry and self._git("stash", "pop", "--quiet", check=False, capture=True).returncode != 0:
+            return "failed", "your edits are kept in `git stash list`"
+        if moved.returncode != 0:
+            return "failed", (moved.stderr or "fast-forward refused").strip().splitlines()[-1]
+        return "updated", f"{behind} new commits"
+
+    def _merges_cleanly(self, path: str) -> bool:
+        """Would the working copy of `path` merge with upstream without conflict?"""
+        work = self.project_dir / path
+        base = self._git("show", f"HEAD:{path}", check=False, capture=True)
+        theirs = self._git("show", f"@{{u}}:{path}", check=False, capture=True)
+        if not work.is_file() or base.returncode != 0 or theirs.returncode != 0:
+            return False
+        with tempfile.TemporaryDirectory() as tmp:
+            ours = Path(tmp) / "ours"
+            shutil.copyfile(work, ours)
+            (Path(tmp) / "base").write_text(base.stdout, encoding="utf-8")
+            (Path(tmp) / "theirs").write_text(theirs.stdout, encoding="utf-8")
+            r = subprocess.run(["git", "merge-file", "-q", "-p", str(ours),
+                                str(Path(tmp) / "base"), str(Path(tmp) / "theirs")],
+                               capture_output=True)
+        return r.returncode == 0
+
     def app_display_name(self, app_id: str) -> str:
         """Human name for an app, registry or not.
 
@@ -3398,7 +3468,8 @@ def error_line(step: str, reason: str, subject: str = "") -> str:
     table = {
         ("download", "offline"): "Can't reach GitHub — check your connection, then [r] retry",
         ("download", "failed"): "Couldn't update {s} → [r] retry   [3] Something's wrong",
-        ("components", "failed"): "Couldn't fetch firmware components → [r] retry",
+        ("components", "failed"): "Couldn't update the firmware ({s}) → [r] retry",
+        ("components", "clash"): "The firmware can't update: {s} → commit or undo it, then [r] retry",
         ("build", "no-tools"): "Build tools are missing → [3] Something's wrong",
         ("build", "no-board"): "Which board? Answer above, then [r] retry",
         ("build", "failed"): "Build failed in {s} → [c] show the error   [3] Something's wrong",
@@ -3544,17 +3615,25 @@ class UpdatePipeline:
         return True
 
     def _components(self, s: StepResult) -> bool:
+        state, msg = self.mgr.update_project()
+        self.log.write(f"project: {state} -- {msg}\n")
+        if state in ("clash", "failed"):
+            s.error = error_line("components", state, msg)
+            return False
+        if state == "updated":
+            self.plan["fullclean"] = True      # new app folders arrive with the project
+        project = f"project: {msg}"
         paths = self.mgr.infra_submodules()
         if not paths:
-            s.detail = "none to update"
+            s.detail = project
             return True
         r = self.mgr._git("submodule", "update", "--init", "--", *paths,
                           check=False, capture=True)
         self.log.write((r.stdout or "") + "\n")
         if r.returncode != 0:
-            s.error = error_line("components", "failed")
+            s.error = error_line("components", "failed", "core, gui")
             return False
-        s.detail = ", ".join(os.path.basename(p) for p in paths)
+        s.detail = f"{project}; " + ", ".join(os.path.basename(p) for p in paths)
         return True
 
     def _build(self, s: StepResult) -> bool:

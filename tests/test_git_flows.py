@@ -78,3 +78,80 @@ def test_a_detached_app_that_follows_development_gets_onto_its_branch(project):
     mgr.update(app_name="sampler")
     assert git(sub, "rev-parse", "--abbrev-ref", "HEAD") == "main"
     assert git(sub, "rev-parse", "HEAD") == second
+
+
+@pytest.fixture
+def behind(tmp_path, monkeypatch):
+    """A project clone two commits behind origin, with an app submodule."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
+    app = tmp_path / "crosspad-sampler"
+    app.mkdir()
+    git(app, "init", "-q", "-b", "main")
+    (app / "a.txt").write_text("1")
+    git(app, "add", ".")
+    git(app, "commit", "-qm", "one")
+    up = tmp_path / "up"
+    up.mkdir()
+    git(up, "init", "-q", "-b", "main")
+    (up / "main.cpp").write_text("a\nb\nc\nd\ne\n")
+    (up / "other.cpp").write_text("x\n")
+    git(up, "add", ".")
+    git(up, "submodule", "add", "-q", str(app), "components/crosspad-sampler")
+    git(up, "commit", "-qm", "base")
+    proj = tmp_path / "proj"
+    git(tmp_path, "clone", "-q", "--recurse-submodules", str(up), "proj")
+    (app / "a.txt").write_text("2")
+    git(app, "commit", "-qam", "two")
+    git(up / "components/crosspad-sampler", "pull", "-q", "origin", "main")
+    (up / "main.cpp").write_text("A\nb\nc\nd\ne\n")
+    git(up, "commit", "-qam", "upstream edits main.cpp and moves the app")
+    (up / "new.cpp").write_text("n\n")
+    git(up, "add", ".")
+    git(up, "commit", "-qm", "upstream adds new.cpp")
+    mgr = cam.AppManager(str(proj), cam.PlatformConfig(platform="idf", lib_dir="components"))
+    return mgr, proj, up
+
+
+def test_project_update_fast_forwards_a_clean_project(behind):
+    mgr, proj, up = behind
+    assert mgr.update_project() == ("updated", "2 new commits")
+    assert git(proj, "rev-parse", "HEAD") == git(up, "rev-parse", "HEAD")
+    assert mgr.update_project() == ("current", "up to date")
+
+
+def test_project_update_carries_edits_and_moved_app_pointers(behind):
+    mgr, proj, up = behind
+    (proj / "main.cpp").write_text("a\nb\nc\nd\nE\n")      # same file, other line
+    (proj / "other.cpp").write_text("mine\n")                 # file upstream never touched
+    (proj / "untracked.cpp").write_text("u\n")
+    sub = proj / "components/crosspad-sampler"
+    git(sub, "pull", "-q", "origin", "main")                   # what update() does to an app
+    git(proj, "add", "components/crosspad-sampler")
+    state, _ = mgr.update_project()
+    assert state == "updated"
+    assert git(proj, "rev-parse", "HEAD") == git(up, "rev-parse", "HEAD")
+    assert (proj / "main.cpp").read_text() == "A\nb\nc\nd\nE\n"
+    assert (proj / "other.cpp").read_text() == "mine\n"
+    assert (proj / "untracked.cpp").exists()
+    assert git(proj, "stash", "list") == ""
+
+
+def test_project_update_leaves_a_clashing_edit_alone(behind):
+    mgr, proj, up = behind
+    head = git(proj, "rev-parse", "HEAD")
+    (proj / "main.cpp").write_text("mine\nb\nc\nd\ne\n")
+    state, msg = mgr.update_project()
+    assert state == "clash" and "main.cpp" in msg
+    assert git(proj, "rev-parse", "HEAD") == head
+    assert (proj / "main.cpp").read_text() == "mine\nb\nc\nd\ne\n"
+
+
+def test_project_update_never_merges_over_local_commits(behind):
+    mgr, proj, up = behind
+    (proj / "other.cpp").write_text("mine\n")
+    git(proj, "commit", "-qam", "local")
+    head = git(proj, "rev-parse", "HEAD")
+    assert mgr.update_project()[0] == "local-commits"
+    assert git(proj, "rev-parse", "HEAD") == head
