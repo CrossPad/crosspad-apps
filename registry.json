@@ -1,40 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "recorder": {
-      "name": "Recorder",
-      "version": "0.4.2",
-      "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
-      "repo": "https://github.com/CrossPad/crosspad-recorder.git",
-      "component_path": "components/crosspad-recorder",
-      "icon": "recorder.png",
-      "category": "audio",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.28.0",
-        "crosspad-gui": ">=1.14.0"
-      }
-    },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.9.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.34.0",
-        "crosspad-gui": ">=1.17.0"
-      }
-    },
     "dawcontrol": {
       "name": "DAW Control",
       "version": "0.4.1",
@@ -69,6 +35,23 @@
         "crosspad-gui": ">=1.12.0"
       }
     },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.9.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.34.0",
+        "crosspad-gui": ">=1.17.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -83,6 +66,23 @@
       "requires": {
         "crosspad-core": ">=0.3.0",
         "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "recorder": {
+      "name": "Recorder",
+      "version": "0.4.2",
+      "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
+      "repo": "https://github.com/CrossPad/crosspad-recorder.git",
+      "component_path": "components/crosspad-recorder",
+      "icon": "recorder.png",
+      "category": "audio",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.28.0",
+        "crosspad-gui": ">=1.14.0"
       }
     },
     "instructions": {
