@@ -42,3 +42,16 @@ def test_clicks_land_on_the_bracketed_key_they_hit(monkeypatch):
     assert cam._hotspot_key(30, row) == "2"
     assert cam._hotspot_key(10, row) == ""
     assert cam._hotspot_key(4, row + 1) == "enter" and cam._hotspot_key(19, row + 1) == "q"
+
+
+def test_a_failed_step_shows_its_error_not_working(monkeypatch):
+    out = __import__("io").StringIO()
+    monkeypatch.setattr(cam.sys, "stdout", out)
+    class Tui:
+        def _header(self, *a): pass
+        def _header_right(self): return ""
+    step = cam.StepResult("check", detail="…")
+    step.ok, step.error = False, "Check found an older Sampler on the board"
+    cam._PipelineUI(Tui())._draw([step], [], None)
+    assert "Check found an older Sampler" in out.getvalue()
+    assert "working…" not in out.getvalue()

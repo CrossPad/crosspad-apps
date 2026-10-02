@@ -4969,14 +4969,15 @@ class _PipelineUI:
             else:
                 mark, col = " ", _C.GRAY
             detail = s.error or s.detail
-            if s.detail == "…" and s.name == "build" and progress:
+            running = s.ok is None and s.detail == "…"
+            if running and s.name == "build" and progress:
                 n, m = progress
                 width = 20
                 filled = int(width * n / max(m, 1))
                 pct = int(100 * n / max(m, 1))
                 detail = (f"{G['bar_on'] * filled}{G['bar_off'] * (width - filled)}  "
                           f"{pct:3d} %")
-            elif s.detail == "…":
+            elif running:
                 detail = "working…"
             line = f" {col}{mark:<3}{_C.RST}{STEP_TITLES[s.name]:<22} "
             _w(line + (f"{_C.BRED}{detail}{_C.RST}" if s.error else
