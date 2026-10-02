@@ -7,8 +7,10 @@ class FakeUI:
         self.asked = []
     def render(self, steps, tail, progress):
         self.frames.append([(s.name, s.ok, s.detail) for s in steps])
-    def ask_local_work(self, app):
+    def ask_local_work(self, app, can_carry=False):
         self.asked.append(app); return self.local
+    def ask_project_work(self):
+        self.asked.append("project"); return self.local
     def ask_board(self, revs):
         return self.board
     def wait_for_board(self, probe):
@@ -37,11 +39,15 @@ class FakeMgr:
     def app_status(self, a): return self.statuses[a]
     def app_display_name(self, a): return a.capitalize()
     def backup_app(self, a): self.calls.append(("backup", a)); return "/bk"
-    def update(self, app_name=None, update_all=False, force=False, dry_run=False):
-        self.calls.append(("update", app_name, force))
+    def can_carry(self, st): return st["blocking"] == ["dirty"]
+    def update(self, app_name=None, update_all=False, force=False, dry_run=False, carry=False):
+        self.calls.append(("update", app_name, force) + (("carry",) if carry else ()))
+        return []
     def infra_submodules(self): return ["components/crosspad-core"]
     project = ("current", "up to date")
-    def update_project(self): return self.project
+    def update_project(self, carry_commits=False):
+        self.calls.append(("update_project", carry_commits))
+        return ("updated", "5 new commits, yours on top") if carry_commits else self.project
     def _git(self, *args, check=True, capture=False):
         self.calls.append(("git",) + args)
         class R: returncode = 0; stdout = ""
@@ -88,6 +94,25 @@ def test_pipeline_backup_then_update_local_work(tmp_path):
     # snapshot is not taken here.
     assert ("backup", "dawcontrol") not in mgr.calls
     assert ("update", "dawcontrol", True) in mgr.calls
+
+
+def test_pipeline_carries_local_work_on_top(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    p = cam.UpdatePipeline(mgr, FakeUI(local="carry"))
+    p.run()
+    assert ("update", "dawcontrol", False, "carry") in mgr.calls
+    assert ("backup", "dawcontrol") not in mgr.calls
+
+
+def test_pipeline_rebases_the_project_when_asked(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.project = ("local-commits", "5 new commits, but yours are not pushed")
+    p = cam.UpdatePipeline(mgr, FakeUI(local="carry"))
+    p.run()
+    assert ("update_project", True) in mgr.calls
+    assert "yours on top" in p.step("components").detail
 
 
 def test_pipeline_build_failure_stops_with_the_error_line(tmp_path):

@@ -1885,15 +1885,17 @@ class AppManager:
     def infra_submodules(self) -> list[str]:
         return [s["path"] for s in self.get_all_submodules() if s["infra"]]
 
-    def update_project(self) -> tuple[str, str]:
+    def update_project(self, carry_commits: bool = False) -> tuple[str, str]:
         """Fast-forward the project itself to its upstream, carrying local edits.
 
         The apps follow their own branches; the core and gui they are written
         against come with the project. Updating the apps alone moved them past
         that core and the build failed. Never merges and never discards: local
         commits, or an edit that clashes with an incoming one, leave the
-        project where it is. Returns (state, message), state one of current,
-        updated, no-upstream, local-commits, clash, failed.
+        project where it is — unless carry_commits, which rebases the local
+        commits onto upstream and, on any clash, puts everything back.
+        Returns (state, message), state one of current, updated, no-upstream,
+        local-commits, clash, failed.
         """
         def out(*args) -> str:
             r = self._git(*args, check=False, capture=True)
@@ -1907,7 +1909,7 @@ class AppManager:
         behind, ahead = (int(counts[0]), int(counts[1])) if len(counts) == 2 else (0, 0)
         if not behind:
             return "current", "up to date"
-        if ahead:
+        if ahead and not carry_commits:
             return "local-commits", f"{behind} new commits, but yours are not pushed"
 
         # The pointers update() stages when it moves an app would clash with
@@ -1922,19 +1924,42 @@ class AppManager:
         if untracked & incoming:
             return "clash", f"your new file {sorted(untracked & incoming)[0]} is also new upstream"
         edited = out("diff", "--name-only", "--ignore-submodules=all", "HEAD").splitlines()
-        carry = [p for p in edited if p in incoming]
+        # A rebase wants every tracked edit out of the way, not only the
+        # ones upstream also touches.
+        carry = edited if ahead else [p for p in edited if p in incoming]
         for p in carry:
-            if not self._merges_cleanly(p):
+            if p in incoming and not self._merges_cleanly(p):
                 return "clash", f"your edit to {p} clashes with {behind} new commits"
 
+        # The app folders hold their own checkouts; neither the rebase nor a
+        # roll-back may reset them to the commits the project records.
+        no_recurse = ("-c", "submodule.recurse=false")
+        old_head = out("rev-parse", "HEAD").strip()
         if carry:
-            self._git("stash", "push", "--quiet", "-m", "cptools: project update", "--", *carry,
+            self._git("-c", "user.name=cptools", "-c", "user.email=cptools@localhost",
+                      "stash", "push", "--quiet", "-m", "cptools: project update", "--", *carry,
                       check=False, capture=True)
-        moved = self._git("merge", "--ff-only", "--quiet", "@{u}", check=False, capture=True)
+        if ahead:
+            moved = self._git(*no_recurse, "rebase", "--quiet", "@{u}", check=False, capture=True)
+            if moved.returncode != 0:
+                self._git(*no_recurse, "rebase", "--abort", check=False, capture=True)
+                if carry:
+                    self._git("stash", "pop", "--quiet", check=False, capture=True)
+                return "clash", f"your commits clash with {behind} new commits — left as they were"
+        else:
+            moved = self._git("merge", "--ff-only", "--quiet", "@{u}", check=False, capture=True)
         if carry and self._git("stash", "pop", "--quiet", check=False, capture=True).returncode != 0:
-            return "failed", "your edits are kept in `git stash list`"
+            if not ahead:
+                return "failed", "your edits are kept in `git stash list`"
+            # Every tracked edit was in the stash, so this drops only the
+            # half-applied one.
+            self._git(*no_recurse, "reset", "--hard", "--quiet", old_head, check=False, capture=True)
+            self._git("stash", "pop", "--quiet", check=False, capture=True)
+            return "clash", f"your edits clash with {behind} new commits — left as they were"
         if moved.returncode != 0:
             return "failed", (moved.stderr or "fast-forward refused").strip().splitlines()[-1]
+        if ahead:
+            return "updated", f"{behind} new commits, yours on top"
         return "updated", f"{behind} new commits"
 
     def _merges_cleanly(self, path: str) -> bool:
@@ -3154,13 +3179,26 @@ class AppManager:
         print(f"\n  {info.get('name', app_name)} removed.")
         self._print_next_steps()
 
+    def can_carry(self, st: dict) -> bool:
+        """Can update(carry=True) move this app and keep its local work on top?
+
+        Uncommitted edits ride a stash over any move; commits of your own only
+        a branch can rebase. A worktree on another branch or another origin
+        is not an update's to move.
+        """
+        allowed = {"dirty", "ahead"} if st["policy"]["track"] == TRACK_BRANCH else {"dirty"}
+        return bool(st["blocking"]) and set(st["blocking"]) <= allowed
+
     def update(self, app_name: str = None, update_all: bool = False,
-               force: bool = False, dry_run: bool = False):
+               force: bool = False, dry_run: bool = False, carry: bool = False):
         """Update app submodules, honouring track policy and local work.
 
         Never stops on a blocked app: clean ones are updated, the rest are
         reported in a skip table with the reason. --force takes a backup and
-        proceeds anyway.
+        proceeds anyway. carry takes the backup too, then moves the app with
+        the local work put back on top; work that clashes with the update
+        leaves the app exactly where it was. Returns the skipped
+        (name, reason) pairs.
         """
         manifest = self._load_manifest()
         registry = self._load_registry()
@@ -3204,7 +3242,8 @@ class AppManager:
                 skipped.append((name, f"track=pinned @ {pin}"))
                 continue
 
-            ok, reason = self.guard(name, force=force)
+            carrying = carry and self.can_carry(st)
+            ok, reason = self.guard(name, force=force or carrying)
             if not ok:
                 skipped.append((name, f"{reason} — backup & --force to override"))
                 continue
@@ -3222,6 +3261,32 @@ class AppManager:
                 skipped.append((name, "fetch failed"))
                 continue
 
+            old_head = self._sub_git(install_path, "rev-parse", "HEAD").stdout.strip()
+            old_branch = st["git"]["branch"]
+            stashed = False
+            if carrying and st["git"]["dirty"]:
+                # A stash is a commit; a fresh machine with no git identity
+                # could not make one. It is popped a moment later.
+                if self._sub_git(install_path, "-c", "user.name=cptools",
+                                 "-c", "user.email=cptools@localhost", "stash", "push",
+                                 "--quiet", "-m", "cptools: app update").returncode != 0:
+                    skipped.append((name, "your changes could not be set aside"))
+                    continue
+                stashed = True
+
+            def put_back():
+                # Back to the commit and branch the app had, edits on top.
+                if not carrying:
+                    return
+                self._sub_git(install_path, "reset", "--hard", "--quiet")
+                if old_branch:
+                    self._sub_git(install_path, "checkout", "--quiet", old_branch)
+                    self._sub_git(install_path, "reset", "--hard", "--quiet", old_head)
+                else:
+                    self._sub_git(install_path, "checkout", "--quiet", old_head)
+                if stashed:
+                    self._sub_git(install_path, "stash", "pop", "--quiet")
+
             if track == TRACK_BRANCH:
                 # Follow the branch the user parked this app on: fast-forward
                 # in place, never check something else out.
@@ -3238,14 +3303,21 @@ class AppManager:
                                   f"--set-upstream-to=origin/{ref}", ref)
                     st["git"]["branch"] = ref
                 if st["git"]["branch"] != ref:
+                    put_back()
                     skipped.append((name, f"on {st['git']['branch'] or 'no branch'}, "
                                           f"config says {ref}"))
                     continue
                 r = self._sub_git(install_path, "merge", "--ff-only",
                                   f"origin/{ref}")
+                if r.returncode != 0 and carrying:
+                    r = self._sub_git(install_path, "rebase", "--quiet", f"origin/{ref}")
+                    if r.returncode != 0:
+                        self._sub_git(install_path, "rebase", "--abort")
                 if r.returncode != 0:
-                    skipped.append((name, "not fast-forwardable "
-                                          "(diverged from origin)"))
+                    put_back()
+                    skipped.append((name, "your commits clash with the update — left as they were"
+                                    if carrying else
+                                    "not fast-forwardable (diverged from origin)"))
                     continue
             else:
                 # Latest release = the newest semver tag on origin; an app
@@ -3256,9 +3328,16 @@ class AppManager:
                 checkout_ref = _release_target(tags, self._get_default_branch(install_path))
                 r = self._sub_git(install_path, "checkout", "--quiet", checkout_ref)
                 if r.returncode != 0:
+                    put_back()
                     skipped.append((name, f"checkout {checkout_ref} failed"))
                     continue
                 ref = checkout_ref
+
+            if stashed and self._sub_git(install_path, "stash", "pop",
+                                         "--quiet").returncode != 0:
+                put_back()
+                skipped.append((name, "your changes clash with the update — left as they were"))
+                continue
 
             self._git("add", install_path, check=False)
             commit = self._get_submodule_commit(install_path)
@@ -3278,6 +3357,7 @@ class AppManager:
                 print(f"    {name:<16} {reason}")
         if updated and not dry_run:
             self._print_next_steps()
+        return skipped
 
     def status(self, app_name: str = None):
         """Report intent vs observed state for installed apps."""
@@ -3584,38 +3664,43 @@ class UpdatePipeline:
     # -- steps -----------------------------------------------------------------
 
     def _download(self, s: StepResult) -> bool:
-        done, left = [], []
+        done, left, clashed = [], [], []
         for app_id in self.installed:
             st = self.mgr.app_status(app_id)
             name = self.mgr.app_display_name(app_id)
             rule, _ = follow_rule(st["policy"])
             if rule in ("own", "version"):
                 continue
-            force = False
+            force = carry = False
             if st["blocking"]:
-                choice = self.ui.ask_local_work(name)
-                if choice != "backup":
+                choice = self.ui.ask_local_work(name, self.mgr.can_carry(st))
+                if choice not in ("carry", "backup"):
                     left.append(name)
                     continue
-                # update(force=True) backs up through guard() itself — no
-                # need to also back up here (that took two identical
-                # snapshots per confirmation).
-                force = True
+                # update() backs up through guard() itself — no need to also
+                # back up here (that took two identical snapshots per
+                # confirmation).
+                carry, force = choice == "carry", choice == "backup"
             self.tail = [f"{name}: fetching"]
             self._render()
             with _capture_stdout(self.log):
-                self.mgr.update(app_name=app_id, force=force)
+                skipped = self.mgr.update(app_name=app_id, force=force, carry=carry) or []
+            if carry:
+                clashed.extend(f"{name}: {reason}" for _, reason in skipped)
             after = self.mgr.app_status(app_id)["git"]["head"]
             if after != st["git"]["head"]:
-                done.append(f"{name} {after}")
+                done.append(f"{name} {after}" + (" + your changes" if carry else ""))
         bits = [", ".join(done) if done else "nothing new"]
         if left:
             bits.append(f"{', '.join(left)} — your changes, left alone")
+        bits.extend(clashed)
         s.detail = "; ".join(bits)
         return True
 
     def _components(self, s: StepResult) -> bool:
         state, msg = self.mgr.update_project()
+        if state == "local-commits" and self.ui.ask_project_work() == "carry":
+            state, msg = self.mgr.update_project(carry_commits=True)
         self.log.write(f"project: {state} -- {msg}\n")
         if state in ("clash", "failed"):
             s.error = error_line("components", state, msg)
@@ -3819,8 +3904,12 @@ class _PrintUI:
             mark = {True: "OK ", False: "BAD", None: "..."}[st.ok]
             print(f"  [{mark}] {STEP_TITLES[st.name]:<20} {st.error or st.detail}", flush=True)
 
-    def ask_local_work(self, app_name: str) -> str:
+    def ask_local_work(self, app_name: str, can_carry: bool = False) -> str:
         print(f"  {app_name} has changes you made — left alone", flush=True)
+        return "leave"
+
+    def ask_project_work(self) -> str:
+        print("  the project has commits you made — left alone", flush=True)
         return "leave"
 
     def ask_board(self, revs):
@@ -4892,9 +4981,9 @@ class _PipelineUI:
             line = f" {col}{mark:<3}{_C.RST}{STEP_TITLES[s.name]:<22} "
             _w(line + (f"{_C.BRED}{detail}{_C.RST}" if s.error else
                        f"{_C.GRAY if s.ok is None else ''}{detail[:w - 28]}{_C.RST}") + "\n")
-        # Header 3, blank lines 3, [q] stop 1, and 3 kept free for what the
+        # Header 3, blank lines 3, [q] stop 1, and 4 kept free for what the
         # screen after the run writes below this — nothing may scroll.
-        room = max(_get_size()[1] - len(steps) - 10, 1)
+        room = max(_get_size()[1] - len(steps) - 11, 1)
         _w("\n")
         for line in tail[-room:]:
             _w(f" {_C.DIM}{line[:w - 4]}{_C.RST}\n")
@@ -4902,15 +4991,32 @@ class _PipelineUI:
         _screen_hints = "[q] stop the step that is running (Ctrl+C does the same)"
         _w(f"\n{' ' * max(w - 14, 0)}{_C.GRAY}[q] stop{_C.RST}\n")
 
-    def ask_local_work(self, app_name: str) -> str:
+    def ask_local_work(self, app_name: str, can_carry: bool = False) -> str:
         _w(f"\n {_C.BYELLOW}{app_name} has changes you made.{_C.RST}\n")
-        _w(f"   {_C.BCYAN}[Enter]{_C.RST} Leave it alone (keep my changes)\n")
+        if can_carry:
+            _w(f"   {_C.BCYAN}[Enter]{_C.RST} Update and put my changes back on top\n")
+            _w(f"   {_C.BCYAN}[Esc]{_C.RST}   Leave it alone\n")
+        else:
+            _w(f"   {_C.BCYAN}[Enter]{_C.RST} Leave it alone (keep my changes)\n")
         _w(f"   {_C.BCYAN}[b]{_C.RST}     Back it up to {BACKUP_ROOT} and update anyway\n")
         while True:
             key = _read_key()
             if key == "b":
                 return "backup"
+            if key == "enter" and can_carry:
+                return "carry"
             if key in ("enter", "esc", "q"):
+                return "leave"
+
+    def ask_project_work(self) -> str:
+        _w(f"\n {_C.BYELLOW}The firmware project has commits you made that are not pushed.{_C.RST}\n")
+        _w(f"   {_C.BCYAN}[Enter]{_C.RST} Update and put my commits back on top\n")
+        _w(f"   {_C.BCYAN}[Esc]{_C.RST}   Leave it alone (the apps may not build against it)\n")
+        while True:
+            key = _read_key()
+            if key == "enter":
+                return "carry"
+            if key in ("esc", "q"):
                 return "leave"
 
     def ask_board(self, revs: list[str]) -> str | None:
