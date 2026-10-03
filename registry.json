@@ -51,6 +51,24 @@
         "crosspad-gui": ">=1.17.0"
       }
     },
+    "instructions": {
+      "name": "Instructions",
+      "version": "0.2.0",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "info.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "arduino",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "dawcontrol": {
       "name": "DAW Control",
       "version": "0.4.1",
@@ -85,22 +103,21 @@
         "crosspad-gui": ">=1.12.0"
       }
     },
-    "instructions": {
-      "name": "Instructions",
-      "version": "0.2.0",
-      "description": "Markdown-based instructions and help viewer",
-      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
-      "component_path": "components/crosspad-instructions",
-      "icon": "info.png",
-      "category": "tools",
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.7.0",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
       "platforms": [
-        "esp-idf",
-        "arduino",
-        "pc"
+        "pc",
+        "esp-idf"
       ],
       "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
+        "crosspad-core": ">=1.25.0",
+        "crosspad-gui": ">=1.14.0"
       }
     },
     "slicer": {
@@ -117,23 +134,6 @@
       ],
       "requires": {
         "crosspad-core": ">=1.31.0",
-        "crosspad-gui": ">=1.14.0"
-      }
-    },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.7.0",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.25.0",
         "crosspad-gui": ">=1.14.0"
       }
     },
