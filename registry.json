@@ -18,23 +18,6 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.9.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.34.0",
-        "crosspad-gui": ">=1.17.0"
-      }
-    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -133,6 +116,23 @@
       "requires": {
         "crosspad-core": ">=1.21.0",
         "crosspad-gui": ">=1.12.0"
+      }
+    },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.9.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.34.0",
+        "crosspad-gui": ">=1.17.0"
       }
     },
     "instructions": {
