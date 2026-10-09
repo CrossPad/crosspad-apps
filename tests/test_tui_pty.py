@@ -37,7 +37,8 @@ def drive(cwd, keys, settle=1.2, platform="pc"):
         os.chdir(cwd)
         # Never the bench's real crosspad-hil: a test must not take the board.
         env = dict(os.environ, TERM="xterm", PYTHONPATH=ROOT, CROSSPAD_NO_MOUSE="",
-                   CROSSPAD_HIL=os.path.join(str(cwd), "no-hil"))
+                   CROSSPAD_HIL=os.path.join(str(cwd), "no-hil"),
+                   CROSSPAD_TRACE=os.path.join(str(cwd), "no-trace"))
         lib = "src/apps" if platform == "pc" else "components"
         os.execvpe(sys.executable, [sys.executable, "-c",
                    "import crosspad_app_manager as c; c.tui_main(c.PlatformConfig("
@@ -102,3 +103,10 @@ def test_crosspad_screen_without_hil_says_how_to_install(project):
     assert "Traceback" not in text, text[text.find("Traceback"):][:2000]
     assert "pip install git+https://github.com/CrossPad/crosspad-hil" in text
     assert "Pads" not in text.split("crosspad-hil, which is not installed")[-1]
+
+
+def test_tracer_menu_without_the_tracer_says_how_to_get_it(project):
+    text = drive(project, [ENTER, "/", "swd", ENTER, ENTER, "x", "q", "q"], platform="esp-idf")
+    assert "Traceback" not in text, text[text.find("Traceback"):][:2000]
+    for seen in ("STM (SWD)", "ESP (CDC)", "crosspad-mcp"):
+        assert seen in text, seen

@@ -23,6 +23,7 @@ import itertools
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -6489,6 +6490,102 @@ class _DeviceScreen:
                    lambda _r: self._conn_enter())
 
 
+# -- STM tracer ----------------------------------------------------------------
+#
+# A shortcut only: crosspad-trace (crosspad-mcp) checks the ST-Link, starts the
+# SWD session and its page on :7373 and opens the browser. CP Tools runs it,
+# shows what it prints, and stops it the way Ctrl+C would.
+
+TRACER_TAIL_LINES = 15
+TRACER_MISSING_LINES = (
+    "  The STM tracer (crosspad-trace) is not installed here.",
+    "",
+    "  It comes with crosspad-mcp:",
+    "    git clone https://github.com/CrossPad/crosspad-mcp ~/GIT/crosspad-mcp",
+    "    cd ~/GIT/crosspad-mcp && npm install && npm run build",
+    "",
+    "  CP Tools then runs ~/GIT/crosspad-mcp/dist/trace-cli.js with node,",
+    "  or crosspad-trace itself once it is on PATH.",
+)
+
+
+def find_trace_cli(home: Path | None = None) -> list[str] | None:
+    """crosspad-trace on PATH, else node + ~/GIT/crosspad-mcp/dist/trace-cli.js; CROSSPAD_TRACE overrides."""
+    forced = os.environ.get("CROSSPAD_TRACE")
+    if forced is not None:
+        return [forced] if forced and os.path.isfile(forced) else None
+    exe = shutil.which("crosspad-trace")
+    if exe:
+        return [exe]
+    script = (home or Path.home()) / "GIT" / "crosspad-mcp" / "dist" / "trace-cli.js"
+    node = shutil.which("node")
+    if node and script.is_file():
+        return [node, str(script)]
+    return None
+
+
+def tracer_verdict(rc: int | None, tail: list[str], stopped: bool) -> list[str]:
+    """What to say when crosspad-trace ends: 1 = the probe or its check, 2 = the tools."""
+    if stopped:
+        return ["  The tracer stopped."]
+    last = [f"  {_C.GRAY}{line}{_C.RST}" for line in tail[-TRACER_TAIL_LINES:]]
+    if rc == 0:
+        return ["  The tracer finished:", ""] + last
+    if rc == 1:
+        head = "The tracer could not reach the STM32 — its check says:"
+    elif rc == 2:
+        head = "The tracer's tools are not set up — its check says:"
+    else:
+        head = f"The tracer stopped with exit code {rc}:"
+    return [f"  {_C.BRED}{head}{_C.RST}", ""] + last
+
+
+class _TracerRun:
+    """crosspad-trace as a child: its output kept, stopped the way Ctrl+C stops it."""
+
+    KEEP_LINES = 200
+
+    def __init__(self, argv: list[str]):
+        self.argv = list(argv)
+        self.proc: subprocess.Popen | None = None
+        self._tail: collections.deque = collections.deque(maxlen=self.KEEP_LINES)
+        self._pump_t: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.proc = subprocess.Popen(
+            self.argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            bufsize=1, **_own_group())
+        self._pump_t = threading.Thread(target=self._pump, daemon=True)
+        self._pump_t.start()
+
+    def _pump(self) -> None:
+        for raw in self.proc.stdout:
+            self._tail.append(raw.rstrip("\r\n"))
+
+    def poll(self) -> int | None:
+        rc = self.proc.poll()
+        if rc is not None:
+            self._pump_t.join(1.0)
+        return rc
+
+    def lines(self) -> list[str]:
+        return list(self._tail)
+
+    def stop(self, grace: float = 5.0) -> int | None:
+        if self.proc.poll() is None:
+            try:
+                if sys.platform == "win32":
+                    self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    os.killpg(self.proc.pid, signal.SIGINT)
+                self.proc.wait(grace)
+            except (OSError, subprocess.TimeoutExpired):
+                _kill_tree(self.proc)
+        self._pump_t.join(1.0)
+        return self.proc.returncode
+
+
 class _TUI:
     """Interactive TUI for CrossPad App Manager."""
 
@@ -7282,6 +7379,7 @@ class _TUI:
         if self.config.platform == "esp-idf":
             entries.insert(2, ("CrossPad", "pads, encoder, apps, files, WiFi, Bluetooth — "
                                            "the board from here", lambda: self._crosspad_screen()))
+            entries.insert(3, ("Tracer", "STM over SWD, ESP heap and touch", self._tracer_menu))
         return entries
 
     def _submit_flow(self):
@@ -7652,6 +7750,56 @@ class _TUI:
                           device=self.mgr.chosen_device).run(self)
         finally:
             self.mgr.hil_close()
+
+    def _tracer_menu(self):
+        while True:
+            idx = _menu_select("Tracer", ["STM (SWD)", "ESP (CDC)"],
+                               ["live STM32 variables over an ST-Link, in the browser",
+                                "heap and touch traces off the ESP: CrossPad → Trace"])
+            if idx < 0:
+                return
+            if idx == 0:
+                self._tracer_stm()
+            else:
+                self._crosspad_screen(tab=DEV_TAB_TRACE)
+
+    def _tracer_stm(self):
+        argv = find_trace_cli()
+        if argv is None:
+            _clear()
+            self._header("STM tracer")
+            for line in TRACER_MISSING_LINES:
+                _w(line + "\n")
+            _pause()
+            return
+        run = _TracerRun(argv)
+        try:
+            run.start()
+        except OSError as e:
+            self._toast_here(f"crosspad-trace did not start: {e}")
+            return
+        stopped = False
+        try:
+            while run.poll() is None:
+                with _frame():
+                    _clear()
+                    self._header("STM tracer", "SWD · http://localhost:7373")
+                    _w("\n")
+                    for line in run.lines()[-max(_get_size()[1] - 8, 3):]:
+                        _w(f"  {_C.DIM}{line[:self._cols - 4]}{_C.RST}\n")
+                    self._footer("[q] stop the tracer")
+                if _read_key(0.25) in ("q", "esc", "ctrl-c"):
+                    stopped = True
+                    break
+        except KeyboardInterrupt:
+            stopped = True
+        rc = run.stop() if stopped else run.poll()
+        _clear()
+        self._header("STM tracer")
+        for line in tracer_verdict(rc, run.lines(), stopped):
+            _w(line + "\n")
+        _pause()
+
 
     # -- Browse ---------------------------------------------------------------
 
