@@ -7263,6 +7263,9 @@ class _TUI:
         if getattr(self.config, "board_revs", None):
             entries.insert(4, ("Board", "choose the board revision to build for",
                                lambda: self._choose_board()))
+        if self.config.platform == "esp-idf":
+            entries.insert(2, ("CrossPad", "pads, encoder, apps, files, WiFi, Bluetooth — "
+                                           "the board from here", lambda: self._crosspad_screen()))
         return entries
 
     def _submit_flow(self):
@@ -7614,6 +7617,25 @@ class _TUI:
                 return
             if key == "r":
                 report = None
+
+    def _crosspad_screen(self, tab: int = DEV_TAB_PADS):
+        """The board itself, through one crosspad-hil serve held for this screen."""
+        try:
+            client = self.mgr.hil_open()
+        except HilFailure as e:
+            _clear()
+            self._header("CrossPad", "Developer tools")
+            reason = "" if e.code == HIL_MISSING and "not installed" in e.message else e.message
+            for line in hil_missing_lines(reason):
+                _w(line + "\n")
+            self._footer("any key: back")
+            _read_key_blocking()
+            return
+        try:
+            _DeviceScreen(client, tab=tab, project_dir=self.mgr.project_dir,
+                          device=self.mgr.chosen_device).run(self)
+        finally:
+            self.mgr.hil_close()
 
     # -- Browse ---------------------------------------------------------------
 
