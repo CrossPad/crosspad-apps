@@ -5551,6 +5551,44 @@ def hil_dead_lines(err: HilFailure) -> list[str]:
             f"  {_C.GRAY}Then leave with Esc and open CrossPad again.{_C.RST}"]
 
 
+TRACE_ACTIONS = (("Heap start", "heap_trace", "START"), ("Heap stop", "heap_trace", "STOP"),
+                 ("Heap dump", "heap_trace", "DUMP"), ("Touch on", "touch_trace", "ON"),
+                 ("Touch off", "touch_trace", "OFF"), ("Touch clear", "touch_trace", "CLEAR"),
+                 ("Touch dump", "touch_trace", "DUMP"))
+TRACE_TIMEOUT_S = 25.0          # the board takes up to 20 s for a dump
+TRACE_KEEP_LINES = 2000
+TRACE_DIR = ".crosspad/traces"
+
+
+def heap_trace_lines(result: dict) -> list[str]:
+    """HEAP_TRACE's trailer, then one line per group of live allocations."""
+    head = " ".join(f"{k}={v}" for k, v in result.items() if k != "groups")
+    lines = [f"  {head}"] if head else []
+    for group in result.get("groups") or []:
+        rest = " ".join(f"{k}={v}" for k, v in group.items() if k != "pc")
+        pcs = ",".join(group.get("pc") or [])
+        lines.append(f"  {rest} pc={pcs}" if pcs else f"  {rest}")
+    return lines if result.get("groups") else lines + ["  (no allocations)"]
+
+
+def touch_trace_lines(result: dict) -> list[str]:
+    """TOUCH_TRACE's counters, then its samples, oldest first."""
+    head = " ".join(f"{k}={v}" for k, v in result.items() if k != "samples")
+    lines = [f"  {head}"] if head else []
+    for s in result.get("samples") or []:
+        lines.append(f"  {s.get('t_ms', 0):>8} ms  {'down' if s.get('pressed') else 'up  '}  "
+                     f"x={s.get('x')} y={s.get('y')}")
+    return lines
+
+
+def save_trace(project_dir: Path, lines: list[str], when: float) -> Path:
+    stamp = datetime.fromtimestamp(when).strftime("%Y%m%d-%H%M%S")
+    path = Path(project_dir) / TRACE_DIR / f"{stamp}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(_ANSI_RE.sub("", line) for line in lines) + "\n", encoding="utf-8")
+    return path
+
+
 class _DeviceScreen:
     """The CrossPad screen: four tabs over one crosspad-hil serve.
 
@@ -6082,6 +6120,52 @@ class _DeviceScreen:
                 self._request("app_start", {"name": apps[idx]}, timeout=8.0)
         except HilFailure as e:
             self._failed("apps", e)
+
+    # -- Trace -----------------------------------------------------------------
+
+    _trace_hints = ("← →  pick   [Enter] run   ↑ ↓ PgUp PgDn Home End  scroll   "
+                    "[s] save to a file   [c] claim or release the bench   "
+                    "1-4 or [Tab] tabs   [q] back")
+
+    def _trace_lines(self, width: int, height: int) -> list[str]:
+        picks = " ".join(f"{_C.BGCYAN}{_C.BOLD} {label} {_C.RST}" if i == self.trace_pick
+                         else f" {label} " for i, (label, _verb, _what) in enumerate(TRACE_ACTIONS))
+        self._pane = max(height - 14, 3)
+        lines = ["  " + picks, ""]
+        if "trace" in self._inflight:
+            lines.append(f"  {_C.GRAY}running…{_C.RST}")
+        shown = self.trace_out[self.trace_top:self.trace_top + self._pane]
+        return lines + (shown or [f"  {_C.GRAY}Pick a trace and press Enter; "
+                                  f"its output lands here.{_C.RST}"])
+
+    def _trace_key(self, key: str) -> None:
+        last = max(len(self.trace_out) - self._pane, 0)
+        if key in ("left", "right"):
+            step = 1 if key == "right" else -1
+            self.trace_pick = (self.trace_pick + step) % len(TRACE_ACTIONS)
+        elif key == "enter":
+            label, verb, what = TRACE_ACTIONS[self.trace_pick]
+            self._verb("trace", verb, {"what": what},
+                       lambda r, l=label, v=verb: self._got_trace(l, v, r),
+                       timeout=TRACE_TIMEOUT_S)
+        elif key in ("home", "end"):
+            self.trace_top = 0 if key == "home" else last
+        elif key in ("up", "down", "pgup", "pgdn"):
+            step = {"up": -1, "down": 1, "pgup": -self._pane, "pgdn": self._pane}[key]
+            self.trace_top = min(max(self.trace_top + step, 0), last)
+        elif key == "s":
+            if not self.trace_out:
+                self.message = "Nothing to save yet."
+                return
+            path = save_trace(self.project_dir, self.trace_out, self._wall())
+            self.message = f"Saved {path.relative_to(self.project_dir).as_posix()}"
+
+    def _got_trace(self, label: str, verb: str, result: dict) -> None:
+        stamp = datetime.fromtimestamp(self._wall()).strftime("%H:%M:%S")
+        body = heap_trace_lines(result) if verb == "heap_trace" else touch_trace_lines(result)
+        self.trace_out = (self.trace_out + [f"  {_C.BCYAN}── {label} {stamp}{_C.RST}"]
+                          + body)[-TRACE_KEEP_LINES:]
+        self.trace_top = max(len(self.trace_out) - self._pane, 0)
 
 
 class _TUI:
