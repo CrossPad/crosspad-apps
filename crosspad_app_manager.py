@@ -5623,6 +5623,37 @@ def settings_text(st: dict | None) -> str:
     return "nothing saved or loaded since the board started"
 
 
+USB_MODE_LONG = {"default": "CDC — serial and MIDI",
+                 "audio": "USB audio — MIDI, sound in and out, no serial",
+                 "bootloader": "bootloader"}
+USB_SWITCH_TIMEOUT_S = 60.0     # the board re-enumerates; the guard prompt waits 30 s
+
+
+def wifi_text(w: dict | None) -> str:
+    if not w:
+        return "-"
+    parts = [str(w.get("state") or "?")]
+    if w.get("ssid"):
+        parts.append(str(w["ssid"]))
+    if w.get("ip"):
+        parts.append(str(w["ip"]))
+    if w.get("rssi") is not None and w.get("ssid"):
+        parts.append(f"{w['rssi']} dBm")
+    if w.get("enabled") == 0:
+        parts.append("off in settings")
+    return " · ".join(parts)
+
+
+def ble_text(b: dict | None) -> str:
+    if not b:
+        return "-"
+    if not b.get("supported"):
+        return "not on this firmware"
+    if not b.get("running"):
+        return "off"
+    return f"on · {b.get('mode') or '?'} · peer {b.get('peer') or '-'}"
+
+
 class _DeviceScreen:
     """The CrossPad screen: four tabs over one crosspad-hil serve.
 
@@ -6356,6 +6387,90 @@ class _DeviceScreen:
         if result.get("busy"):
             self._after(SETTINGS_POLL_S, lambda: self._verb(
                 "settings", "settings_status", {}, self._got_settings))
+
+    # -- Connections -----------------------------------------------------------
+
+    _conn_hints = ("[u] switch the USB profile   ↑ ↓  pick a network   [n] add a network   "
+                   "[x] forget it   [b] Bluetooth on/off   [r] refresh   "
+                   "[c] claim or release the bench   1-4 or [Tab] tabs   [q] back")
+
+    def _conn_enter(self) -> None:
+        self._verb("wifi", "wifi_status", {}, self._got_wifi)
+        self._verb("nets", "wifi_list", {}, self._got_nets)
+        self._verb("ble", "ble_status", {}, self._got_ble)
+
+    def _got_wifi(self, result: dict) -> None:
+        self.wifi = result
+
+    def _got_nets(self, result) -> None:
+        self.nets = list(result) if isinstance(result, list) else list(result.get("nets") or [])
+        self.net_pick = min(self.net_pick, max(len(self.nets) - 1, 0))
+
+    def _got_ble(self, result: dict) -> None:
+        self.ble = result
+
+    def _conn_lines(self, width: int, height: int) -> list[str]:
+        mode = (self.dev or {}).get("usb_mode")
+        other = USB_MODE_NAMES["audio" if mode == "default" else "default"]
+        lines = [f"  {_C.BWHITE}USB{_C.RST}        {USB_MODE_LONG.get(mode, 'unknown')}   "
+                 f"{_C.GRAY}[u] switch to {other}{_C.RST}",
+                 f"             {_C.GRAY}A board with the serial guard on asks on its screen "
+                 f"first — press Allow there.{_C.RST}",
+                 "",
+                 f"  {_C.BWHITE}WiFi{_C.RST}       {wifi_text(self.wifi)}"]
+        for i, net in enumerate(self.nets):
+            mark = f"{_C.BYELLOW}>{_C.RST}" if i == self.net_pick else " "
+            lines.append(f"           {mark} {net}")
+        if not self.nets:
+            lines.append(f"             {_C.GRAY}no saved networks{_C.RST}")
+        return lines + ["", f"  {_C.BWHITE}Bluetooth{_C.RST}  {ble_text(self.ble)}"]
+
+    def _conn_key(self, key: str) -> None:
+        if key == "u":
+            self._switch_usb()
+        elif key in ("up", "down") and self.nets:
+            self.net_pick = (self.net_pick + (1 if key == "down" else -1)) % len(self.nets)
+        elif key == "n":
+            self._add_net()
+        elif key == "x" and self.nets:
+            ssid = self.nets[self.net_pick]
+            if _confirm(f"Forget the network {ssid}?"):
+                self._verb("wifi_forget", "wifi_forget", {"ssid": ssid},
+                           lambda _r: self._conn_enter())
+        elif key == "b" and self.ble is not None:
+            self._verb("ble_enable", "ble_enable", {"on": not self.ble.get("running")},
+                       lambda _r: self._conn_enter())
+        elif key == "r":
+            self._conn_enter()
+
+    def _switch_usb(self) -> None:
+        mode = (self.dev or {}).get("usb_mode")
+        target = "audio" if mode == "default" else "default"
+        if not _confirm(f"Switch the board to {USB_MODE_NAMES[target]}? It reconnects; a board "
+                        f"with the serial guard asks on its screen"):
+            return
+        self.message = "Switching — press Allow on the board if it asks."
+        self._call("usbmode", "usbmode.set", {"mode": target}, self._got_usbmode,
+                   timeout=USB_SWITCH_TIMEOUT_S)
+
+    def _got_usbmode(self, dev: dict) -> None:
+        self.dev = dev
+        self.audio = dev.get("usb_mode") == "audio"
+        self.message = f"The board is in {USB_MODE_NAMES.get(dev.get('usb_mode'), 'unknown')} now."
+        self._next["devices"] = 0.0
+
+    def _add_net(self) -> None:
+        ssid = _text_input("Network name", "")
+        if not ssid:
+            return
+        password = _text_input("Password (empty for an open network)", "")
+        if password is None:
+            return
+        if password and len(password) < 8:
+            self.message = "A WiFi password has at least 8 characters."
+            return
+        self._verb("wifi_set", "wifi_set", {"ssid": ssid, "password": password},
+                   lambda _r: self._conn_enter())
 
 
 class _TUI:
