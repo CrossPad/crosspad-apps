@@ -5331,6 +5331,225 @@ class _PipelineUI:
 
 # -- Main TUI class -----------------------------------------------------------
 
+# -- CrossPad screen -------------------------------------------------------------
+#
+# Developer tools → CrossPad: the board's pads, knob, apps, traces, files and
+# radios, through crosspad-hil. Everything drawn is a function of state, so
+# the tests read the screen without a terminal or a board.
+
+DEV_TABS = ("Pads", "Trace", "Files", "Connections")
+DEV_TAB_PADS, DEV_TAB_TRACE, DEV_TAB_FILES, DEV_TAB_CONN = range(4)
+_DEV_TAB_NAMES = ("pads", "trace", "files", "conn")
+
+# The hardware counts pads from the bottom-left corner, row by row; the grid
+# (and the keyboard) is drawn top row first.
+PAD_KEY_ROWS = ("1234", "qwer", "asdf", "zxcv")
+PAD_HOLD_ROWS = ("!@#$", "QWER", "ASDF", "ZXCV")
+PAD_GRID = ((12, 13, 14, 15), (8, 9, 10, 11), (4, 5, 6, 7), (0, 1, 2, 3))
+PAD_CELL_W = 8
+
+AUDIO_NOTICE = "This needs the CDC profile — switch in Connections."
+USB_MODE_NAMES = {"default": "CDC", "audio": "USB audio", "bootloader": "bootloader"}
+
+_CUBE_LEVELS = (0, 95, 135, 175, 215, 255)
+
+
+def rgb_to_256(r: int, g: int, b: int) -> int:
+    """Nearest xterm-256 colour: the 6x6x6 cube or the 24-step grey ramp."""
+    def nearest(v):
+        return min(range(6), key=lambda i: abs(_CUBE_LEVELS[i] - v))
+
+    def dist(c):
+        return sum((x - y) ** 2 for x, y in zip(c, (r, g, b)))
+    ri, gi, bi = nearest(r), nearest(g), nearest(b)
+    step = min(23, max(0, round(((r + g + b) / 3 - 8) / 10)))
+    grey = 8 + 10 * step
+    cube = (_CUBE_LEVELS[ri], _CUBE_LEVELS[gi], _CUBE_LEVELS[bi])
+    return 232 + step if dist((grey, grey, grey)) < dist(cube) else 16 + 36 * ri + 6 * gi + bi
+
+
+def color_mode() -> str:
+    """How the pad grid paints: '24bit', '256', or 'none' (NO_COLOR / plain)."""
+    if PLAIN or os.environ.get("NO_COLOR"):
+        return "none"
+    if os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit"):
+        return "24bit"
+    return "256"
+
+
+def _hex_rgb(text: str) -> tuple[int, int, int]:
+    try:
+        v = int(text, 16) if len(text) == 6 else 0
+    except ValueError:
+        v = 0
+    return (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF
+
+
+def _pad_paint(hexrgb: str, mode: str) -> str:
+    r, g, b = _hex_rgb(hexrgb)
+    bg = (f"\033[48;2;{r};{g};{b}m" if mode == "24bit"
+          else f"\033[48;5;{rgb_to_256(r, g, b)}m")
+    fg = "\033[30m" if 0.299 * r + 0.587 * g + 0.114 * b > 140 else "\033[97m"
+    return bg + fg
+
+
+def pad_grid_lines(colors: list[str] | None, held: set[int], mode: str) -> list[str]:
+    """The 4x4 pads, two lines a row: the key (and * when held), then the pad number."""
+    out: list[str] = []
+    for r, row in enumerate(PAD_GRID):
+        top, bottom = "  ", "  "
+        for c, idx in enumerate(row):
+            hexrgb = colors[idx] if colors and idx < len(colors) else "000000"
+            first = f" {PAD_KEY_ROWS[r][c]}{'*' if idx in held else ' '}".ljust(PAD_CELL_W)
+            if mode == "none":
+                top += first + " "
+                bottom += f" {hexrgb.upper()}".ljust(PAD_CELL_W) + " "
+            else:
+                paint = _pad_paint(hexrgb, mode)
+                top += f"{paint}{first}\033[0m "
+                bottom += f"{paint}{f' {idx:>2}'.ljust(PAD_CELL_W)}\033[0m "
+        out += [top.rstrip(), bottom.rstrip(), ""]
+    return out[:-1]
+
+
+def pad_for_key(key: str) -> tuple[int, bool] | None:
+    """(pad index, hold) for a key on the pad grid; None for any other key."""
+    if len(key) != 1:
+        return None
+    for r in range(4):
+        if key in PAD_KEY_ROWS[r]:
+            return PAD_GRID[r][PAD_KEY_ROWS[r].index(key)], False
+        if key in PAD_HOLD_ROWS[r]:
+            return PAD_GRID[r][PAD_HOLD_ROWS[r].index(key)], True
+    return None
+
+
+def lease_age(seconds: float) -> str:
+    seconds = max(int(seconds), 0)
+    return f"{seconds} s" if seconds < 60 else f"{seconds // 60} min"
+
+
+def bench_segment(view: dict | None, me: str, now: float) -> str:
+    """`bench: free`, `bench: pidf (firmware_app, 12 min left)`, `bench: yours (…)`, `, you #2`."""
+    if view is None:
+        return "bench: ?"
+    lease, reserved = view.get("lease"), view.get("reserved_for")
+    if lease:
+        left = lease_age(float(lease.get("expires") or now) - now)
+        if lease.get("holder") == me:
+            text = f"bench: yours ({left} left)"
+        else:
+            purpose = f"{lease['purpose']}, " if lease.get("purpose") else ""
+            text = f"bench: {lease.get('holder') or '?'} ({purpose}{left} left)"
+    elif reserved and reserved.get("holder") != me:
+        text = f"bench: held for {reserved.get('holder') or '?'}"
+    else:
+        text = "bench: free"
+    pos = next((q.get("position") for q in view.get("queue") or [] if q.get("holder") == me), None)
+    return text + (f", you #{pos}" if pos else "")
+
+
+def status_line(dev: dict | None, hub: dict | None, bench: dict | None, now: float,
+                me: str) -> str:
+    """`v2 · CDC · bench: free · hub: 2 clients · lease: kit_churn (pid 4121, 3 min)`.
+
+    The bench is the coarse "someone is testing" lease (crosspad-hil bench.py);
+    the hub's lease is its short exclusive op (an OTA, a file transfer).
+    """
+    if dev is None:
+        parts = ["no board"]
+    else:
+        parts = [dev.get("board_rev") or "?", USB_MODE_NAMES.get(dev.get("usb_mode"), "unknown"),
+                 bench_segment(bench, me, now)]
+    if hub is None:
+        parts.append("hub: ?")
+    elif not hub.get("running"):
+        parts.append("hub: off")
+    else:
+        n = len(hub.get("clients") or [])
+        parts.append(f"hub: {n} client{'' if n == 1 else 's'}")
+        lease = hub.get("lease")
+        if lease:
+            since = float(lease.get("since") or now)
+            parts.append(f"lease: {lease.get('purpose') or lease.get('client') or '?'} "
+                         f"(pid {lease.get('pid', '?')}, {lease_age(now - since)})")
+        else:
+            parts.append("lease: -")
+    return " · ".join(parts)
+
+
+def busy_lines(err: HilFailure, now: float) -> list[str]:
+    h = err.holder
+    if h:
+        since = float(h.get("since") or now)
+        who = (f"{h.get('client') or '?'} ({h.get('purpose') or '?'}), "
+               f"pid {h.get('pid', '?')}, for {lease_age(now - since)}")
+    else:
+        who = err.message
+    return [f"  {_C.BYELLOW}The board is busy{_C.RST}",
+            f"  {who}",
+            "",
+            f"  {_C.GRAY}This comes back by itself when it is free.{_C.RST}"]
+
+
+def bench_busy_lines(err: HilFailure | None, view: dict | None, now: float, me: str,
+                     claim_key: str) -> list[str]:
+    """BENCH_BUSY in place of a tab: who has the bench, since when, for how long, the queue.
+
+    The live `bench.status` view wins over the refusal's details, which are as
+    old as the refused request.
+    """
+    d = err.details if err is not None else {}
+    if view is not None:
+        lease, reserved = view.get("lease"), view.get("reserved_for")
+        queue = [q.get("holder") for q in view.get("queue") or []]
+    else:
+        lease = ({k: d.get(k) for k in ("holder", "purpose", "since", "expires")}
+                 if d.get("expires") else None)
+        reserved = ({"holder": d.get("holder"), "until": d.get("reserved_until")}
+                    if d.get("reserved_until") else None)
+        queue = list(d.get("queue") or [])
+    lines = [f"  {_C.BYELLOW}The bench is claimed{_C.RST}"]
+    if lease:
+        purpose = f" ({lease['purpose']})" if lease.get("purpose") else ""
+        since = time.strftime("%H:%M", time.localtime(float(lease.get("since") or now)))
+        left = lease_age(float(lease.get("expires") or now) - now)
+        lines.append(f"  {lease.get('holder') or '?'}{purpose}, since {since}, {left} left")
+    elif reserved:
+        more = lease_age(float(reserved.get("until") or now) - now)
+        lines.append(f"  held for {reserved.get('holder') or '?'}, first in the queue, "
+                     f"for {more} more")
+    elif err is not None:
+        lines.append(f"  {err.message}")
+    if queue:
+        lines.append("  queue: " + ", ".join(f"{h} (you)" if h == me else str(h) for h in queue))
+    action = "leave the queue" if me in queue else "join the queue"
+    return lines + ["", f"  {_C.GRAY}[{claim_key}] {action} — this comes back by itself "
+                        f"when the bench is free.{_C.RST}"]
+
+
+def hil_missing_lines(reason: str = "") -> list[str]:
+    lines = ["  This screen talks to the board through crosspad-hil, "
+             "which is not installed here."]
+    if reason:
+        lines.append(f"  {_C.GRAY}{reason}{_C.RST}")
+    return lines + ["",
+                    "  Install it:",
+                    f"    {_C.BWHITE}pip install {HIL_GIT_URL}{_C.RST}",
+                    "",
+                    "  or run the CrossPad installer again (install.sh, or install.ps1 on",
+                    "  Windows, from crosspad-apps) — it puts crosspad-hil in the project's .venv."]
+
+
+def hil_dead_lines(err: HilFailure) -> list[str]:
+    return [f"  {_C.BRED}{err.message}{_C.RST}",
+            "",
+            "  An older crosspad-hil has no hub. Update it:",
+            f"    {_C.BWHITE}pip install --upgrade {HIL_GIT_URL}{_C.RST}",
+            "",
+            f"  {_C.GRAY}Then leave with Esc and open CrossPad again.{_C.RST}"]
+
+
 class _TUI:
     """Interactive TUI for CrossPad App Manager."""
 
