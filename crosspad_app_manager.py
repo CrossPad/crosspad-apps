@@ -17,14 +17,19 @@ Usage:
     mgr.list_apps()
 """
 
+import collections
 import contextlib
+import itertools
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -537,6 +542,207 @@ class PlatformConfig:
     lib_dir: str = "components"        # where submodules go ("components" or "lib")
     official_org: str = "CrossPad"
     lib_prefix: str = "crosspad-"      # prefix for component dirs
+
+
+# -- crosspad-hil serve client --------------------------------------------------
+#
+# CP Tools says nothing to the board itself. One `crosspad-hil serve` child
+# does, through the hub, so a test, a DAW or a second CP Tools holding the
+# board is told about instead of fought over. NDJSON on the child's stdio:
+# request {id, op, args}, answer {id, ok, result | error}, events {ev} ignored,
+# logs on stderr. Every request is a Future, so nothing in the TUI ever waits
+# on the board longer than it chooses to.
+
+HIL_CLIENT_NAME = "cp-tools"
+HIL_MISSING = "HIL_MISSING"      # client side: no crosspad-hil on this machine
+HIL_EXITED = "HIL_EXITED"        # client side: the serve process went away
+HIL_GIT_URL = "git+https://github.com/CrossPad/crosspad-hil"
+# The bench lease (crosspad-hil bench.py): every board op names who asks, so a
+# board someone else has claimed refuses CP Tools with BENCH_BUSY instead of
+# being touched in the middle of their test. The same variable names a session
+# for every crosspad-hil tool on the machine.
+BENCH_HOLDER_ENV = "CROSSPAD_BENCH_HOLDER"
+HIL_UNBOUND_OPS = ("hub.status", "devices.list", "bench.status")
+
+
+def bench_holder() -> str:
+    return os.environ.get(BENCH_HOLDER_ENV) or HIL_CLIENT_NAME
+
+
+class HilFailure(Exception):
+    """A crosspad-hil error as the wire carries it, or one the client met itself."""
+
+    def __init__(self, code: str, message: str, hint: str | None = None,
+                 details: dict | None = None):
+        super().__init__(f"{code}: {message}")
+        self.code, self.message, self.hint = code, message, hint
+        self.details = dict(details or {})
+
+    @classmethod
+    def from_wire(cls, err: dict) -> "HilFailure":
+        # HilError.to_dict() nests extras under "details"; accept them at the
+        # top level as well.
+        details = dict(err.get("details") or {})
+        for key, value in err.items():
+            if key not in ("code", "message", "hint", "details"):
+                details.setdefault(key, value)
+        return cls(str(err.get("code") or "ENV"), str(err.get("message") or ""),
+                   err.get("hint"), details)
+
+    @property
+    def holder(self) -> dict | None:
+        """Who holds the board ({client, purpose, pid, since}) on the hub's PORT_BUSY.
+
+        BENCH_BUSY names its holder as a plain string in details["holder"]; this
+        is None for it, and the bench view reads the details itself.
+        """
+        h = self.details.get("holder")
+        return h if isinstance(h, dict) else None
+
+    def user_text(self) -> str:
+        """One line for a screen that only wants to say why it has no answer."""
+        if self.code in ("PORT_BUSY", "BENCH_BUSY"):
+            return f"busy: {self.message}"
+        return {
+            HIL_MISSING: "crosspad-hil is not installed — Developer tools → CrossPad "
+                         "says how to get it",
+            "NO_DEVICE": "no CrossPad connected",
+            "NO_CDC_IN_AUDIO_MODE": "the board is in USB audio mode (no CDC there)",
+            "TIMEOUT": "no reply — the board did not answer",
+        }.get(self.code, self.message)
+
+
+def _own_group() -> dict:
+    """Popen keywords that keep a child out of the terminal's Ctrl+C."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _hil_candidates(project_dir, home: Path) -> list[str]:
+    bases = ([Path(project_dir) / ".venv"] if project_dir else []) + [
+        home / "GIT" / "crosspad-hil" / ".venv", home / ".venvs" / "crosspad-hil"]
+    out = []
+    for base in bases:
+        out += [str(base / "bin" / "crosspad-hil"), str(base / "Scripts" / "crosspad-hil.exe")]
+    return out
+
+
+def find_hil(project_dir: Path | str | None = None, home: Path | None = None) -> str | None:
+    """crosspad-hil the way platform-idf tools/bench.py finds it; CROSSPAD_HIL overrides."""
+    forced = os.environ.get("CROSSPAD_HIL")
+    if forced is not None:
+        return forced if forced and os.path.isfile(forced) else None
+    found = shutil.which("crosspad-hil")
+    if found:
+        return found
+    for path in _hil_candidates(project_dir, home or Path.home()):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+class _HilClient:
+    """One `crosspad-hil serve` child and the requests waiting on it."""
+
+    STDERR_KEEP = 40
+
+    def __init__(self, argv: list[str], cwd: str | None = None):
+        self.argv, self.cwd = list(argv), cwd
+        self._proc: subprocess.Popen | None = None
+        self._ids = itertools.count(1)
+        self._pending: dict[int, Future] = {}
+        self._lock = threading.Lock()
+        self._wlock = threading.Lock()
+        self._stderr_t: threading.Thread | None = None
+        self.stderr_tail: collections.deque = collections.deque(maxlen=self.STDERR_KEEP)
+
+    def start(self) -> None:
+        try:
+            self._proc = subprocess.Popen(
+                self.argv, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                bufsize=1, **_own_group())
+        except OSError as e:
+            raise HilFailure(HIL_MISSING, f"crosspad-hil did not start: {e}") from e
+        self._stderr_t = threading.Thread(target=self._read_stderr, daemon=True)
+        self._stderr_t.start()
+        threading.Thread(target=self._read_stdout, daemon=True).start()
+
+    @property
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def submit(self, op: str, args: dict | None = None) -> Future:
+        fut: Future = Future()
+        if not self.alive:
+            fut.set_exception(self._exited())
+            return fut
+        with self._lock:
+            rid = next(self._ids)
+            self._pending[rid] = fut
+        line = json.dumps({"id": rid, "op": op, "args": args or {}})
+        try:
+            with self._wlock:
+                self._proc.stdin.write(line + "\n")
+                self._proc.stdin.flush()
+        except (OSError, ValueError):
+            with self._lock:
+                self._pending.pop(rid, None)
+            fut.set_exception(self._exited())
+        return fut
+
+    def request(self, op: str, args: dict | None = None, timeout: float = 5.0):
+        try:
+            return self.submit(op, args).result(timeout)
+        except FutureTimeout:
+            raise HilFailure("TIMEOUT", f"{op}: no answer from crosspad-hil in "
+                                        f"{timeout:.1f} s") from None
+
+    def _read_stdout(self) -> None:
+        for raw in self._proc.stdout:
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(msg, dict) or "ev" in msg:
+                continue
+            with self._lock:
+                fut = self._pending.pop(msg.get("id"), None)
+            if fut is None:
+                continue
+            if msg.get("ok"):
+                fut.set_result(msg.get("result"))
+            else:
+                fut.set_exception(HilFailure.from_wire(msg.get("error") or {}))
+        # EOF: the child is gone. Its last stderr line says why; wait for it.
+        self._stderr_t.join(1.0)
+        with self._lock:
+            waiting, self._pending = list(self._pending.values()), {}
+        for fut in waiting:
+            fut.set_exception(self._exited())
+
+    def _read_stderr(self) -> None:
+        for raw in self._proc.stderr:
+            self.stderr_tail.append(raw.rstrip("\r\n"))
+
+    def _exited(self) -> HilFailure:
+        last = next((l for l in reversed(self.stderr_tail) if l.strip()), "")
+        return HilFailure(HIL_EXITED, "crosspad-hil stopped" + (f": {last}" if last else ""))
+
+    def close(self, wait: float = 2.0) -> None:
+        """EOF on its stdin is serve's own way out; kill only what does not take it."""
+        if self._proc is None:
+            return
+        try:
+            self._proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            self._proc.wait(wait)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait()
 
 
 class AppManager:
