@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-MANAGER_VERSION = "1.1.0"    # CP Tools; shown in help and in support reports
+MANAGER_VERSION = "1.2.0"    # CP Tools; shown in help and in support reports
 REMOTE_REGISTRY_REPO = "CrossPad/crosspad-apps"
 REMOTE_REGISTRY_PATH = "registry.json"
 LOCAL_REGISTRY_FILE = "app-registry.json"
