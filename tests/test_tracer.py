@@ -79,3 +79,25 @@ def test_tracer_output_cannot_drive_the_terminal():
         time.sleep(0.05)
     text = "\n".join(run.lines())
     assert "\x1b" not in text and "\x07" not in text and "dash" in text and "end" in text
+
+
+def test_the_tracer_is_stopped_when_the_screen_fails(monkeypatch):
+    runs = []
+
+    class Recorded(cam._TracerRun):
+        def __init__(self, argv):
+            super().__init__(argv)
+            runs.append(self)
+
+    def boom(_timeout):
+        raise RuntimeError("terminal went away")
+
+    monkeypatch.setattr(cam, "find_trace_cli",
+                        lambda: [sys.executable, "-c", "import time; time.sleep(30)"])
+    monkeypatch.setattr(cam, "_TracerRun", Recorded)
+    monkeypatch.setattr(cam, "_read_key", boom)
+    host = type("Host", (), {"_header": lambda *a: None, "_footer": lambda *a: None,
+                             "_toast_here": lambda *a: None, "_cols": 80})()
+    with pytest.raises(RuntimeError):
+        cam._TUI._tracer_stm(host)
+    assert runs and runs[0].poll() is not None

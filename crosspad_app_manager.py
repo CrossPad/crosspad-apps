@@ -655,7 +655,7 @@ def _scrub(value):
     if isinstance(value, list):
         return [_scrub(v) for v in value]
     if isinstance(value, dict):
-        return {k: _scrub(v) for k, v in value.items()}
+        return {_scrub(k): _scrub(v) for k, v in value.items()}
     return value
 
 
@@ -5695,6 +5695,8 @@ class _DeviceScreen:
     BENCH_PURPOSE = "CP Tools CrossPad screen"
     _META_KINDS = ("hub", "devices", "bench", "bench_op", "bench_renew")   # not board I/O
     TIMEOUT_TEXT = "The board did not answer in time — still trying."
+    LEAVE_SETTLE_S = 3.0        # leaving waits this long, in all, for presses and the bench
+    RELEASE_MIN_S = 1.0         # a bench release still gets this much when the budget is spent
     WAITING_TEXT = "Waiting for the board — keys come back when it is free."
     _nav_hints = "[c] claim or release the bench   [Tab] next tab   [Esc] back"
 
@@ -5708,6 +5710,7 @@ class _DeviceScreen:
         self.bench: dict | None = None              # this board's bench.status view
         self.bench_busy: HilFailure | None = None   # BENCH_BUSY: someone else's test
         self.bench_want = False                     # the claim key asked for the bench
+        self._claimed_dev: str | None = None        # the board this screen claimed, until given back
         self.dev: dict | None = None
         self.devices_known = False
         self.hub: dict | None = None
@@ -5940,28 +5943,57 @@ class _DeviceScreen:
         return True
 
     def leave(self) -> None:
-        """Let go of every pad this screen still holds down, then of the bench, before serve stops."""
-        for idx in sorted(self.held | self._pending_release):
-            try:
-                self._request("pad_release", {"idx": idx}, timeout=2.0)
-            except HilFailure:
-                pass
-        self.held.clear()
-        self._pending_release.clear()
-        if not self.bench_want or self.dev is None:
+        """Let go of every pad this screen still holds down, then of the bench it claimed,
+        before serve stops, all within LEAVE_SETTLE_S."""
+        deadline = self._clock() + self.LEAVE_SETTLE_S
+        self._let_go_of_pads(deadline, held_too=True)
+        claim = self._inflight.get("bench_claim")
+        if claim is not None:
+            self._wait(claim[0], deadline)
+        self.bench_want = False
+        if self._claimed_dev is None:
             return
         fw = ""
-        if self._mine():
+        if self.dev is not None and self._mine():
             try:
-                fw = self._firmware_left(self._request("app_sha", {}, timeout=2.0))
+                fw = self._firmware_left(self._request("app_sha", {},
+                                                       timeout=self._left(deadline)))
             except HilFailure:
                 fw = ""
         try:
             self.client.request("bench.release", self._args("bench.release", self._bench_args(
-                **({"firmware_left": fw} if fw else {}))), timeout=5.0)
+                device=self._claimed_dev, **({"firmware_left": fw} if fw else {}))),
+                timeout=max(self._left(deadline), self.RELEASE_MIN_S))
         except HilFailure:
             pass
-        self.bench_want = False
+        self._claimed_dev = None
+
+    def _left(self, deadline: float) -> float:
+        return max(0.0, deadline - self._clock())
+
+    def _wait(self, fut: Future, deadline: float) -> None:
+        try:
+            fut.result(self._left(deadline))
+        except Exception:  # noqa: BLE001 - only that it settled matters here
+            pass
+
+    def _let_go_of_pads(self, deadline: float, held_too: bool) -> None:
+        """Release the pads a hit left down (and held ones when leaving) once their presses
+        have been answered: serve answers on a pool, so a release must not overtake a press."""
+        pads = set(self._pending_release) | (self.held if held_too else set())
+        if not pads:
+            return
+        for fut in list(self._fired):
+            self._wait(fut, deadline)
+        releases = []
+        for idx in sorted(pads):
+            releases.append(self.client.submit("cdc.verb", self._args(
+                "cdc.verb", {"verb": "pad_release", "args": {"idx": idx}})))
+        for fut in releases:
+            self._wait(fut, deadline)
+        self._pending_release.clear()
+        if held_too:
+            self.held.clear()
 
     # -- bench lease -------------------------------------------------------------
     #
@@ -5973,8 +6005,8 @@ class _DeviceScreen:
     def _claim_key(self) -> str:
         return "b" if self.tab == DEV_TAB_PADS else "c"     # c is a pad (zxcv) on Pads
 
-    def _bench_args(self, **extra) -> dict:
-        return {"device": self.dev["id"], "holder": self.holder, **extra}
+    def _bench_args(self, device: str | None = None, **extra) -> dict:
+        return {"device": device or self.dev["id"], "holder": self.holder, **extra}
 
     def _mine(self) -> bool:
         lease = (self.bench or {}).get("lease")
@@ -5992,10 +6024,11 @@ class _DeviceScreen:
             self._call("bench", "bench.status", {"device": self.dev["id"]}, self._got_bench)
         if not self.bench_want:
             return
-        if self._mine():
+        if self._claimed_dev is not None and self._mine():
             if self._due("renew", now, self.BENCH_TTL_S / 2):
                 self._call("bench_renew", "bench.renew",
-                           self._bench_args(ttl_s=self.BENCH_TTL_S), self._got_bench_view)
+                           self._bench_args(device=self._claimed_dev, ttl_s=self.BENCH_TTL_S),
+                           self._got_bench_view)
         elif self._due("claim", now, self.BENCH_REQUEUE_S):
             self._claim()
 
@@ -6010,7 +6043,7 @@ class _DeviceScreen:
             self._enter_tab()
 
     def _toggle_claim(self) -> None:
-        if self.bench_want or self._mine():
+        if self.bench_want or self._claimed_dev is not None:
             self._release_bench()
             return
         self.bench_want = True
@@ -6018,12 +6051,17 @@ class _DeviceScreen:
         self._claim()
 
     def _claim(self) -> None:
-        self._call("bench_op", "bench.claim",
-                   self._bench_args(purpose=self.BENCH_PURPOSE, ttl_s=self.BENCH_TTL_S),
+        self._claimed_dev = self._claimed_dev or self.dev["id"]
+        self._call("bench_claim", "bench.claim",
+                   self._bench_args(device=self._claimed_dev, purpose=self.BENCH_PURPOSE,
+                                    ttl_s=self.BENCH_TTL_S),
                    self._got_claim)
 
     def _got_claim(self, result: dict) -> None:
         self._got_bench_view(result)
+        if not self.bench_want:             # given back while the claim was on its way
+            self._send_release("")
+            return
         if result.get("granted"):
             self._next["renew"] = self._clock() + self.BENCH_TTL_S / 2
             self.message = "The bench is yours — other sessions queue until you give it back."
@@ -6038,18 +6076,24 @@ class _DeviceScreen:
 
     def _release_bench(self) -> None:
         self.bench_want = False
-        if not self._mine():
+        if self._claimed_dev is None or "bench_claim" in self._inflight:
+            return                          # _got_claim gives it back when it answers
+        if self.dev is None or not self._mine():
             self._send_release("")          # only queued: leave the queue
             return
         self._verb("sha", "app_sha", {}, lambda r: self._send_release(self._firmware_left(r)),
                    on_err=lambda _e: self._send_release(""))
 
     def _send_release(self, fw: str) -> None:
-        self._call("bench_op", "bench.release",
-                   self._bench_args(**({"firmware_left": fw} if fw else {})), self._got_release)
+        self._call("bench_release", "bench.release",
+                   self._bench_args(device=self._claimed_dev,
+                                    **({"firmware_left": fw} if fw else {})),
+                   self._got_release)
 
     def _got_release(self, result: dict) -> None:
         self._got_bench_view(result)
+        if not self.bench_want:
+            self._claimed_dev = None
         self.message = ("Gave the bench back." if result.get("released")
                         else "Left the bench queue.")
 
@@ -6178,6 +6222,8 @@ class _DeviceScreen:
     def _release_after(self, idx: int, press: Future) -> None:
         # serve answers on a pool: a release sent before its press has been
         # answered could overtake it.
+        if idx not in self._pending_release:
+            return                          # a menu or leaving already let go of it
         if not press.done():
             self._after(0.02, lambda: self._release_after(idx, press))
             return
@@ -6185,6 +6231,8 @@ class _DeviceScreen:
         self._fire("pad_release", {"idx": idx})
 
     def _apps_menu(self) -> None:
+        # The menu holds the loop: a hit's 120 ms release would wait for it.
+        self._let_go_of_pads(self._clock() + self.LEAVE_SETTLE_S, held_too=False)
         try:
             r = self._request("app_list", {})
         except HilFailure as e:
@@ -7793,6 +7841,9 @@ class _TUI:
                     break
         except KeyboardInterrupt:
             stopped = True
+        except BaseException:
+            run.stop()              # it holds the ST-Link and :7373 in its own session
+            raise
         rc = run.stop() if stopped else run.poll()
         _clear()
         self._header("STM tracer")
