@@ -48,3 +48,38 @@ DEV = {"id": "dev_6dd8", "serial": "CP2-0042", "usb_mode": "default", "board_rev
 
 def plain(lines) -> str:
     return "\n".join(cam._ANSI_RE.sub("", line) for line in lines)
+
+
+WALL = 1_000_000.0
+HOLDER = {"client": "crosspad-hil", "purpose": "kit_churn", "pid": 4121, "since": WALL - 180}
+HUB = {"running": True, "board": "dev_6dd8", "usb_mode": "default", "cdc_open": True,
+       "clients": [{"client": "cp-tools", "purpose": "screen", "pid": 11},
+                   {"client": "crosspad-mcp", "purpose": "query", "pid": 12}],
+       "lease": None}
+HUB_LEASED = {**HUB, "lease": HOLDER}
+PORT_BUSY_ERR = {"code": "PORT_BUSY", "message": "the board is leased", "hint": None,
+                 "details": {"holder": HOLDER}}
+LEDS = {"brightness": 40, "anim": False, "coalesce": True, "cfgbri": 40, "pwr": 0,
+        "pwr_count": 0, "txfail": 0,
+        "colors": ["00FF00"] + ["000000"] * 11 + ["FF0000", "000000", "000000", "000000"]}
+UI = {"display": "on", "touch": "on", "drawer": 0, "lcd": 1, "rgb": 1, "theme": 0,
+      "bt_icon": None, "app": "Sampler"}
+FOCUS = {"index": 2, "label": "KIT", "ptr": "0x3fc9a000", "editing": False}
+BENCH_FREE = {"device": "dev_6dd8", "lease": None, "queue": [], "firmware": None, "history": []}
+BASE = {"devices.list": {"result": {"devices": [DEV]}},
+        "hub.status": {"result": HUB},
+        "bench.status": {"result": {"devices": [BENCH_FREE]}},
+        "cdc.verb:led_state": {"result": LEDS},
+        "cdc.verb:ui_state": {"result": UI},
+        "cdc.verb:enc_focus": {"result": FOCUS}}
+
+
+def make_screen(fake, tab=0, project_dir=".", t=None):
+    t = t if t is not None else [100.0]
+    return cam._DeviceScreen(fake, tab=tab, project_dir=project_dir,
+                             clock=lambda: t[0], wall=lambda: WALL)
+
+
+def settle(screen, n=3):
+    for _ in range(n):
+        screen.tick()

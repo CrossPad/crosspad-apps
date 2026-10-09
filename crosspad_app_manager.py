@@ -4989,7 +4989,7 @@ def _decode_key(ch: str) -> str:
                 return _hotspot_key(col, row)
             return ""
         simple = {"A": "up", "B": "down", "C": "right", "D": "left",
-                  "H": "home", "F": "end"}
+                  "H": "home", "F": "end", "Z": "shift-tab"}
         if code in simple:
             return simple[code]
         if code.isdigit():
@@ -5090,7 +5090,8 @@ def _read_key_raw(timeout: float | None = None) -> str:
         if ch in (b"\xe0", b"\x00"):
             ch2 = msvcrt.getch()
             m = {b"H": "up", b"P": "down", b"K": "left", b"M": "right",
-                 b"I": "pgup", b"Q": "pgdn", b"G": "home", b"O": "end"}
+                 b"I": "pgup", b"Q": "pgdn", b"G": "home", b"O": "end",
+                 b"\x0f": "shift-tab"}
             return m.get(ch2, "")
         if ch == b"\r": return "enter"
         if ch == b"\x1b": return "esc"
@@ -5548,6 +5549,539 @@ def hil_dead_lines(err: HilFailure) -> list[str]:
             f"    {_C.BWHITE}pip install --upgrade {HIL_GIT_URL}{_C.RST}",
             "",
             f"  {_C.GRAY}Then leave with Esc and open CrossPad again.{_C.RST}"]
+
+
+class _DeviceScreen:
+    """The CrossPad screen: four tabs over one crosspad-hil serve.
+
+    Nothing here waits on the board. Every request is a Future; tick() starts
+    what is due and collects what has answered, so the key loop reads the
+    terminal every KEY_POLL_S and a slow, busy or absent board never holds a
+    key. A tab is a set of methods found by name -- _<tab>_enter, _<tab>_lines,
+    _<tab>_key, _<tab>_hints -- so each tab is added without touching the core.
+    """
+
+    KEY_POLL_S = 0.05
+    PADS_EVERY_S = 0.2              # 5 Hz
+    HUB_EVERY_S = 1.0
+    DEVICES_EVERY_S = 5.0
+    BUSY_RETRY_S = 1.0
+    CALL_TIMEOUT_S = 10.0           # covers serve's own start on a cold machine
+    PAD_VELOCITY = 100
+    PAD_RELEASE_AFTER_S = 0.12
+    BENCH_EVERY_S = 1.0
+    BENCH_TTL_S = 1800.0            # what the screen claims for; renewed at half of it
+    BENCH_REQUEUE_S = 10.0          # a queued claim asks again this often (the queue forgets the silent)
+    BENCH_PURPOSE = "CP Tools CrossPad screen"
+    _META_KINDS = ("hub", "devices", "bench", "bench_op", "bench_renew")   # not board I/O
+    TIMEOUT_TEXT = "The board did not answer in time — still trying."
+    WAITING_TEXT = "Waiting for the board — keys come back when it is free."
+    _nav_hints = "[c] claim or release the bench   [Tab] next tab   [Esc] back"
+
+    def __init__(self, client, tab: int = DEV_TAB_PADS, project_dir: Path | str = ".",
+                 device: str | None = None, clock=time.monotonic, wall=time.time,
+                 holder: str | None = None):
+        self.client, self.tab = client, tab
+        self.project_dir, self.device = Path(project_dir), device
+        self._clock, self._wall = clock, wall
+        self.holder = holder or bench_holder()
+        self.bench: dict | None = None              # this board's bench.status view
+        self.bench_busy: HilFailure | None = None   # BENCH_BUSY: someone else's test
+        self.bench_want = False                     # the claim key asked for the bench
+        self.dev: dict | None = None
+        self.devices_known = False
+        self.hub: dict | None = None
+        self.busy: HilFailure | None = None
+        self.dead: HilFailure | None = None
+        self.audio = False
+        self.message = ""
+        self._inflight: dict[str, tuple] = {}       # kind -> (future, on_ok, deadline, on_err)
+        self._fired: list[Future] = []              # pad and knob actions in flight
+        self._next: dict[str, float] = {}           # timer name -> when it is next due
+        self._later: list[tuple[float, object]] = []  # (when, fn), see _after()
+        # Pads
+        self.leds: list[str] | None = None
+        self.ui: dict = {}
+        self.focus: dict = {}
+        self.held: set[int] = set()
+        self._pending_release: set[int] = set()
+        # Trace
+        self.trace_pick = 0
+        self.trace_out: list[str] = []
+        self.trace_top = 0
+        self._pane = 10                             # output rows at the last draw
+        # Files
+        self.cwd: str | None = None                 # None: the list of mounts
+        self.roots: list[dict] = []
+        self.entries: list[dict] = []
+        self.file_pick = 0
+        self.transfer: str | None = None            # what a running pull/push says
+        self.settings: dict | None = None           # the last SETTINGS_STATUS
+        # Connections
+        self.wifi: dict | None = None
+        self.nets: list[str] = []
+        self.net_pick = 0
+        self.ble: dict | None = None
+
+    # -- requests --------------------------------------------------------------
+
+    def _args(self, op: str, args: dict) -> dict:
+        """Every board op names the bench holder (crosspad-hil checks the lease on it)."""
+        if op in HIL_UNBOUND_OPS:
+            return args
+        out = {"holder": self.holder, **args}
+        if self.device:
+            out.setdefault("device", self.device)
+        return out
+
+    def _call(self, kind: str, op: str, args: dict, on_ok, timeout: float | None = None,
+              on_err=None) -> None:
+        """One request per kind at a time; its answer goes to on_ok (or on_err) on a later tick."""
+        if kind in self._inflight:
+            return
+        fut = self.client.submit(op, self._args(op, args))
+        self._inflight[kind] = (fut, on_ok, self._clock() + (timeout or self.CALL_TIMEOUT_S),
+                                on_err)
+
+    def _verb(self, kind: str, verb: str, vargs: dict, on_ok, timeout: float | None = None,
+              on_err=None) -> None:
+        self._call(kind, "cdc.verb", {"verb": verb, "args": vargs}, on_ok, timeout, on_err)
+
+    def _fire(self, verb: str, vargs: dict) -> Future:
+        """A pad or knob action: sent at once, never merged with another; only a failure matters."""
+        fut = self.client.submit("cdc.verb", self._args("cdc.verb", {"verb": verb, "args": vargs}))
+        self._fired.append(fut)
+        return fut
+
+    def _request(self, verb: str, vargs: dict, timeout: float = 5.0):
+        """A verb whose answer the caller waits for (menus, leaving the screen)."""
+        return self.client.request(
+            "cdc.verb", self._args("cdc.verb", {"verb": verb, "args": vargs}), timeout=timeout)
+
+    def _after(self, delay: float, fn) -> None:
+        self._later.append((self._clock() + delay, fn))
+
+    # -- the clock -------------------------------------------------------------
+
+    def tick(self) -> None:
+        now = self._clock()
+        self._schedule(now)
+        self._collect(now)
+
+    def _due(self, name: str, now: float, every: float) -> bool:
+        """True once per `every` on a fixed cadence: a late tick does not push the next one back."""
+        due_at = self._next.get(name, 0.0)
+        if now < due_at:
+            return False
+        self._next[name] = due_at + every if due_at + every > now else now + every
+        return True
+
+    def _schedule(self, now: float) -> None:
+        if self._due("hub", now, self.HUB_EVERY_S):
+            self._call("hub", "hub.status", {}, self._got_hub)
+        if self._due("devices", now, self.DEVICES_EVERY_S):
+            self._call("devices", "devices.list", {}, self._got_devices)
+        if self.dev is not None:
+            self._schedule_bench(now)
+        for item in [x for x in self._later if now >= x[0]]:
+            self._later.remove(item)
+            item[1]()
+        if self._quiet():
+            return
+        if self.busy is not None:
+            if self._due("busy", now, self.BUSY_RETRY_S):
+                self._verb("probe", "ui_state", {}, lambda _r: self._enter_tab())
+            return
+        if self.tab == DEV_TAB_PADS and self._due("pads", now, self.PADS_EVERY_S):
+            self._refresh_pads()
+
+    def _collect(self, now: float) -> None:
+        for kind, (fut, on_ok, deadline, on_err) in list(self._inflight.items()):
+            if fut.done():
+                del self._inflight[kind]
+                try:
+                    result = fut.result()
+                except HilFailure as e:
+                    (on_err or (lambda err, k=kind: self._failed(k, err)))(e)
+                    continue
+                if kind not in self._META_KINDS:
+                    self._board_answered()
+                on_ok(result)
+            elif now > deadline:
+                del self._inflight[kind]
+                err = HilFailure("TIMEOUT", "no answer in time")
+                (on_err or (lambda e, k=kind: self._failed(k, e)))(err)
+        for fut in [f for f in self._fired if f.done()]:
+            self._fired.remove(fut)
+            try:
+                fut.result()
+            except HilFailure as e:
+                self._failed("fired", e)
+
+    def _board_answered(self) -> None:
+        self.busy = None
+        if self.message in (self.TIMEOUT_TEXT, self.WAITING_TEXT):
+            self.message = ""
+
+    def _failed(self, kind: str, err: HilFailure) -> None:
+        if kind == "transfer":
+            self.transfer = None
+        if err.code == HIL_EXITED:
+            self.dead = err
+        elif kind in ("hub", "devices", "bench", "bench_renew"):
+            return              # an older crosspad-hil without these ops: the status line says "?"
+        elif err.code == "BENCH_BUSY":
+            self.bench_busy = err
+        elif err.code == "PORT_BUSY":
+            self.busy = err
+        elif err.code == "NO_DEVICE":
+            self.dev, self.devices_known = None, True
+        elif err.code == "NO_CDC_IN_AUDIO_MODE":
+            self.audio = True
+        elif kind == "focus":
+            self.focus = {}     # no ENC_FOCUS on this firmware, or LVGL busy: focus is optional
+        elif err.code == "TIMEOUT":
+            self.message = self.TIMEOUT_TEXT
+        else:
+            self.message = err.message + (f" — {err.hint}" if err.hint else "")
+
+    def _got_hub(self, result: dict) -> None:
+        self.hub = result
+        if self.busy is not None and self.busy.holder and not result.get("lease"):
+            self.busy = None
+            self._enter_tab()
+
+    def _got_devices(self, result: dict) -> None:
+        was_blocked = self._blocked()
+        devs = result.get("devices") or []
+        pick = [d for d in devs if d.get("id") == self.device]
+        self.dev = (pick or devs or [None])[0]
+        if self.device is None and len(devs) > 1:
+            self.device = self.dev["id"]     # serve refuses an unnamed board when there are two
+        self.devices_known = True
+        self.audio = bool(self.dev) and self.dev.get("usb_mode") == "audio"
+        if was_blocked and not self._blocked():
+            self._enter_tab()
+
+    # -- state -----------------------------------------------------------------
+
+    def _no_device(self) -> bool:
+        return self.devices_known and self.dev is None
+
+    def _quiet(self) -> bool:
+        """Nothing should be asked of the board right now."""
+        return (self.dead is not None or not self.devices_known or self._no_device()
+                or self.bench_busy is not None or self.transfer is not None)
+
+    def _blocked(self) -> bool:
+        return (self._quiet() or self.busy is not None
+                or (self.tab in (DEV_TAB_TRACE, DEV_TAB_FILES) and self.audio))
+
+    def _tab_part(self, part: str):
+        return getattr(self, f"_{_DEV_TAB_NAMES[self.tab]}_{part}", None)
+
+    def _enter_tab(self) -> None:
+        enter = self._tab_part("enter")
+        if enter is not None and not self._blocked():
+            enter()
+
+    def _switch_tab(self, tab: int) -> None:
+        if tab != self.tab:
+            self.tab, self.message = tab, ""
+            self._enter_tab()
+
+    # -- keys ------------------------------------------------------------------
+
+    def handle_key(self, key: str) -> bool:
+        """One key; False when the screen should close."""
+        if key in ("", "resize"):
+            return True
+        on_pads = self.tab == DEV_TAB_PADS
+        if key in ("esc", "ctrl-c") or (key == "q" and not on_pads):
+            return False
+        if key in ("tab", "shift-tab"):
+            self._switch_tab((self.tab + (1 if key == "tab" else -1)) % len(DEV_TABS))
+            return True
+        if not on_pads and key in ("1", "2", "3", "4"):
+            self._switch_tab(int(key) - 1)
+            return True
+        if key == self._claim_key():
+            if self.dev is None:
+                self.message = "No board to claim."
+            else:
+                self._toggle_claim()
+            return True
+        if self._blocked():
+            self.message = self.WAITING_TEXT
+            return True
+        handler = self._tab_part("key")
+        if handler is not None:
+            handler(key)
+        return True
+
+    def leave(self) -> None:
+        """Let go of every pad this screen still holds down, then of the bench, before serve stops."""
+        for idx in sorted(self.held | self._pending_release):
+            try:
+                self._request("pad_release", {"idx": idx}, timeout=2.0)
+            except HilFailure:
+                pass
+        self.held.clear()
+        self._pending_release.clear()
+        if not self.bench_want or self.dev is None:
+            return
+        fw = ""
+        if self._mine():
+            try:
+                fw = self._firmware_left(self._request("app_sha", {}, timeout=2.0))
+            except HilFailure:
+                fw = ""
+        try:
+            self.client.request("bench.release", self._args("bench.release", self._bench_args(
+                **({"firmware_left": fw} if fw else {}))), timeout=5.0)
+        except HilFailure:
+            pass
+        self.bench_want = False
+
+    # -- bench lease -------------------------------------------------------------
+    #
+    # BENCH_BUSY is the coarse layer: someone is testing on this board, for
+    # minutes. PORT_BUSY is the hub's short exclusive op. The screen never
+    # claims by itself; the claim key does, and the screen keeps the claim
+    # alive and gives it back when it closes.
+
+    def _claim_key(self) -> str:
+        return "b" if self.tab == DEV_TAB_PADS else "c"     # c is a pad (zxcv) on Pads
+
+    def _bench_args(self, **extra) -> dict:
+        return {"device": self.dev["id"], "holder": self.holder, **extra}
+
+    def _mine(self) -> bool:
+        lease = (self.bench or {}).get("lease")
+        return bool(lease) and lease.get("holder") == self.holder
+
+    def _bench_blocks_us(self) -> bool:
+        view = self.bench or {}
+        lease, reserved = view.get("lease"), view.get("reserved_for")
+        if lease:
+            return lease.get("holder") != self.holder
+        return bool(reserved) and reserved.get("holder") != self.holder
+
+    def _schedule_bench(self, now: float) -> None:
+        if self._due("bench", now, self.BENCH_EVERY_S):
+            self._call("bench", "bench.status", {"device": self.dev["id"]}, self._got_bench)
+        if not self.bench_want:
+            return
+        if self._mine():
+            if self._due("renew", now, self.BENCH_TTL_S / 2):
+                self._call("bench_renew", "bench.renew",
+                           self._bench_args(ttl_s=self.BENCH_TTL_S), self._got_bench_view)
+        elif self._due("claim", now, self.BENCH_REQUEUE_S):
+            self._claim()
+
+    def _got_bench(self, result: dict) -> None:
+        views = result.get("devices") or []
+        self._got_bench_view(views[0] if views else None)
+
+    def _got_bench_view(self, view: dict | None) -> None:
+        self.bench = view
+        if self.bench_busy is not None and not self._bench_blocks_us():
+            self.bench_busy = None
+            self._enter_tab()
+
+    def _toggle_claim(self) -> None:
+        if self.bench_want or self._mine():
+            self._release_bench()
+            return
+        self.bench_want = True
+        self._next["claim"] = self._clock() + self.BENCH_REQUEUE_S
+        self._claim()
+
+    def _claim(self) -> None:
+        self._call("bench_op", "bench.claim",
+                   self._bench_args(purpose=self.BENCH_PURPOSE, ttl_s=self.BENCH_TTL_S),
+                   self._got_claim)
+
+    def _got_claim(self, result: dict) -> None:
+        self._got_bench_view(result)
+        if result.get("granted"):
+            self._next["renew"] = self._clock() + self.BENCH_TTL_S / 2
+            self.message = "The bench is yours — other sessions queue until you give it back."
+            return
+        ahead = (result.get("lease") or result.get("reserved_for") or {}).get("holder") or "?"
+        self.message = f"Queued for the bench: #{result.get('position', '?')} behind {ahead}."
+
+    @staticmethod
+    def _firmware_left(app_sha: dict) -> str:
+        sha = str(app_sha.get("sha256") or "")
+        return f"app_sha256 {sha[:16]}" if sha else ""
+
+    def _release_bench(self) -> None:
+        self.bench_want = False
+        if not self._mine():
+            self._send_release("")          # only queued: leave the queue
+            return
+        self._verb("sha", "app_sha", {}, lambda r: self._send_release(self._firmware_left(r)),
+                   on_err=lambda _e: self._send_release(""))
+
+    def _send_release(self, fw: str) -> None:
+        self._call("bench_op", "bench.release",
+                   self._bench_args(**({"firmware_left": fw} if fw else {})), self._got_release)
+
+    def _got_release(self, result: dict) -> None:
+        self._got_bench_view(result)
+        self.message = ("Gave the bench back." if result.get("released")
+                        else "Left the bench queue.")
+
+    # -- drawing ---------------------------------------------------------------
+
+    def hints(self) -> str:
+        return self._tab_part("hints") or self._nav_hints
+
+    def render(self, width: int = 80, height: int = 24) -> list[str]:
+        lines = ["  " + status_line(self.dev, self.hub, self.bench, self._wall(), self.holder),
+                 "  " + self._tab_bar(), ""]
+        lines += self._blocking_lines() or self._tab_lines(width, height)
+        if self.message:
+            lines += ["", f"  {_C.BYELLOW}{self.message}{_C.RST}"]
+        return lines
+
+    def _tab_bar(self) -> str:
+        return " ".join(f"{_C.BGCYAN}{_C.BOLD} {name} {_C.RST}" if i == self.tab
+                        else f"{_C.GRAY} {name} {_C.RST}" for i, name in enumerate(DEV_TABS))
+
+    def _blocking_lines(self) -> list[str]:
+        if self.dead is not None:
+            return hil_dead_lines(self.dead)
+        if not self.devices_known:
+            return [f"  {_C.GRAY}Looking for the board…{_C.RST}"]
+        if self._no_device():
+            return ["  No CrossPad connected — plug it in over USB."]
+        if self.bench_busy is not None:
+            return bench_busy_lines(self.bench_busy, self.bench, self._wall(), self.holder,
+                                    self._claim_key())
+        if self.busy is not None:
+            return busy_lines(self.busy, self._wall())
+        if self.tab in (DEV_TAB_TRACE, DEV_TAB_FILES) and self.audio:
+            return [f"  {AUDIO_NOTICE}"]
+        return []
+
+    def _tab_lines(self, width: int, height: int) -> list[str]:
+        lines = self._tab_part("lines")
+        return lines(width, height) if lines is not None else []
+
+    def run(self, tui) -> None:
+        drawn: list[str] | None = None
+        key = ""
+        try:
+            while True:
+                self.tick()
+                cols, rows = _get_size()
+                lines = self.render(cols, rows)
+                if lines != drawn or key == "resize":
+                    with _frame():
+                        _clear()
+                        tui._header("CrossPad", "Developer tools")
+                        for line in lines:
+                            _w(line + "\n")
+                        tui._footer(self.hints())
+                    drawn = lines
+                key = _read_key(self.KEY_POLL_S)
+                if not self.handle_key(key):
+                    return
+                if key not in ("", "resize"):
+                    drawn = None        # a prompt or a menu may have drawn over the frame
+        finally:
+            self.leave()
+
+    # -- Pads ------------------------------------------------------------------
+
+    _pads_hints = ("1234 qwer asdf zxcv  hit a pad   Shift+key  hold, again to let go   "
+                   "← →  turn the knob   [Enter] press the knob   [l] apps   "
+                   "[b] claim or release the bench   [Tab] next tab   [Esc] back")
+
+    def _pads_enter(self) -> None:
+        self._refresh_pads()
+
+    def _refresh_pads(self) -> None:
+        self._verb("leds", "led_state", {}, self._got_leds)
+        self._verb("ui", "ui_state", {}, self._got_ui)
+        self._verb("focus", "enc_focus", {}, self._got_focus)
+
+    def _got_leds(self, result: dict) -> None:
+        self.leds = list(result.get("colors") or [])
+
+    def _got_ui(self, result: dict) -> None:
+        self.ui = result
+
+    def _got_focus(self, result: dict) -> None:
+        self.focus = result
+
+    def _pads_lines(self, width: int, height: int) -> list[str]:
+        focus = self.focus.get("label") or "-"
+        if self.focus.get("editing"):
+            focus += " (editing)"
+        lines = [f"  App {_C.BWHITE}{self.ui.get('app') or '-'}{_C.RST}    "
+                 f"Focus {_C.BWHITE}{focus}{_C.RST}", ""]
+        if self.leds is None:
+            return lines + [f"  {_C.GRAY}reading the pads…{_C.RST}"]
+        lines += pad_grid_lines(self.leds, self.held, color_mode())
+        if self.held:
+            lines += ["", f"  {_C.GRAY}held: "
+                          f"{', '.join(str(i) for i in sorted(self.held))}{_C.RST}"]
+        return lines
+
+    def _pads_key(self, key: str) -> None:
+        pad = pad_for_key(key)
+        if pad is not None:
+            self._hit(*pad)
+        elif key in ("left", "right"):
+            self._fire("enc_rotate", {"delta": -1 if key == "left" else 1})
+        elif key == "enter":
+            self._fire("enc_press", {})
+        elif key == "l":
+            self._apps_menu()
+
+    def _hit(self, idx: int, hold: bool) -> None:
+        """A terminal has no key-up: a key is a hit, Shift+key holds until pressed again."""
+        if idx in self.held:
+            self.held.discard(idx)
+            self._fire("pad_release", {"idx": idx})
+            return
+        press = self._fire("pad_press", {"idx": idx, "vel": self.PAD_VELOCITY})
+        if hold:
+            self.held.add(idx)
+            return
+        self._pending_release.add(idx)
+        self._after(self.PAD_RELEASE_AFTER_S, lambda: self._release_after(idx, press))
+
+    def _release_after(self, idx: int, press: Future) -> None:
+        # serve answers on a pool: a release sent before its press has been
+        # answered could overtake it.
+        if not press.done():
+            self._after(0.02, lambda: self._release_after(idx, press))
+            return
+        self._pending_release.discard(idx)
+        self._fire("pad_release", {"idx": idx})
+
+    def _apps_menu(self) -> None:
+        try:
+            r = self._request("app_list", {})
+        except HilFailure as e:
+            self._failed("apps", e)
+            return
+        apps, running = list(r.get("apps") or []), r.get("running")
+        items = [f"{a}{'   (running)' if a == running else ''}" for a in apps]
+        idx = _menu_select("Apps on the board", items + ["Stop the running app"])
+        if idx < 0:
+            return
+        try:
+            if idx == len(apps):
+                self._request("app_stop", {})
+            else:
+                self._request("app_start", {"name": apps[idx]}, timeout=8.0)
+        except HilFailure as e:
+            self._failed("apps", e)
 
 
 class _TUI:
