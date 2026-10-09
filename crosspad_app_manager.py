@@ -5589,6 +5589,40 @@ def save_trace(project_dir: Path, lines: list[str], when: float) -> Path:
     return path
 
 
+SETTINGS_BACKUP_PATH = "/sdcard/crosspad-settings.json"
+FILES_DIR = ".crosspad/files"
+TRANSFER_TIMEOUT_S = 900.0      # a whole kit folder's sample over CDC
+SETTINGS_POLL_S = 0.5
+
+
+def _join_remote(base: str, name: str) -> str:
+    return base.rstrip("/") + "/" + name
+
+
+def fs_entries(result: dict) -> list[dict]:
+    """crosspad-hil fs_list's rows ({name, dir, size}), folders first."""
+    return sorted(result.get("entries") or [], key=lambda e: (not e["dir"], e["name"].lower()))
+
+
+def fs_root_rows(result: dict) -> list[dict]:
+    """crosspad-hil fs_roots' {mount: {total, used}} as rows, in the board's order."""
+    return [{"mount": mount, "total": (v or {}).get("total"), "used": (v or {}).get("used")}
+            for mount, v in (result.get("roots") or {}).items()]
+
+
+def settings_text(st: dict | None) -> str:
+    if not st:
+        return "-"
+    what = {"export": "save", "import": "load"}.get(st.get("op"), "")
+    if st.get("busy"):
+        return f"{what} running…"
+    if st.get("ok") is True:
+        return f"last {what}: ok"
+    if st.get("ok") is False:
+        return f"last {what} failed: {st.get('err') or '?'}"
+    return "nothing saved or loaded since the board started"
+
+
 class _DeviceScreen:
     """The CrossPad screen: four tabs over one crosspad-hil serve.
 
@@ -6166,6 +6200,162 @@ class _DeviceScreen:
         self.trace_out = (self.trace_out + [f"  {_C.BCYAN}── {label} {stamp}{_C.RST}"]
                           + body)[-TRACE_KEEP_LINES:]
         self.trace_top = max(len(self.trace_out) - self._pane, 0)
+
+    # -- Files -----------------------------------------------------------------
+
+    _files_hints = ("↑ ↓  pick   [Enter] open   ← back up   [p] pull to this computer   "
+                    "[u] push a file here   [n] new folder   [x] delete   "
+                    "[e] save settings to the card   [i] load settings from the card   "
+                    "[r] refresh   [c] claim or release the bench   1-4 or [Tab] tabs   [q] back")
+
+    def _files_enter(self) -> None:
+        self._files_refresh()
+        self._verb("settings", "settings_status", {}, self._got_settings)
+
+    def _files_refresh(self) -> None:
+        path = self.cwd
+        if path is None:
+            self._verb("fs:", "fs_roots", {}, self._got_roots)
+        else:
+            self._verb(f"fs:{path}", "fs_list", {"path": path},
+                       lambda r, p=path: self._got_list(p, r))
+
+    def _got_roots(self, result: dict) -> None:
+        self.roots = fs_root_rows(result)
+        self.file_pick = min(self.file_pick, max(len(self.roots) - 1, 0))
+
+    def _got_list(self, path: str, result: dict) -> None:
+        if path != self.cwd:
+            return              # an answer for a folder already left
+        self.entries = fs_entries(result)
+        self.file_pick = min(self.file_pick, max(len(self.entries) - 1, 0))
+
+    def _files_lines(self, width: int, height: int) -> list[str]:
+        if self.cwd is None:
+            lines = [f"  {_C.GRAY}On the board{_C.RST}"]
+            for i, r in enumerate(self.roots):
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == self.file_pick else " "
+                size = (f"{_TUI._fmt_size(r['used'])} used of {_TUI._fmt_size(r['total'])}"
+                        if r["total"] is not None and r["used"] is not None else "not mounted")
+                lines.append(f"  {mark} {r['mount']:<12} {_C.GRAY}{size}{_C.RST}")
+        else:
+            lines = [f"  {_C.BWHITE}{self.cwd}{_C.RST}"]
+            start, end = _viewport(self.file_pick, len(self.entries), max(height - 16, 3))
+            for i in range(start, end):
+                e = self.entries[i]
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == self.file_pick else " "
+                name = e["name"] + ("/" if e["dir"] else "")
+                size = "" if e["dir"] else _TUI._fmt_size(e["size"])
+                lines.append(f"  {mark} {name:<40} {_C.GRAY}{size}{_C.RST}")
+            if not self.entries:
+                lines.append(f"    {_C.GRAY}(empty){_C.RST}")
+        if self.transfer:
+            lines += ["", f"  {_C.BCYAN}{self.transfer}{_C.RST}"]
+        path = (self.settings or {}).get("path") or SETTINGS_BACKUP_PATH
+        return lines + ["", f"  {_C.GRAY}Settings backup{_C.RST}  {path}  "
+                            f"{settings_text(self.settings)}"]
+
+    def _files_key(self, key: str) -> None:
+        rows = self.roots if self.cwd is None else self.entries
+        if key in ("up", "down") and rows:
+            self.file_pick = (self.file_pick + (1 if key == "down" else -1)) % len(rows)
+        elif key == "enter" and rows:
+            row = rows[self.file_pick]
+            if self.cwd is None:
+                self._open_dir(row["mount"])
+            elif row["dir"]:
+                self._open_dir(_join_remote(self.cwd, row["name"]))
+        elif key in ("left", "backspace"):
+            self._up_dir()
+        elif key == "r":
+            self._files_refresh()
+        elif key == "e":
+            self._verb("settings_op", "settings_export", {}, self._settings_started)
+        elif key == "i":
+            if _confirm(f"Load the settings in {SETTINGS_BACKUP_PATH} into the board?"):
+                self._verb("settings_op", "settings_import", {"path": SETTINGS_BACKUP_PATH},
+                           self._settings_started)
+        elif self.cwd is None:
+            return
+        elif key == "p" and rows:
+            self._pull(rows[self.file_pick])
+        elif key == "u":
+            self._push()
+        elif key == "n":
+            self._mkdir()
+        elif key == "x" and rows:
+            self._delete(rows[self.file_pick])
+
+    def _open_dir(self, path: str | None) -> None:
+        self.cwd, self.entries, self.file_pick = path, [], 0
+        self._files_refresh()
+
+    def _up_dir(self) -> None:
+        if self.cwd is None:
+            return
+        parent = self.cwd.rstrip("/").rsplit("/", 1)[0]
+        mounts = {r["mount"] for r in self.roots}
+        self._open_dir(None if self.cwd in mounts or not parent else parent)
+
+    def _transfer(self, op: str, args: dict, text: str, on_ok) -> None:
+        """fs.pull / fs.push: hil takes the board's lease itself for as long as it runs."""
+        self.transfer = text
+        self._call("transfer", op, args, on_ok, timeout=TRANSFER_TIMEOUT_S)
+
+    def _transferred(self, text: str, result: dict) -> None:
+        self.transfer = None
+        n, secs = result.get("bytes"), result.get("seconds")
+        self.message = text + (f" ({_TUI._fmt_size(n)} in {secs:.1f} s)"
+                               if n is not None and secs else "")
+        self._files_refresh()
+
+    def _pull(self, row: dict) -> None:
+        if row["dir"]:
+            self.message = "Pick a file — folders are not pulled."
+            return
+        local = _text_input("Save as", str(self.project_dir / FILES_DIR / row["name"]))
+        if not local:
+            return
+        local = os.path.expanduser(local)
+        Path(local).parent.mkdir(parents=True, exist_ok=True)
+        self._transfer("fs.pull", {"remote": _join_remote(self.cwd, row["name"]), "local": local},
+                       f"Pulling {row['name']}…", lambda r, l=local: self._transferred(f"Saved {l}", r))
+
+    def _push(self) -> None:
+        local = _text_input("File to send", "")
+        if not local:
+            return
+        local = os.path.expanduser(local)
+        if not os.path.isfile(local):
+            self.message = f"No such file: {local}"
+            return
+        name = os.path.basename(local)
+        self._transfer("fs.push", {"local": local, "remote": _join_remote(self.cwd, name)},
+                       f"Pushing {name}…", lambda r, n=name: self._transferred(f"Sent {n}", r))
+
+    def _mkdir(self) -> None:
+        name = _text_input("New folder name", "")
+        if not name:
+            return
+        if "/" in name:
+            self.message = "A folder name has no '/'."
+            return
+        path = _join_remote(self.cwd, name)
+        self._verb(f"mkdir:{path}", "fs_mkdir", {"path": path}, lambda _r: self._files_refresh())
+
+    def _delete(self, row: dict) -> None:
+        path = _join_remote(self.cwd, row["name"])
+        if _confirm(f"Delete {path} from the board?"):
+            self._verb(f"rm:{path}", "fs_delete", {"path": path}, lambda _r: self._files_refresh())
+
+    def _settings_started(self, _result: dict) -> None:
+        self._verb("settings", "settings_status", {}, self._got_settings)
+
+    def _got_settings(self, result: dict) -> None:
+        self.settings = result
+        if result.get("busy"):
+            self._after(SETTINGS_POLL_S, lambda: self._verb(
+                "settings", "settings_status", {}, self._got_settings))
 
 
 class _TUI:
