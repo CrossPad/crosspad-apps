@@ -120,3 +120,20 @@ def test_crosspad_hil_env_overrides_discovery(tmp_path, monkeypatch):
     exe.write_text("")
     monkeypatch.setenv("CROSSPAD_HIL", str(exe))
     assert cam.find_hil(tmp_path, home=tmp_path) == str(exe)
+
+
+def test_board_text_cannot_drive_the_terminal(serve):
+    """A file name on the card, an SSID or a trace line comes from outside; an
+    escape sequence in it must not reach the screen as one."""
+    c = serve({
+        "cdc.verb": {"result": {"entries": [{"name": "kit\x1b[2J\x1b]52;c;cHduZWQ=\x07.wav"}],
+                                "ssid": "net\x9b31m"}},
+        "bad": {"error": {"code": "TIMEOUT", "message": "late\x1b[1A", "details": {}}},
+    })
+    r = c.request("cdc.verb", timeout=10)
+    assert "\x1b" not in r["entries"][0]["name"] and "\x07" not in r["entries"][0]["name"]
+    assert "\x9b" not in r["ssid"]
+    assert r["entries"][0]["name"].startswith("kit") and r["entries"][0]["name"].endswith(".wav")
+    with pytest.raises(cam.HilFailure) as e:
+        c.request("bad", timeout=10)
+    assert "\x1b" not in e.value.message

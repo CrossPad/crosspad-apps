@@ -642,6 +642,22 @@ def find_hil(project_dir: Path | str | None = None, home: Path | None = None) ->
     return None
 
 
+_CONTROL_CHARS = _re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _scrub(value):
+    """Board-supplied text (card file names, SSIDs, trace lines) with every control
+    character but tab and newline replaced, so none of it reaches the terminal as a
+    sequence."""
+    if isinstance(value, str):
+        return _CONTROL_CHARS.sub("\ufffd", value)
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _scrub(v) for k, v in value.items()}
+    return value
+
+
 class _HilClient:
     """One `crosspad-hil serve` child and the requests waiting on it."""
 
@@ -712,9 +728,9 @@ class _HilClient:
             if fut is None:
                 continue
             if msg.get("ok"):
-                fut.set_result(msg.get("result"))
+                fut.set_result(_scrub(msg.get("result")))
             else:
-                fut.set_exception(HilFailure.from_wire(msg.get("error") or {}))
+                fut.set_exception(HilFailure.from_wire(_scrub(msg.get("error") or {})))
         # EOF: the child is gone. Its last stderr line says why; wait for it.
         self._stderr_t.join(1.0)
         with self._lock:
