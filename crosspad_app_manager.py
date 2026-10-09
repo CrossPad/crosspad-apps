@@ -1476,14 +1476,17 @@ class AppManager:
 
     def fw_slots(self) -> list[dict] | None:
         """The board's two firmware slots (FW_SLOTS), or None when it cannot say."""
-        ok, text = self._cdc_exchange("FW_SLOTS", "rollback=", 4.0)
-        if not ok:
+        try:
+            r = self.hil_call("cdc.verb", {"verb": "fw_slots"})
+        except HilFailure:
             return None
-        slots = []
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("FWSLOT:") and "slot=" in line:
-                slots.append(dict(t.split("=", 1) for t in line[7:].split() if "=" in t))
+
+        def text(v):
+            return "-" if v is None else str(v)
+        slots = [{"slot": sl.get("slot"), "running": "1" if sl.get("running") else "0",
+                  "state": sl.get("state"), "pkg": text(sl.get("pkg")),
+                  "ver": text(sl.get("ver")), "kit": text(sl.get("kit"))}
+                 for sl in r.get("slots") or []]
         return slots or None
 
     def previous_firmware(self) -> dict | None:
@@ -1494,8 +1497,11 @@ class AppManager:
         return None
 
     def switch_firmware(self) -> bool:
-        reply = self.cdc_verb("FW_SWITCH", timeout=4.0) or ""
-        return reply.startswith("OK")
+        try:
+            self.hil_call("cdc.verb", {"verb": "fw_switch"}, timeout=10.0)
+        except HilFailure:
+            return False
+        return True
 
     # -- repair -------------------------------------------------------------------
 
@@ -2732,6 +2738,61 @@ class AppManager:
     # answers the question the manifest cannot: is the thing on the desk
     # actually running what this checkout describes?
 
+    # Every word CP Tools says to the board goes through one crosspad-hil
+    # serve (and through it, the hub). A screen holds the client open for its
+    # life; anything else starts one for its call and stops it after, so CP
+    # Tools never keeps the board from a test or the browser between screens.
+
+    _hil = None    # _HilClient while a screen or a block holds one open
+
+    def hil_argv(self) -> list[str] | None:
+        exe = find_hil(self.project_dir)
+        return [exe, "serve", "--client", HIL_CLIENT_NAME] if exe else None
+
+    def hil_open(self) -> "_HilClient":
+        if self._hil is not None and self._hil.alive:
+            return self._hil
+        argv = self.hil_argv()
+        if argv is None:
+            raise HilFailure(HIL_MISSING, "crosspad-hil is not installed")
+        client = _HilClient(argv, cwd=str(self.project_dir))
+        client.start()
+        self._hil = client
+        return client
+
+    def hil_close(self) -> None:
+        if self._hil is not None:
+            self._hil.close()
+            self._hil = None
+
+    @contextlib.contextmanager
+    def hil_held(self):
+        """The open client, or one started for this block and stopped after it."""
+        opened = self._hil is None or not self._hil.alive
+        client = self.hil_open()
+        try:
+            yield client
+        finally:
+            if opened:
+                self.hil_close()
+
+    def hil_call(self, op: str, args: dict | None = None, timeout: float = 8.0):
+        args = dict(args or {})
+        if op not in HIL_UNBOUND_OPS:
+            args.setdefault("holder", bench_holder())
+            if self.chosen_device:
+                args.setdefault("device", self.chosen_device)
+        with self.hil_held() as client:
+            return client.request(op, args, timeout=timeout)
+
+    def _hil_cdc_port(self) -> str | None:
+        devs = self.hil_call("devices.list", timeout=10.0).get("devices") or []
+        pick = [d for d in devs if d.get("id") == self.chosen_device] or devs
+        if not pick:
+            return None
+        return ((pick[0].get("ports") or {}).get("cdc") or {}).get("path")
+
+
     CROSSPAD_USB_VID = 0x303A
 
     def device_port(self) -> str | None:
@@ -2793,40 +2854,14 @@ class AppManager:
                 return f"{base}/{component}" if base != "." else component
         return None
 
-    def _cdc_exchange(self, verb: str, end_marker: str | None,
-                      timeout: float) -> tuple[bool, str]:
-        """Send one CDC line, collect the reply. (ok, text-or-reason)."""
-        try:
-            import serial
-        except ImportError:
-            return False, "pyserial not installed (pip install pyserial)"
-        port = self.device_port()
-        if not port:
-            return False, ("no CrossPad CDC port — device unplugged, or in "
-                           "USB audio mode (no CDC there)")
-        try:
-            with serial.Serial(port, 115200, timeout=0.5) as ser:
-                ser.reset_input_buffer()
-                ser.write(f"{verb}\r\n".encode())
-                deadline = time.time() + timeout
-                buf = ""
-                while time.time() < deadline:
-                    chunk = ser.read(512).decode("utf-8", "replace")
-                    if chunk:
-                        buf += chunk
-                        if end_marker and end_marker in buf:
-                            break
-                        if not end_marker and "\n" in buf:
-                            break
-        except Exception as e:                      # noqa: BLE001 - report it
-            return False, f"{type(e).__name__}: {e}"
-        if not buf.strip():
-            return False, "no reply — the board did not answer"
-        return True, buf
-
     def cdc_verb(self, verb: str, timeout: float = 4.0) -> str | None:
-        ok, text = self._cdc_exchange(verb, None, timeout)
-        return text.strip().splitlines()[0] if ok else None
+        """One CDC verb's first reply line, through crosspad-hil; None when it cannot be had."""
+        try:
+            r = self.hil_call("cdc.transact", {"cmd": verb, "timeout_s": timeout},
+                              timeout=timeout + 4)
+        except HilFailure:
+            return None
+        return (r.get("line") or "").strip() or None
 
     chosen_device: str | None = None   # a device id picked when several are plugged in
 
@@ -2861,25 +2896,28 @@ class AppManager:
     def query_device_versions(self, timeout: float = 3.0) -> dict:
         """Ask a connected device what it was built from.
 
-        Returns {"ok": bool, "error": str, "entries": [ {...} ]}. Never raises:
-        a missing pyserial, a device in USB-audio mode (no CDC) and an older
-        firmware without the command are all normal states to report, not
-        failures to crash on.
+        Returns {"ok": bool, "error": str, "entries": [ {...} ], "port": str|None}.
+        Never raises: no crosspad-hil, a busy board, a board in USB-audio mode
+        and an older firmware without the command are all normal states to
+        report, not failures to crash on.
         """
         if self.config.platform == "pc":
             return self._query_binary_versions(timeout)
 
         out = {"ok": False, "error": "", "entries": [], "port": None}
-        ok, buf = self._cdc_exchange("APP_VERSIONS", "APPVER: end", timeout)
-        if not ok:
-            out["error"] = buf
+        try:
+            with self.hil_held():
+                r = self.hil_call("cdc.verb", {"verb": "app_versions"}, timeout=timeout + 5)
+                out["port"] = self._hil_cdc_port()
+        except HilFailure as e:
+            out["error"] = e.user_text()
             return out
-        out["port"] = self.device_port()
-        out["entries"] = self._parse_appver_lines(buf)
-
+        out["entries"] = [{"component": c.get("component") or "?", "id": c.get("id") or "-",
+                           "commit": c.get("commit") or "", "ref": c.get("ref") or "-",
+                           "dirty": "1" if c.get("dirty") else "0"}
+                          for c in r.get("components") or []]
         if not out["entries"]:
-            out["error"] = ("no APPVER reply — firmware predates APP_VERSIONS, "
-                            "or the port is busy")
+            out["error"] = "the board listed no components"
             return out
         out["ok"] = True
         return out

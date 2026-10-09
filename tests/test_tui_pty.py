@@ -35,7 +35,9 @@ def drive(cwd, keys, settle=1.2):
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(cwd)
-        env = dict(os.environ, TERM="xterm", PYTHONPATH=ROOT, CROSSPAD_NO_MOUSE="")
+        # Never the bench's real crosspad-hil: a test must not take the board.
+        env = dict(os.environ, TERM="xterm", PYTHONPATH=ROOT, CROSSPAD_NO_MOUSE="",
+                   CROSSPAD_HIL=os.path.join(str(cwd), "no-hil"))
         os.execvpe(sys.executable, [sys.executable, "-c",
                    "import crosspad_app_manager as c; c.tui_main(c.PlatformConfig(platform='pc', lib_dir='src/apps'))"],
                    env)
