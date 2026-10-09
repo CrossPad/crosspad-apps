@@ -667,6 +667,7 @@ class _HilClient:
     def __init__(self, argv: list[str], cwd: str | None = None):
         self.argv, self.cwd = list(argv), cwd
         self._proc: subprocess.Popen | None = None
+        self._eof = False
         self._ids = itertools.count(1)
         self._pending: dict[int, Future] = {}
         self._lock = threading.Lock()
@@ -688,7 +689,9 @@ class _HilClient:
 
     @property
     def alive(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
+        # The end of its stdout is the end of serve: on Windows the process can
+        # still look alive to poll() for a moment after it.
+        return self._proc is not None and not self._eof and self._proc.poll() is None
 
     def submit(self, op: str, args: dict | None = None) -> Future:
         fut: Future = Future()
@@ -733,6 +736,7 @@ class _HilClient:
             else:
                 fut.set_exception(HilFailure.from_wire(_scrub(msg.get("error") or {})))
         # EOF: the child is gone. Its last stderr line says why; wait for it.
+        self._eof = True
         self._stderr_t.join(1.0)
         with self._lock:
             waiting, self._pending = list(self._pending.values()), {}
