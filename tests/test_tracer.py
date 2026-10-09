@@ -68,3 +68,14 @@ def test_stopping_the_tracer_interrupts_it_like_ctrl_c():
     run.stop()
     assert time.monotonic() - t0 < 5
     assert "stopped cleanly" in run.lines()
+
+
+def test_tracer_output_cannot_drive_the_terminal():
+    run = cam._TracerRun([sys.executable, "-c",
+                          "print('dash\\x1b[2Jboard\\x1b]0;x\\x07end', flush=True)"])
+    run.start()
+    deadline = time.monotonic() + 10
+    while run.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    text = "\n".join(run.lines())
+    assert "\x1b" not in text and "\x07" not in text and "dash" in text and "end" in text

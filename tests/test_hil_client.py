@@ -137,3 +137,16 @@ def test_board_text_cannot_drive_the_terminal(serve):
     with pytest.raises(cam.HilFailure) as e:
         c.request("bad", timeout=10)
     assert "\x1b" not in e.value.message
+
+
+def test_hil_stderr_cannot_drive_the_terminal(tmp_path):
+    c = cam._HilClient([sys.executable, "-c",
+                        "import sys; sys.stderr.write('boom\\x1b[2J\\n'); sys.stderr.flush()"])
+    c.start()
+    deadline = time.monotonic() + 10
+    while c.alive and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.2)
+    assert any("boom" in l for l in c.stderr_tail)
+    assert all("\x1b" not in l for l in c.stderr_tail)
+    c.close()

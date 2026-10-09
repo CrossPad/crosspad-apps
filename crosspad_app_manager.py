@@ -741,7 +741,7 @@ class _HilClient:
 
     def _read_stderr(self) -> None:
         for raw in self._proc.stderr:
-            self.stderr_tail.append(raw.rstrip("\r\n"))
+            self.stderr_tail.append(_scrub(raw.rstrip("\r\n")))
 
     def _exited(self) -> HilFailure:
         last = next((l for l in reversed(self.stderr_tail) if l.strip()), "")
@@ -6561,7 +6561,7 @@ class _TracerRun:
 
     def _pump(self) -> None:
         for raw in self.proc.stdout:
-            self._tail.append(raw.rstrip("\r\n"))
+            self._tail.append(_scrub(raw.rstrip("\r\n")))
 
     def poll(self) -> int | None:
         rc = self.proc.poll()
