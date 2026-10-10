@@ -32,7 +32,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Sampler** | 0.8.4 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=1.45.0, gui >=1.16.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.6.0 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.23.0, gui >=1.13.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
 | **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
-| **Slicer** | 0.3.0 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=1.31.0, gui >=1.14.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
+| **Slicer** | 0.3.1 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=1.31.0, gui >=1.14.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
 | **Song** | 0.2.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
