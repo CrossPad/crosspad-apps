@@ -455,3 +455,6 @@ Your repo must also contain a `crosspad-app.json` with valid metadata.
 | `diff_registry.py` | CI: compares registries, outputs changes for notifications |
 | `external-apps.json` | Community/third-party app repos (add via PR) |
 | `COMMUNITY_APPS.md` | Auto-generated full list of community apps |
+## License
+
+GPL-3.0-or-later — see [LICENSE](LICENSE).
