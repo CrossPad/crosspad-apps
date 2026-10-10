@@ -1,6 +1,22 @@
 {
   "version": 1,
   "apps": {
+    "pitchplay": {
+      "name": "Pitch Play",
+      "version": "0.5.0",
+      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
+      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
+      "component_path": "components/crosspad-pitchplay",
+      "icon": "pitchplay.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.38.0",
+        "crosspad-gui": ">=1.18.0"
+      }
+    },
     "recorder": {
       "name": "Recorder",
       "version": "0.4.2",
@@ -51,15 +67,17 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
-    "serial-monitor": {
-      "name": "Serial Monitor",
-      "version": "0.1.0",
-      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
-      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
-      "component_path": "components/crosspad-serial-monitor",
-      "icon": "terminal.png",
+    "instructions": {
+      "name": "Instructions",
+      "version": "0.2.0",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "info.png",
       "category": "tools",
       "platforms": [
+        "esp-idf",
+        "arduino",
         "pc"
       ],
       "requires": {
@@ -84,22 +102,37 @@
         "crosspad-gui": ">=1.12.0"
       }
     },
-    "instructions": {
-      "name": "Instructions",
-      "version": "0.2.0",
-      "description": "Markdown-based instructions and help viewer",
-      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
-      "component_path": "components/crosspad-instructions",
-      "icon": "info.png",
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.0",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
       "category": "tools",
       "platforms": [
-        "esp-idf",
-        "arduino",
         "pc"
       ],
       "requires": {
         "crosspad-core": ">=0.3.0",
         "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.9.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.34.0",
+        "crosspad-gui": ">=1.17.0"
       }
     },
     "dawcontrol": {
@@ -136,21 +169,21 @@
         "crosspad-gui": ">=1.12.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.9.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.12.0",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
       "platforms": [
-        "esp-idf",
-        "pc"
+        "pc",
+        "esp-idf"
       ],
       "requires": {
-        "crosspad-core": ">=1.34.0",
-        "crosspad-gui": ">=1.17.0"
+        "crosspad-core": ">=1.44.0",
+        "crosspad-gui": ">=1.14.0"
       }
     },
     "synthesizer": {
@@ -184,23 +217,6 @@
       "requires": {
         "crosspad-core": ">=1.23.0",
         "crosspad-gui": ">=1.13.0"
-      }
-    },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.12.0",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.44.0",
-        "crosspad-gui": ">=1.14.0"
       }
     },
     "piano": {

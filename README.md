@@ -27,6 +27,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Mixer** | 0.12.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.44.0, gui >=1.14.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Pad Mixer** | 0.2.1 | Sixteen faders, one per pad | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-pad-mixer](https://github.com/CrossPad/crosspad-pad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
+| **Pitch Play** | 0.5.0 | One sample or many, played chromatically on the pads and from a MIDI keyboard | esp-idf | core >=1.38.0, gui >=1.18.0 | [CrossPad/crosspad-pitchplay](https://github.com/CrossPad/crosspad-pitchplay) |
 | **Recorder** | 0.4.2 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=1.28.0, gui >=1.14.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
 | **Sampler** | 0.8.4 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=1.45.0, gui >=1.16.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.6.0 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.23.0, gui >=1.13.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
@@ -35,7 +36,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Song** | 0.2.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*14 official app(s)*
+*15 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps
