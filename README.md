@@ -7,12 +7,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
+- **Mixer v0.11.0** — desk format 4 -- a saved channel is loaded onto the live channel of the same name wherever it now sits (the slot is only a hint), so a desk saved before the native sampler's Sampler2 channel (or with it, on a build without it) keeps USB, Click and the inputs on USB, Click and the inputs; earlier desks lost those channels' settings to the name guard. The desk's JSON moved to MixerState.cpp so a platform builds it -Os and the render -O2; tests/test_desk_migration.cpp
+- **Mixer v0.10.0** — 0.8.1 (master: input pairs, silent channels skipped, NaN kept off the buses) and 0.9.1 (the engine branch: Source switch, IN as USB/Line/Mic, EQ across the outputs, per-channel render timing) merged; the look-up table files both the IN1/IN2/IN3 and the Line/Mic channel names
+- **Mixer v0.9.1** — saveState()/loadState() through stdio instead of fstream (smaller firmware image); same file, same .tmp/.bak commit and fallback
 - **Arrange v0.9.0** — the status line sits in the status bar, centred where the CrossPad logo was (gui 1.17 statusbar_show_title), and the row it took goes to the tools at the foot: as tall as the screen leaves them, in the larger font, spread across the width; MOVE reads its axis as two arrows; requires gui 1.17
+- **Mixer v0.9.0** — IN reads USB in, In 1/2, In 3/4, Mic. The two line sockets share one converter, so they are two rows over one channel: the one the converter is on is live, the other is dimmed, and tapping it makes it live. Also fixes the page they were filed under -- the look-up table still said IN1/IN2 after the platform renamed the channels Mic and Line, which quietly put both on SOURCES.
 - **Mixer v0.8.1 (0.7.2 merged in)** — render() neither pans nor sends a channel whose block is silent (peak 0) -- the buses come out bit for bit the same, and every quiet channel saves two passes per send; a block of only NaN and zeros no longer reaches the buses (renderTap() still sums it); host tests in tests/, the scalar and the esp-dsp path
-- **Sampler v0.8.4** — a hold-mode release cuts the voice before the MIDI echo goes out (a host that reads USB MIDI slowly no longer holds the cut back); the waveform loader is marked running before its task is created, so a waveform no longer stays LOADING; a setting being turned in the pad editor stays turned on the next pad; requires core 1.45.0, the first core on main with PitchedInstrument::voiceCap() (0.8.3's 1.43.0 was the firmware line's release/core-1.43.0)
-- **Sampler v0.8.3** — the pitched editor's Voices goes up to the board's voice cap (PitchedInstrument::voiceCap(), which every setParams now meets); requires core 1.43.0
-- **Sampler v0.8.2** — a kit swap with no pad sounding starts on the first pad at once instead of 150 ms later (the wait stays while a pad sounds)
-- **Sampler v0.8.1** — + NEW finds a free kit name with stat(), and a name the card cannot answer for counts as taken ("card read failed"); no <fstream> left (smaller firmware image)
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -24,12 +24,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Arrange** | 0.9.0 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=1.34.0, gui >=1.17.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
 | **DAW Control** | 0.4.1 | DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub | esp-idf, pc | core >=1.23.0, gui >=1.3.0 | [CrossPad/crosspad-dawcontrol](https://github.com/CrossPad/crosspad-dawcontrol) |
 | **Instructions** | 0.2.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
-| **Mixer** | 0.8.1 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.44.0, gui >=1.14.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
+| **Mixer** | 0.12.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.44.0, gui >=1.14.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Pad Mixer** | 0.2.1 | Sixteen faders, one per pad | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-pad-mixer](https://github.com/CrossPad/crosspad-pad-mixer) |
 | **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
 | **Recorder** | 0.4.2 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=1.28.0, gui >=1.14.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
 | **Sampler** | 0.8.4 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=1.45.0, gui >=1.16.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
-| **Sequencer** | 0.3.2 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.23.0, gui >=1.13.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
+| **Sequencer** | 0.6.0 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=1.23.0, gui >=1.13.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
 | **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Slicer** | 0.3.0 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=1.31.0, gui >=1.14.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
 | **Song** | 0.2.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.21.0, gui >=1.12.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
