@@ -2740,7 +2740,74 @@ class AppManager:
             return cache
         return cache if (cache / "src").is_dir() else None
 
+    # The public repo as one archive — template/ is a few files, the archive
+    # about 1.5 MB, and one anonymous request beats a request per file.
+    TEMPLATE_TARBALL = (f"https://codeload.github.com/{REMOTE_REGISTRY_REPO}"
+                        "/tar.gz/refs/heads/main")
+
     def _download_template(self, dest: Path) -> bool:
+        """Fetch template/ into dest: the public archive first, `gh api` second.
+
+        crosspad-apps is public, so a new app needs nobody's GitHub sign-in;
+        gh stays as the fallback for a proxy it is set up for. Either lands in
+        a staging folder that replaces dest whole, so a half-finished fetch
+        never becomes the cache and a file dropped upstream does not linger.
+        """
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            staging = Path(tempfile.mkdtemp(prefix="template-", dir=dest.parent))
+        except OSError:
+            return False
+        try:
+            ok = self._template_from_tarball(staging)
+            if not ok:
+                shutil.rmtree(staging, ignore_errors=True)
+                staging.mkdir()
+                ok = self._template_from_gh(staging)
+            if ok and (staging / "src").is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+                os.replace(staging, dest)
+                return True
+            return False
+        except OSError:
+            return False
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _template_from_tarball(self, dest: Path) -> bool:
+        """template/ out of the repo archive, over plain HTTPS."""
+        import io
+        import tarfile
+        try:
+            blob = http_get(self.TEMPLATE_TARBALL, timeout=60)
+        except NetError as e:
+            self.cert_problem = self.cert_problem or e.cert
+            return False
+        files = {}
+        try:
+            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+                for m in tar:
+                    # "<repo>-main/template/<path>": regular files only, and
+                    # nothing that could climb out of dest on any system.
+                    parts = m.name.split("/")
+                    rel = parts[2:]
+                    if (len(parts) < 3 or parts[1] != self.TEMPLATE_REPO_PATH
+                            or not m.isfile()
+                            or any(p in ("", ".", "..") or "\\" in p or ":" in p
+                                   for p in rel)):
+                        continue
+                    files[tuple(rel)] = tar.extractfile(m).read()
+        except (tarfile.TarError, EOFError, OSError):
+            return False
+        if not any(rel[0] == "src" for rel in files):
+            return False
+        for rel, data in files.items():
+            path = dest.joinpath(*rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return True
+
+    def _template_from_gh(self, dest: Path) -> bool:
         """Pull template/ out of the registry repo with the gh CLI."""
         def fetch_dir(remote_path: str, local_dir: Path) -> bool:
             r = subprocess.run(
@@ -2790,7 +2857,7 @@ class AppManager:
         src = self._template_dir()
         if not src:
             raise RuntimeError("app template unavailable (no crosspad-apps "
-                               "checkout and gh could not fetch it)")
+                               "checkout, and it could not be downloaded)")
 
         def substitute(text: str) -> str:
             for key, value in subs.items():
