@@ -17,20 +17,26 @@ Usage:
     mgr.list_apps()
 """
 
+import collections
 import contextlib
+import itertools
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-MANAGER_VERSION = "1.1.0"    # CP Tools; shown in help and in support reports
+MANAGER_VERSION = "1.2.0"    # CP Tools; shown in help and in support reports
 REMOTE_REGISTRY_REPO = "CrossPad/crosspad-apps"
 REMOTE_REGISTRY_PATH = "registry.json"
 LOCAL_REGISTRY_FILE = "app-registry.json"
@@ -537,6 +543,227 @@ class PlatformConfig:
     lib_dir: str = "components"        # where submodules go ("components" or "lib")
     official_org: str = "CrossPad"
     lib_prefix: str = "crosspad-"      # prefix for component dirs
+
+
+# -- crosspad-hil serve client --------------------------------------------------
+#
+# CP Tools says nothing to the board itself. One `crosspad-hil serve` child
+# does, through the hub, so a test, a DAW or a second CP Tools holding the
+# board is told about instead of fought over. NDJSON on the child's stdio:
+# request {id, op, args}, answer {id, ok, result | error}, events {ev} ignored,
+# logs on stderr. Every request is a Future, so nothing in the TUI ever waits
+# on the board longer than it chooses to.
+
+HIL_CLIENT_NAME = "cp-tools"
+HIL_MISSING = "HIL_MISSING"      # client side: no crosspad-hil on this machine
+HIL_EXITED = "HIL_EXITED"        # client side: the serve process went away
+HIL_GIT_URL = "git+https://github.com/CrossPad/crosspad-hil"
+# The bench lease (crosspad-hil bench.py): every board op names who asks, so a
+# board someone else has claimed refuses CP Tools with BENCH_BUSY instead of
+# being touched in the middle of their test. The same variable names a session
+# for every crosspad-hil tool on the machine.
+BENCH_HOLDER_ENV = "CROSSPAD_BENCH_HOLDER"
+HIL_UNBOUND_OPS = ("hub.status", "devices.list", "bench.status")
+
+
+def bench_holder() -> str:
+    return os.environ.get(BENCH_HOLDER_ENV) or HIL_CLIENT_NAME
+
+
+class HilFailure(Exception):
+    """A crosspad-hil error as the wire carries it, or one the client met itself."""
+
+    def __init__(self, code: str, message: str, hint: str | None = None,
+                 details: dict | None = None):
+        super().__init__(f"{code}: {message}")
+        self.code, self.message, self.hint = code, message, hint
+        self.details = dict(details or {})
+
+    @classmethod
+    def from_wire(cls, err: dict) -> "HilFailure":
+        # HilError.to_dict() nests extras under "details"; accept them at the
+        # top level as well.
+        details = dict(err.get("details") or {})
+        for key, value in err.items():
+            if key not in ("code", "message", "hint", "details"):
+                details.setdefault(key, value)
+        return cls(str(err.get("code") or "ENV"), str(err.get("message") or ""),
+                   err.get("hint"), details)
+
+    @property
+    def holder(self) -> dict | None:
+        """Who holds the board ({client, purpose, pid, since}) on the hub's PORT_BUSY.
+
+        BENCH_BUSY names its holder as a plain string in details["holder"]; this
+        is None for it, and the bench view reads the details itself.
+        """
+        h = self.details.get("holder")
+        return h if isinstance(h, dict) else None
+
+    def user_text(self) -> str:
+        """One line for a screen that only wants to say why it has no answer."""
+        if self.code in ("PORT_BUSY", "BENCH_BUSY"):
+            return f"busy: {self.message}"
+        return {
+            HIL_MISSING: "crosspad-hil is not installed — Developer tools → CrossPad "
+                         "says how to get it",
+            "NO_DEVICE": "no CrossPad connected",
+            "NO_CDC_IN_AUDIO_MODE": "the board is in USB audio mode (no CDC there)",
+            "TIMEOUT": "no reply — the board did not answer",
+        }.get(self.code, self.message)
+
+
+def _own_group() -> dict:
+    """Popen keywords that keep a child out of the terminal's Ctrl+C."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _hil_candidates(project_dir, home: Path) -> list[str]:
+    bases = ([Path(project_dir) / ".venv"] if project_dir else []) + [
+        home / "GIT" / "crosspad-hil" / ".venv", home / ".venvs" / "crosspad-hil"]
+    out = []
+    for base in bases:
+        out += [str(base / "bin" / "crosspad-hil"), str(base / "Scripts" / "crosspad-hil.exe")]
+    return out
+
+
+def find_hil(project_dir: Path | str | None = None, home: Path | None = None) -> str | None:
+    """crosspad-hil the way platform-idf tools/bench.py finds it; CROSSPAD_HIL overrides."""
+    forced = os.environ.get("CROSSPAD_HIL")
+    if forced is not None:
+        return forced if forced and os.path.isfile(forced) else None
+    found = shutil.which("crosspad-hil")
+    if found:
+        return found
+    for path in _hil_candidates(project_dir, home or Path.home()):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+_CONTROL_CHARS = _re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _scrub(value):
+    """Board-supplied text (card file names, SSIDs, trace lines) with every control
+    character but tab and newline replaced, so none of it reaches the terminal as a
+    sequence."""
+    if isinstance(value, str):
+        return _CONTROL_CHARS.sub("\ufffd", value)
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    if isinstance(value, dict):
+        return {_scrub(k): _scrub(v) for k, v in value.items()}
+    return value
+
+
+class _HilClient:
+    """One `crosspad-hil serve` child and the requests waiting on it."""
+
+    STDERR_KEEP = 40
+
+    def __init__(self, argv: list[str], cwd: str | None = None):
+        self.argv, self.cwd = list(argv), cwd
+        self._proc: subprocess.Popen | None = None
+        self._eof = False
+        self._ids = itertools.count(1)
+        self._pending: dict[int, Future] = {}
+        self._lock = threading.Lock()
+        self._wlock = threading.Lock()
+        self._stderr_t: threading.Thread | None = None
+        self.stderr_tail: collections.deque = collections.deque(maxlen=self.STDERR_KEEP)
+
+    def start(self) -> None:
+        try:
+            self._proc = subprocess.Popen(
+                self.argv, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                bufsize=1, **_own_group())
+        except OSError as e:
+            raise HilFailure(HIL_MISSING, f"crosspad-hil did not start: {e}") from e
+        self._stderr_t = threading.Thread(target=self._read_stderr, daemon=True)
+        self._stderr_t.start()
+        threading.Thread(target=self._read_stdout, daemon=True).start()
+
+    @property
+    def alive(self) -> bool:
+        # The end of its stdout is the end of serve: on Windows the process can
+        # still look alive to poll() for a moment after it.
+        return self._proc is not None and not self._eof and self._proc.poll() is None
+
+    def submit(self, op: str, args: dict | None = None) -> Future:
+        fut: Future = Future()
+        if not self.alive:
+            fut.set_exception(self._exited())
+            return fut
+        with self._lock:
+            rid = next(self._ids)
+            self._pending[rid] = fut
+        line = json.dumps({"id": rid, "op": op, "args": args or {}})
+        try:
+            with self._wlock:
+                self._proc.stdin.write(line + "\n")
+                self._proc.stdin.flush()
+        except (OSError, ValueError):
+            with self._lock:
+                self._pending.pop(rid, None)
+            fut.set_exception(self._exited())
+        return fut
+
+    def request(self, op: str, args: dict | None = None, timeout: float = 5.0):
+        try:
+            return self.submit(op, args).result(timeout)
+        except FutureTimeout:
+            raise HilFailure("TIMEOUT", f"{op}: no answer from crosspad-hil in "
+                                        f"{timeout:.1f} s") from None
+
+    def _read_stdout(self) -> None:
+        for raw in self._proc.stdout:
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(msg, dict) or "ev" in msg:
+                continue
+            with self._lock:
+                fut = self._pending.pop(msg.get("id"), None)
+            if fut is None:
+                continue
+            if msg.get("ok"):
+                fut.set_result(_scrub(msg.get("result")))
+            else:
+                fut.set_exception(HilFailure.from_wire(_scrub(msg.get("error") or {})))
+        # EOF: the child is gone. Its last stderr line says why; wait for it.
+        self._eof = True
+        self._stderr_t.join(1.0)
+        with self._lock:
+            waiting, self._pending = list(self._pending.values()), {}
+        for fut in waiting:
+            fut.set_exception(self._exited())
+
+    def _read_stderr(self) -> None:
+        for raw in self._proc.stderr:
+            self.stderr_tail.append(_scrub(raw.rstrip("\r\n")))
+
+    def _exited(self) -> HilFailure:
+        last = next((l for l in reversed(self.stderr_tail) if l.strip()), "")
+        return HilFailure(HIL_EXITED, "crosspad-hil stopped" + (f": {last}" if last else ""))
+
+    def close(self, wait: float = 2.0) -> None:
+        """EOF on its stdin is serve's own way out; kill only what does not take it."""
+        if self._proc is None:
+            return
+        try:
+            self._proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            self._proc.wait(wait)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait()
 
 
 class AppManager:
@@ -1270,14 +1497,17 @@ class AppManager:
 
     def fw_slots(self) -> list[dict] | None:
         """The board's two firmware slots (FW_SLOTS), or None when it cannot say."""
-        ok, text = self._cdc_exchange("FW_SLOTS", "rollback=", 4.0)
-        if not ok:
+        try:
+            r = self.hil_call("cdc.verb", {"verb": "fw_slots"})
+        except HilFailure:
             return None
-        slots = []
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("FWSLOT:") and "slot=" in line:
-                slots.append(dict(t.split("=", 1) for t in line[7:].split() if "=" in t))
+
+        def text(v):
+            return "-" if v is None else str(v)
+        slots = [{"slot": sl.get("slot"), "running": "1" if sl.get("running") else "0",
+                  "state": sl.get("state"), "pkg": text(sl.get("pkg")),
+                  "ver": text(sl.get("ver")), "kit": text(sl.get("kit"))}
+                 for sl in r.get("slots") or []]
         return slots or None
 
     def previous_firmware(self) -> dict | None:
@@ -1288,8 +1518,11 @@ class AppManager:
         return None
 
     def switch_firmware(self) -> bool:
-        reply = self.cdc_verb("FW_SWITCH", timeout=4.0) or ""
-        return reply.startswith("OK")
+        try:
+            self.hil_call("cdc.verb", {"verb": "fw_switch"}, timeout=10.0)
+        except HilFailure:
+            return False
+        return True
 
     # -- repair -------------------------------------------------------------------
 
@@ -2526,6 +2759,61 @@ class AppManager:
     # answers the question the manifest cannot: is the thing on the desk
     # actually running what this checkout describes?
 
+    # Every word CP Tools says to the board goes through one crosspad-hil
+    # serve (and through it, the hub). A screen holds the client open for its
+    # life; anything else starts one for its call and stops it after, so CP
+    # Tools never keeps the board from a test or the browser between screens.
+
+    _hil = None    # _HilClient while a screen or a block holds one open
+
+    def hil_argv(self) -> list[str] | None:
+        exe = find_hil(self.project_dir)
+        return [exe, "serve", "--client", HIL_CLIENT_NAME] if exe else None
+
+    def hil_open(self) -> "_HilClient":
+        if self._hil is not None and self._hil.alive:
+            return self._hil
+        argv = self.hil_argv()
+        if argv is None:
+            raise HilFailure(HIL_MISSING, "crosspad-hil is not installed")
+        client = _HilClient(argv, cwd=str(self.project_dir))
+        client.start()
+        self._hil = client
+        return client
+
+    def hil_close(self) -> None:
+        if self._hil is not None:
+            self._hil.close()
+            self._hil = None
+
+    @contextlib.contextmanager
+    def hil_held(self):
+        """The open client, or one started for this block and stopped after it."""
+        opened = self._hil is None or not self._hil.alive
+        client = self.hil_open()
+        try:
+            yield client
+        finally:
+            if opened:
+                self.hil_close()
+
+    def hil_call(self, op: str, args: dict | None = None, timeout: float = 8.0):
+        args = dict(args or {})
+        if op not in HIL_UNBOUND_OPS:
+            args.setdefault("holder", bench_holder())
+            if self.chosen_device:
+                args.setdefault("device", self.chosen_device)
+        with self.hil_held() as client:
+            return client.request(op, args, timeout=timeout)
+
+    def _hil_cdc_port(self) -> str | None:
+        devs = self.hil_call("devices.list", timeout=10.0).get("devices") or []
+        pick = [d for d in devs if d.get("id") == self.chosen_device] or devs
+        if not pick:
+            return None
+        return ((pick[0].get("ports") or {}).get("cdc") or {}).get("path")
+
+
     CROSSPAD_USB_VID = 0x303A
 
     def device_port(self) -> str | None:
@@ -2587,40 +2875,14 @@ class AppManager:
                 return f"{base}/{component}" if base != "." else component
         return None
 
-    def _cdc_exchange(self, verb: str, end_marker: str | None,
-                      timeout: float) -> tuple[bool, str]:
-        """Send one CDC line, collect the reply. (ok, text-or-reason)."""
-        try:
-            import serial
-        except ImportError:
-            return False, "pyserial not installed (pip install pyserial)"
-        port = self.device_port()
-        if not port:
-            return False, ("no CrossPad CDC port — device unplugged, or in "
-                           "USB audio mode (no CDC there)")
-        try:
-            with serial.Serial(port, 115200, timeout=0.5) as ser:
-                ser.reset_input_buffer()
-                ser.write(f"{verb}\r\n".encode())
-                deadline = time.time() + timeout
-                buf = ""
-                while time.time() < deadline:
-                    chunk = ser.read(512).decode("utf-8", "replace")
-                    if chunk:
-                        buf += chunk
-                        if end_marker and end_marker in buf:
-                            break
-                        if not end_marker and "\n" in buf:
-                            break
-        except Exception as e:                      # noqa: BLE001 - report it
-            return False, f"{type(e).__name__}: {e}"
-        if not buf.strip():
-            return False, "no reply — the board did not answer"
-        return True, buf
-
     def cdc_verb(self, verb: str, timeout: float = 4.0) -> str | None:
-        ok, text = self._cdc_exchange(verb, None, timeout)
-        return text.strip().splitlines()[0] if ok else None
+        """One CDC verb's first reply line, through crosspad-hil; None when it cannot be had."""
+        try:
+            r = self.hil_call("cdc.transact", {"cmd": verb, "timeout_s": timeout},
+                              timeout=timeout + 4)
+        except HilFailure:
+            return None
+        return (r.get("line") or "").strip() or None
 
     chosen_device: str | None = None   # a device id picked when several are plugged in
 
@@ -2655,25 +2917,28 @@ class AppManager:
     def query_device_versions(self, timeout: float = 3.0) -> dict:
         """Ask a connected device what it was built from.
 
-        Returns {"ok": bool, "error": str, "entries": [ {...} ]}. Never raises:
-        a missing pyserial, a device in USB-audio mode (no CDC) and an older
-        firmware without the command are all normal states to report, not
-        failures to crash on.
+        Returns {"ok": bool, "error": str, "entries": [ {...} ], "port": str|None}.
+        Never raises: no crosspad-hil, a busy board, a board in USB-audio mode
+        and an older firmware without the command are all normal states to
+        report, not failures to crash on.
         """
         if self.config.platform == "pc":
             return self._query_binary_versions(timeout)
 
         out = {"ok": False, "error": "", "entries": [], "port": None}
-        ok, buf = self._cdc_exchange("APP_VERSIONS", "APPVER: end", timeout)
-        if not ok:
-            out["error"] = buf
+        try:
+            with self.hil_held():
+                r = self.hil_call("cdc.verb", {"verb": "app_versions"}, timeout=timeout + 5)
+                out["port"] = self._hil_cdc_port()
+        except HilFailure as e:
+            out["error"] = e.user_text()
             return out
-        out["port"] = self.device_port()
-        out["entries"] = self._parse_appver_lines(buf)
-
+        out["entries"] = [{"component": c.get("component") or "?", "id": c.get("id") or "-",
+                           "commit": c.get("commit") or "", "ref": c.get("ref") or "-",
+                           "dirty": "1" if c.get("dirty") else "0"}
+                          for c in r.get("components") or []]
         if not out["entries"]:
-            out["error"] = ("no APPVER reply — firmware predates APP_VERSIONS, "
-                            "or the port is busy")
+            out["error"] = "the board listed no components"
             return out
         out["ok"] = True
         return out
@@ -4745,7 +5010,7 @@ def _decode_key(ch: str) -> str:
                 return _hotspot_key(col, row)
             return ""
         simple = {"A": "up", "B": "down", "C": "right", "D": "left",
-                  "H": "home", "F": "end"}
+                  "H": "home", "F": "end", "Z": "shift-tab"}
         if code in simple:
             return simple[code]
         if code.isdigit():
@@ -4846,7 +5111,8 @@ def _read_key_raw(timeout: float | None = None) -> str:
         if ch in (b"\xe0", b"\x00"):
             ch2 = msvcrt.getch()
             m = {b"H": "up", b"P": "down", b"K": "left", b"M": "right",
-                 b"I": "pgup", b"Q": "pgdn", b"G": "home", b"O": "end"}
+                 b"I": "pgup", b"Q": "pgdn", b"G": "home", b"O": "end",
+                 b"\x0f": "shift-tab"}
             return m.get(ch2, "")
         if ch == b"\r": return "enter"
         if ch == b"\x1b": return "esc"
@@ -5086,6 +5352,1291 @@ class _PipelineUI:
 
 
 # -- Main TUI class -----------------------------------------------------------
+
+# -- CrossPad screen -------------------------------------------------------------
+#
+# Developer tools → CrossPad: the board's pads, knob, apps, traces, files and
+# radios, through crosspad-hil. Everything drawn is a function of state, so
+# the tests read the screen without a terminal or a board.
+
+DEV_TABS = ("Pads", "Trace", "Files", "Connections")
+DEV_TAB_PADS, DEV_TAB_TRACE, DEV_TAB_FILES, DEV_TAB_CONN = range(4)
+_DEV_TAB_NAMES = ("pads", "trace", "files", "conn")
+
+# The hardware counts pads from the bottom-left corner, row by row; the grid
+# (and the keyboard) is drawn top row first.
+PAD_KEY_ROWS = ("1234", "qwer", "asdf", "zxcv")
+PAD_HOLD_ROWS = ("!@#$", "QWER", "ASDF", "ZXCV")
+PAD_GRID = ((12, 13, 14, 15), (8, 9, 10, 11), (4, 5, 6, 7), (0, 1, 2, 3))
+PAD_CELL_W = 8
+
+AUDIO_NOTICE = "This needs the CDC profile — switch in Connections."
+USB_MODE_NAMES = {"default": "CDC", "audio": "USB audio", "bootloader": "bootloader"}
+
+_CUBE_LEVELS = (0, 95, 135, 175, 215, 255)
+
+
+def rgb_to_256(r: int, g: int, b: int) -> int:
+    """Nearest xterm-256 colour: the 6x6x6 cube or the 24-step grey ramp."""
+    def nearest(v):
+        return min(range(6), key=lambda i: abs(_CUBE_LEVELS[i] - v))
+
+    def dist(c):
+        return sum((x - y) ** 2 for x, y in zip(c, (r, g, b)))
+    ri, gi, bi = nearest(r), nearest(g), nearest(b)
+    step = min(23, max(0, round(((r + g + b) / 3 - 8) / 10)))
+    grey = 8 + 10 * step
+    cube = (_CUBE_LEVELS[ri], _CUBE_LEVELS[gi], _CUBE_LEVELS[bi])
+    return 232 + step if dist((grey, grey, grey)) < dist(cube) else 16 + 36 * ri + 6 * gi + bi
+
+
+def color_mode() -> str:
+    """How the pad grid paints: '24bit', '256', or 'none' (NO_COLOR / plain)."""
+    if PLAIN or os.environ.get("NO_COLOR"):
+        return "none"
+    if os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit"):
+        return "24bit"
+    return "256"
+
+
+def _hex_rgb(text: str) -> tuple[int, int, int]:
+    try:
+        v = int(text, 16) if len(text) == 6 else 0
+    except ValueError:
+        v = 0
+    return (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF
+
+
+def _pad_paint(hexrgb: str, mode: str) -> str:
+    r, g, b = _hex_rgb(hexrgb)
+    bg = (f"\033[48;2;{r};{g};{b}m" if mode == "24bit"
+          else f"\033[48;5;{rgb_to_256(r, g, b)}m")
+    fg = "\033[30m" if 0.299 * r + 0.587 * g + 0.114 * b > 140 else "\033[97m"
+    return bg + fg
+
+
+def pad_grid_lines(colors: list[str] | None, held: set[int], mode: str) -> list[str]:
+    """The 4x4 pads, two lines a row: the key (and * when held), then the pad number."""
+    out: list[str] = []
+    for r, row in enumerate(PAD_GRID):
+        top, bottom = "  ", "  "
+        for c, idx in enumerate(row):
+            hexrgb = colors[idx] if colors and idx < len(colors) else "000000"
+            first = f" {PAD_KEY_ROWS[r][c]}{'*' if idx in held else ' '}".ljust(PAD_CELL_W)
+            if mode == "none":
+                top += first + " "
+                bottom += f" {hexrgb.upper()}".ljust(PAD_CELL_W) + " "
+            else:
+                paint = _pad_paint(hexrgb, mode)
+                top += f"{paint}{first}\033[0m "
+                bottom += f"{paint}{f' {idx:>2}'.ljust(PAD_CELL_W)}\033[0m "
+        out += [top.rstrip(), bottom.rstrip(), ""]
+    return out[:-1]
+
+
+def pad_for_key(key: str) -> tuple[int, bool] | None:
+    """(pad index, hold) for a key on the pad grid; None for any other key."""
+    if len(key) != 1:
+        return None
+    for r in range(4):
+        if key in PAD_KEY_ROWS[r]:
+            return PAD_GRID[r][PAD_KEY_ROWS[r].index(key)], False
+        if key in PAD_HOLD_ROWS[r]:
+            return PAD_GRID[r][PAD_HOLD_ROWS[r].index(key)], True
+    return None
+
+
+def lease_age(seconds: float) -> str:
+    seconds = max(int(seconds), 0)
+    return f"{seconds} s" if seconds < 60 else f"{seconds // 60} min"
+
+
+def bench_segment(view: dict | None, me: str, now: float) -> str:
+    """`bench: free`, `bench: pidf (firmware_app, 12 min left)`, `bench: yours (…)`, `, you #2`."""
+    if view is None:
+        return "bench: ?"
+    lease, reserved = view.get("lease"), view.get("reserved_for")
+    if lease:
+        left = lease_age(float(lease.get("expires") or now) - now)
+        if lease.get("holder") == me:
+            text = f"bench: yours ({left} left)"
+        else:
+            purpose = f"{lease['purpose']}, " if lease.get("purpose") else ""
+            text = f"bench: {lease.get('holder') or '?'} ({purpose}{left} left)"
+    elif reserved and reserved.get("holder") != me:
+        text = f"bench: held for {reserved.get('holder') or '?'}"
+    else:
+        text = "bench: free"
+    pos = next((q.get("position") for q in view.get("queue") or [] if q.get("holder") == me), None)
+    return text + (f", you #{pos}" if pos else "")
+
+
+def status_line(dev: dict | None, hub: dict | None, bench: dict | None, now: float,
+                me: str) -> str:
+    """`v2 · CDC · bench: free · hub: 2 clients · lease: kit_churn (pid 4121, 3 min)`.
+
+    The bench is the coarse "someone is testing" lease (crosspad-hil bench.py);
+    the hub's lease is its short exclusive op (an OTA, a file transfer).
+    """
+    if dev is None:
+        parts = ["no board"]
+    else:
+        parts = [dev.get("board_rev") or "?", USB_MODE_NAMES.get(dev.get("usb_mode"), "unknown"),
+                 bench_segment(bench, me, now)]
+    if hub is None:
+        parts.append("hub: ?")
+    elif not hub.get("running"):
+        parts.append("hub: off")
+    else:
+        n = len(hub.get("clients") or [])
+        parts.append(f"hub: {n} client{'' if n == 1 else 's'}")
+        lease = hub.get("lease")
+        if lease:
+            since = float(lease.get("since") or now)
+            parts.append(f"lease: {lease.get('purpose') or lease.get('client') or '?'} "
+                         f"(pid {lease.get('pid', '?')}, {lease_age(now - since)})")
+        else:
+            parts.append("lease: -")
+    return " · ".join(parts)
+
+
+def busy_lines(err: HilFailure, now: float) -> list[str]:
+    h = err.holder
+    if h:
+        since = float(h.get("since") or now)
+        who = (f"{h.get('client') or '?'} ({h.get('purpose') or '?'}), "
+               f"pid {h.get('pid', '?')}, for {lease_age(now - since)}")
+    else:
+        who = err.message
+    return [f"  {_C.BYELLOW}The board is busy{_C.RST}",
+            f"  {who}",
+            "",
+            f"  {_C.GRAY}This comes back by itself when it is free.{_C.RST}"]
+
+
+def bench_busy_lines(err: HilFailure | None, view: dict | None, now: float, me: str,
+                     claim_key: str) -> list[str]:
+    """BENCH_BUSY in place of a tab: who has the bench, since when, for how long, the queue.
+
+    The live `bench.status` view wins over the refusal's details, which are as
+    old as the refused request.
+    """
+    d = err.details if err is not None else {}
+    if view is not None:
+        lease, reserved = view.get("lease"), view.get("reserved_for")
+        queue = [q.get("holder") for q in view.get("queue") or []]
+    else:
+        lease = ({k: d.get(k) for k in ("holder", "purpose", "since", "expires")}
+                 if d.get("expires") else None)
+        reserved = ({"holder": d.get("holder"), "until": d.get("reserved_until")}
+                    if d.get("reserved_until") else None)
+        queue = list(d.get("queue") or [])
+    lines = [f"  {_C.BYELLOW}The bench is claimed{_C.RST}"]
+    if lease:
+        purpose = f" ({lease['purpose']})" if lease.get("purpose") else ""
+        since = time.strftime("%H:%M", time.localtime(float(lease.get("since") or now)))
+        left = lease_age(float(lease.get("expires") or now) - now)
+        lines.append(f"  {lease.get('holder') or '?'}{purpose}, since {since}, {left} left")
+    elif reserved:
+        more = lease_age(float(reserved.get("until") or now) - now)
+        lines.append(f"  held for {reserved.get('holder') or '?'}, first in the queue, "
+                     f"for {more} more")
+    elif err is not None:
+        lines.append(f"  {err.message}")
+    if queue:
+        lines.append("  queue: " + ", ".join(f"{h} (you)" if h == me else str(h) for h in queue))
+    action = "leave the queue" if me in queue else "join the queue"
+    return lines + ["", f"  {_C.GRAY}[{claim_key}] {action} — this comes back by itself "
+                        f"when the bench is free.{_C.RST}"]
+
+
+def hil_missing_lines(reason: str = "") -> list[str]:
+    lines = ["  This screen talks to the board through crosspad-hil, "
+             "which is not installed here."]
+    if reason:
+        lines.append(f"  {_C.GRAY}{reason}{_C.RST}")
+    return lines + ["",
+                    "  Install it:",
+                    f"    {_C.BWHITE}pip install {HIL_GIT_URL}{_C.RST}",
+                    "",
+                    "  or run the CrossPad installer again (install.sh, or install.ps1 on",
+                    "  Windows, from crosspad-apps) — it puts crosspad-hil in the project's .venv."]
+
+
+def hil_dead_lines(err: HilFailure) -> list[str]:
+    return [f"  {_C.BRED}{err.message}{_C.RST}",
+            "",
+            "  An older crosspad-hil has no hub. Update it:",
+            f"    {_C.BWHITE}pip install --upgrade {HIL_GIT_URL}{_C.RST}",
+            "",
+            f"  {_C.GRAY}Then leave with Esc and open CrossPad again.{_C.RST}"]
+
+
+TRACE_ACTIONS = (("Heap start", "heap_trace", "START"), ("Heap stop", "heap_trace", "STOP"),
+                 ("Heap dump", "heap_trace", "DUMP"), ("Touch on", "touch_trace", "ON"),
+                 ("Touch off", "touch_trace", "OFF"), ("Touch clear", "touch_trace", "CLEAR"),
+                 ("Touch dump", "touch_trace", "DUMP"))
+TRACE_TIMEOUT_S = 25.0          # the board takes up to 20 s for a dump
+TRACE_KEEP_LINES = 2000
+TRACE_DIR = ".crosspad/traces"
+
+
+def heap_trace_lines(result: dict) -> list[str]:
+    """HEAP_TRACE's trailer, then one line per group of live allocations."""
+    head = " ".join(f"{k}={v}" for k, v in result.items() if k != "groups")
+    lines = [f"  {head}"] if head else []
+    for group in result.get("groups") or []:
+        rest = " ".join(f"{k}={v}" for k, v in group.items() if k != "pc")
+        pcs = ",".join(group.get("pc") or [])
+        lines.append(f"  {rest} pc={pcs}" if pcs else f"  {rest}")
+    return lines if result.get("groups") else lines + ["  (no allocations)"]
+
+
+def touch_trace_lines(result: dict) -> list[str]:
+    """TOUCH_TRACE's counters, then its samples, oldest first."""
+    head = " ".join(f"{k}={v}" for k, v in result.items() if k != "samples")
+    lines = [f"  {head}"] if head else []
+    for s in result.get("samples") or []:
+        lines.append(f"  {s.get('t_ms', 0):>8} ms  {'down' if s.get('pressed') else 'up  '}  "
+                     f"x={s.get('x')} y={s.get('y')}")
+    return lines
+
+
+def save_trace(project_dir: Path, lines: list[str], when: float) -> Path:
+    stamp = datetime.fromtimestamp(when).strftime("%Y%m%d-%H%M%S")
+    path = Path(project_dir) / TRACE_DIR / f"{stamp}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(_ANSI_RE.sub("", line) for line in lines) + "\n", encoding="utf-8")
+    return path
+
+
+SETTINGS_BACKUP_PATH = "/sdcard/crosspad-settings.json"
+FILES_DIR = ".crosspad/files"
+TRANSFER_TIMEOUT_S = 900.0      # a whole kit folder's sample over CDC
+SETTINGS_POLL_S = 0.5
+
+
+def _join_remote(base: str, name: str) -> str:
+    return base.rstrip("/") + "/" + name
+
+
+def fs_entries(result: dict) -> list[dict]:
+    """crosspad-hil fs_list's rows ({name, dir, size}), folders first."""
+    return sorted(result.get("entries") or [], key=lambda e: (not e["dir"], e["name"].lower()))
+
+
+def fs_root_rows(result: dict) -> list[dict]:
+    """crosspad-hil fs_roots' {mount: {total, used}} as rows, in the board's order."""
+    return [{"mount": mount, "total": (v or {}).get("total"), "used": (v or {}).get("used")}
+            for mount, v in (result.get("roots") or {}).items()]
+
+
+def settings_text(st: dict | None) -> str:
+    if not st:
+        return "-"
+    what = {"export": "save", "import": "load"}.get(st.get("op"), "")
+    if st.get("busy"):
+        return f"{what} running…"
+    if st.get("ok") is True:
+        return f"last {what}: ok"
+    if st.get("ok") is False:
+        return f"last {what} failed: {st.get('err') or '?'}"
+    return "nothing saved or loaded since the board started"
+
+
+USB_MODE_LONG = {"default": "CDC — serial and MIDI",
+                 "audio": "USB audio — MIDI, sound in and out, no serial",
+                 "bootloader": "bootloader"}
+USB_SWITCH_TIMEOUT_S = 60.0     # the board re-enumerates; the guard prompt waits 30 s
+
+
+def wifi_text(w: dict | None) -> str:
+    if not w:
+        return "-"
+    parts = [str(w.get("state") or "?")]
+    if w.get("ssid"):
+        parts.append(str(w["ssid"]))
+    if w.get("ip"):
+        parts.append(str(w["ip"]))
+    if w.get("rssi") is not None and w.get("ssid"):
+        parts.append(f"{w['rssi']} dBm")
+    if w.get("enabled") == 0:
+        parts.append("off in settings")
+    return " · ".join(parts)
+
+
+def ble_text(b: dict | None) -> str:
+    if not b:
+        return "-"
+    if not b.get("supported"):
+        return "not on this firmware"
+    if not b.get("running"):
+        return "off"
+    return f"on · {b.get('mode') or '?'} · peer {b.get('peer') or '-'}"
+
+
+class _DeviceScreen:
+    """The CrossPad screen: four tabs over one crosspad-hil serve.
+
+    Nothing here waits on the board. Every request is a Future; tick() starts
+    what is due and collects what has answered, so the key loop reads the
+    terminal every KEY_POLL_S and a slow, busy or absent board never holds a
+    key. A tab is a set of methods found by name -- _<tab>_enter, _<tab>_lines,
+    _<tab>_key, _<tab>_hints -- so each tab is added without touching the core.
+    """
+
+    KEY_POLL_S = 0.05
+    PADS_EVERY_S = 0.2              # 5 Hz
+    HUB_EVERY_S = 1.0
+    DEVICES_EVERY_S = 5.0
+    BUSY_RETRY_S = 1.0
+    CALL_TIMEOUT_S = 10.0           # covers serve's own start on a cold machine
+    PAD_VELOCITY = 100
+    PAD_RELEASE_AFTER_S = 0.12
+    BENCH_EVERY_S = 1.0
+    BENCH_TTL_S = 1800.0            # what the screen claims for; renewed at half of it
+    BENCH_REQUEUE_S = 10.0          # a queued claim asks again this often (the queue forgets the silent)
+    BENCH_PURPOSE = "CP Tools CrossPad screen"
+    _META_KINDS = ("hub", "devices", "bench", "bench_op", "bench_renew")   # not board I/O
+    TIMEOUT_TEXT = "The board did not answer in time — still trying."
+    LEAVE_SETTLE_S = 3.0        # leaving waits this long, in all, for presses and the bench
+    RELEASE_MIN_S = 1.0         # a bench release still gets this much when the budget is spent
+    WAITING_TEXT = "Waiting for the board — keys come back when it is free."
+    _nav_hints = "[c] claim or release the bench   [Tab] next tab   [Esc] back"
+
+    def __init__(self, client, tab: int = DEV_TAB_PADS, project_dir: Path | str = ".",
+                 device: str | None = None, clock=time.monotonic, wall=time.time,
+                 holder: str | None = None):
+        self.client, self.tab = client, tab
+        self.project_dir, self.device = Path(project_dir), device
+        self._clock, self._wall = clock, wall
+        self.holder = holder or bench_holder()
+        self.bench: dict | None = None              # this board's bench.status view
+        self.bench_busy: HilFailure | None = None   # BENCH_BUSY: someone else's test
+        self.bench_want = False                     # the claim key asked for the bench
+        self._claimed_dev: str | None = None        # the board this screen claimed, until given back
+        self.dev: dict | None = None
+        self.devices_known = False
+        self.hub: dict | None = None
+        self.busy: HilFailure | None = None
+        self.dead: HilFailure | None = None
+        self.audio = False
+        self.message = ""
+        self._inflight: dict[str, tuple] = {}       # kind -> (future, on_ok, deadline, on_err)
+        self._fired: list[Future] = []              # pad and knob actions in flight
+        self._next: dict[str, float] = {}           # timer name -> when it is next due
+        self._later: list[tuple[float, object]] = []  # (when, fn), see _after()
+        # Pads
+        self.leds: list[str] | None = None
+        self.ui: dict = {}
+        self.focus: dict = {}
+        self.held: set[int] = set()
+        self._pending_release: set[int] = set()
+        # Trace
+        self.trace_pick = 0
+        self.trace_out: list[str] = []
+        self.trace_top = 0
+        self._pane = 10                             # output rows at the last draw
+        # Files
+        self.cwd: str | None = None                 # None: the list of mounts
+        self.roots: list[dict] = []
+        self.entries: list[dict] = []
+        self.file_pick = 0
+        self.transfer: str | None = None            # what a running pull/push says
+        self.settings: dict | None = None           # the last SETTINGS_STATUS
+        # Connections
+        self.wifi: dict | None = None
+        self.nets: list[str] = []
+        self.net_pick = 0
+        self.ble: dict | None = None
+
+    # -- requests --------------------------------------------------------------
+
+    def _args(self, op: str, args: dict) -> dict:
+        """Every board op names the bench holder (crosspad-hil checks the lease on it)."""
+        if op in HIL_UNBOUND_OPS:
+            return args
+        out = {"holder": self.holder, **args}
+        if self.device:
+            out.setdefault("device", self.device)
+        return out
+
+    def _call(self, kind: str, op: str, args: dict, on_ok, timeout: float | None = None,
+              on_err=None) -> None:
+        """One request per kind at a time; its answer goes to on_ok (or on_err) on a later tick."""
+        if kind in self._inflight:
+            return
+        fut = self.client.submit(op, self._args(op, args))
+        self._inflight[kind] = (fut, on_ok, self._clock() + (timeout or self.CALL_TIMEOUT_S),
+                                on_err)
+
+    def _verb(self, kind: str, verb: str, vargs: dict, on_ok, timeout: float | None = None,
+              on_err=None) -> None:
+        self._call(kind, "cdc.verb", {"verb": verb, "args": vargs}, on_ok, timeout, on_err)
+
+    def _fire(self, verb: str, vargs: dict) -> Future:
+        """A pad or knob action: sent at once, never merged with another; only a failure matters."""
+        fut = self.client.submit("cdc.verb", self._args("cdc.verb", {"verb": verb, "args": vargs}))
+        self._fired.append(fut)
+        return fut
+
+    def _request(self, verb: str, vargs: dict, timeout: float = 5.0):
+        """A verb whose answer the caller waits for (menus, leaving the screen)."""
+        return self.client.request(
+            "cdc.verb", self._args("cdc.verb", {"verb": verb, "args": vargs}), timeout=timeout)
+
+    def _after(self, delay: float, fn) -> None:
+        self._later.append((self._clock() + delay, fn))
+
+    # -- the clock -------------------------------------------------------------
+
+    def tick(self) -> None:
+        now = self._clock()
+        self._schedule(now)
+        self._collect(now)
+
+    def _due(self, name: str, now: float, every: float) -> bool:
+        """True once per `every` on a fixed cadence: a late tick does not push the next one back."""
+        due_at = self._next.get(name, 0.0)
+        if now < due_at:
+            return False
+        self._next[name] = due_at + every if due_at + every > now else now + every
+        return True
+
+    def _schedule(self, now: float) -> None:
+        if self._due("hub", now, self.HUB_EVERY_S):
+            self._call("hub", "hub.status", {}, self._got_hub)
+        if self._due("devices", now, self.DEVICES_EVERY_S):
+            self._call("devices", "devices.list", {}, self._got_devices)
+        if self.dev is not None:
+            self._schedule_bench(now)
+        for item in [x for x in self._later if now >= x[0]]:
+            self._later.remove(item)
+            item[1]()
+        if self._quiet():
+            return
+        if self.busy is not None:
+            if self._due("busy", now, self.BUSY_RETRY_S):
+                self._verb("probe", "ui_state", {}, lambda _r: self._enter_tab())
+            return
+        if self.tab == DEV_TAB_PADS and self._due("pads", now, self.PADS_EVERY_S):
+            self._refresh_pads()
+
+    def _collect(self, now: float) -> None:
+        for kind, (fut, on_ok, deadline, on_err) in list(self._inflight.items()):
+            if fut.done():
+                del self._inflight[kind]
+                try:
+                    result = fut.result()
+                except HilFailure as e:
+                    (on_err or (lambda err, k=kind: self._failed(k, err)))(e)
+                    continue
+                if kind not in self._META_KINDS:
+                    self._board_answered()
+                on_ok(result)
+            elif now > deadline:
+                del self._inflight[kind]
+                err = HilFailure("TIMEOUT", "no answer in time")
+                (on_err or (lambda e, k=kind: self._failed(k, e)))(err)
+        for fut in [f for f in self._fired if f.done()]:
+            self._fired.remove(fut)
+            try:
+                fut.result()
+            except HilFailure as e:
+                self._failed("fired", e)
+
+    def _board_answered(self) -> None:
+        self.busy = None
+        if self.message in (self.TIMEOUT_TEXT, self.WAITING_TEXT):
+            self.message = ""
+
+    def _failed(self, kind: str, err: HilFailure) -> None:
+        if kind == "transfer":
+            self.transfer = None
+        if err.code == HIL_EXITED:
+            self.dead = err
+        elif kind in ("hub", "devices", "bench", "bench_renew"):
+            return              # an older crosspad-hil without these ops: the status line says "?"
+        elif err.code == "BENCH_BUSY":
+            self.bench_busy = err
+        elif err.code == "PORT_BUSY":
+            self.busy = err
+        elif err.code == "NO_DEVICE":
+            self.dev, self.devices_known = None, True
+        elif err.code == "NO_CDC_IN_AUDIO_MODE":
+            self.audio = True
+        elif kind == "focus":
+            self.focus = {}     # no ENC_FOCUS on this firmware, or LVGL busy: focus is optional
+        elif err.code == "TIMEOUT":
+            self.message = self.TIMEOUT_TEXT
+        else:
+            self.message = err.message + (f" — {err.hint}" if err.hint else "")
+
+    def _got_hub(self, result: dict) -> None:
+        self.hub = result
+        if self.busy is not None and self.busy.holder and not result.get("lease"):
+            self.busy = None
+            self._enter_tab()
+
+    def _got_devices(self, result: dict) -> None:
+        was_blocked = self._blocked()
+        devs = result.get("devices") or []
+        pick = [d for d in devs if d.get("id") == self.device]
+        self.dev = (pick or devs or [None])[0]
+        if self.device is None and len(devs) > 1:
+            self.device = self.dev["id"]     # serve refuses an unnamed board when there are two
+        self.devices_known = True
+        self.audio = bool(self.dev) and self.dev.get("usb_mode") == "audio"
+        if was_blocked and not self._blocked():
+            self._enter_tab()
+
+    # -- state -----------------------------------------------------------------
+
+    def _no_device(self) -> bool:
+        return self.devices_known and self.dev is None
+
+    def _quiet(self) -> bool:
+        """Nothing should be asked of the board right now."""
+        return (self.dead is not None or not self.devices_known or self._no_device()
+                or self.bench_busy is not None or self.transfer is not None)
+
+    def _blocked(self) -> bool:
+        return (self._quiet() or self.busy is not None
+                or (self.tab in (DEV_TAB_TRACE, DEV_TAB_FILES) and self.audio))
+
+    def _tab_part(self, part: str):
+        return getattr(self, f"_{_DEV_TAB_NAMES[self.tab]}_{part}", None)
+
+    def _enter_tab(self) -> None:
+        enter = self._tab_part("enter")
+        if enter is not None and not self._blocked():
+            enter()
+
+    def _switch_tab(self, tab: int) -> None:
+        if tab != self.tab:
+            self.tab, self.message = tab, ""
+            self._enter_tab()
+
+    # -- keys ------------------------------------------------------------------
+
+    def handle_key(self, key: str) -> bool:
+        """One key; False when the screen should close."""
+        if key in ("", "resize"):
+            return True
+        on_pads = self.tab == DEV_TAB_PADS
+        if key in ("esc", "ctrl-c") or (key == "q" and not on_pads):
+            return False
+        if key in ("tab", "shift-tab"):
+            self._switch_tab((self.tab + (1 if key == "tab" else -1)) % len(DEV_TABS))
+            return True
+        if not on_pads and key in ("1", "2", "3", "4"):
+            self._switch_tab(int(key) - 1)
+            return True
+        if key == self._claim_key():
+            if self.dev is None:
+                self.message = "No board to claim."
+            else:
+                self._toggle_claim()
+            return True
+        if self._blocked():
+            self.message = self.WAITING_TEXT
+            return True
+        handler = self._tab_part("key")
+        if handler is not None:
+            handler(key)
+        return True
+
+    def leave(self) -> None:
+        """Let go of every pad this screen still holds down, then of the bench it claimed,
+        before serve stops, all within LEAVE_SETTLE_S."""
+        deadline = self._clock() + self.LEAVE_SETTLE_S
+        self._let_go_of_pads(deadline, held_too=True)
+        claim = self._inflight.get("bench_claim")
+        if claim is not None:
+            self._wait(claim[0], deadline)
+        self.bench_want = False
+        if self._claimed_dev is None:
+            return
+        fw = ""
+        if self.dev is not None and self._mine():
+            try:
+                fw = self._firmware_left(self._request("app_sha", {},
+                                                       timeout=self._left(deadline)))
+            except HilFailure:
+                fw = ""
+        try:
+            self.client.request("bench.release", self._args("bench.release", self._bench_args(
+                device=self._claimed_dev, **({"firmware_left": fw} if fw else {}))),
+                timeout=max(self._left(deadline), self.RELEASE_MIN_S))
+        except HilFailure:
+            pass
+        self._claimed_dev = None
+
+    def _left(self, deadline: float) -> float:
+        return max(0.0, deadline - self._clock())
+
+    def _wait(self, fut: Future, deadline: float) -> None:
+        try:
+            fut.result(self._left(deadline))
+        except Exception:  # noqa: BLE001 - only that it settled matters here
+            pass
+
+    def _let_go_of_pads(self, deadline: float, held_too: bool) -> None:
+        """Release the pads a hit left down (and held ones when leaving) once their presses
+        have been answered: serve answers on a pool, so a release must not overtake a press."""
+        pads = set(self._pending_release) | (self.held if held_too else set())
+        if not pads:
+            return
+        for fut in list(self._fired):
+            self._wait(fut, deadline)
+        releases = []
+        for idx in sorted(pads):
+            releases.append(self.client.submit("cdc.verb", self._args(
+                "cdc.verb", {"verb": "pad_release", "args": {"idx": idx}})))
+        for fut in releases:
+            self._wait(fut, deadline)
+        self._pending_release.clear()
+        if held_too:
+            self.held.clear()
+
+    # -- bench lease -------------------------------------------------------------
+    #
+    # BENCH_BUSY is the coarse layer: someone is testing on this board, for
+    # minutes. PORT_BUSY is the hub's short exclusive op. The screen never
+    # claims by itself; the claim key does, and the screen keeps the claim
+    # alive and gives it back when it closes.
+
+    def _claim_key(self) -> str:
+        return "b" if self.tab == DEV_TAB_PADS else "c"     # c is a pad (zxcv) on Pads
+
+    def _bench_args(self, device: str | None = None, **extra) -> dict:
+        return {"device": device or self.dev["id"], "holder": self.holder, **extra}
+
+    def _mine(self) -> bool:
+        lease = (self.bench or {}).get("lease")
+        return bool(lease) and lease.get("holder") == self.holder
+
+    def _bench_blocks_us(self) -> bool:
+        view = self.bench or {}
+        lease, reserved = view.get("lease"), view.get("reserved_for")
+        if lease:
+            return lease.get("holder") != self.holder
+        return bool(reserved) and reserved.get("holder") != self.holder
+
+    def _schedule_bench(self, now: float) -> None:
+        if self._due("bench", now, self.BENCH_EVERY_S):
+            self._call("bench", "bench.status", {"device": self.dev["id"]}, self._got_bench)
+        if not self.bench_want:
+            return
+        if self._claimed_dev is not None and self._mine():
+            if self._due("renew", now, self.BENCH_TTL_S / 2):
+                self._call("bench_renew", "bench.renew",
+                           self._bench_args(device=self._claimed_dev, ttl_s=self.BENCH_TTL_S),
+                           self._got_bench_view)
+        elif self._due("claim", now, self.BENCH_REQUEUE_S):
+            self._claim()
+
+    def _got_bench(self, result: dict) -> None:
+        views = result.get("devices") or []
+        self._got_bench_view(views[0] if views else None)
+
+    def _got_bench_view(self, view: dict | None) -> None:
+        self.bench = view
+        if self.bench_busy is not None and not self._bench_blocks_us():
+            self.bench_busy = None
+            self._enter_tab()
+
+    def _toggle_claim(self) -> None:
+        if self.bench_want or self._claimed_dev is not None:
+            self._release_bench()
+            return
+        self.bench_want = True
+        self._next["claim"] = self._clock() + self.BENCH_REQUEUE_S
+        self._claim()
+
+    def _claim(self) -> None:
+        self._claimed_dev = self._claimed_dev or self.dev["id"]
+        self._call("bench_claim", "bench.claim",
+                   self._bench_args(device=self._claimed_dev, purpose=self.BENCH_PURPOSE,
+                                    ttl_s=self.BENCH_TTL_S),
+                   self._got_claim)
+
+    def _got_claim(self, result: dict) -> None:
+        self._got_bench_view(result)
+        if not self.bench_want:             # given back while the claim was on its way
+            self._send_release("")
+            return
+        if result.get("granted"):
+            self._next["renew"] = self._clock() + self.BENCH_TTL_S / 2
+            self.message = "The bench is yours — other sessions queue until you give it back."
+            return
+        ahead = (result.get("lease") or result.get("reserved_for") or {}).get("holder") or "?"
+        self.message = f"Queued for the bench: #{result.get('position', '?')} behind {ahead}."
+
+    @staticmethod
+    def _firmware_left(app_sha: dict) -> str:
+        sha = str(app_sha.get("sha256") or "")
+        return f"app_sha256 {sha[:16]}" if sha else ""
+
+    def _release_bench(self) -> None:
+        self.bench_want = False
+        if self._claimed_dev is None or "bench_claim" in self._inflight:
+            return                          # _got_claim gives it back when it answers
+        if self.dev is None or not self._mine():
+            self._send_release("")          # only queued: leave the queue
+            return
+        self._verb("sha", "app_sha", {}, lambda r: self._send_release(self._firmware_left(r)),
+                   on_err=lambda _e: self._send_release(""))
+
+    def _send_release(self, fw: str) -> None:
+        self._call("bench_release", "bench.release",
+                   self._bench_args(device=self._claimed_dev,
+                                    **({"firmware_left": fw} if fw else {})),
+                   self._got_release)
+
+    def _got_release(self, result: dict) -> None:
+        self._got_bench_view(result)
+        if not self.bench_want:
+            self._claimed_dev = None
+        self.message = ("Gave the bench back." if result.get("released")
+                        else "Left the bench queue.")
+
+    # -- drawing ---------------------------------------------------------------
+
+    def hints(self) -> str:
+        return self._tab_part("hints") or self._nav_hints
+
+    def render(self, width: int = 80, height: int = 24) -> list[str]:
+        lines = ["  " + status_line(self.dev, self.hub, self.bench, self._wall(), self.holder),
+                 "  " + self._tab_bar(), ""]
+        lines += self._blocking_lines() or self._tab_lines(width, height)
+        if self.message:
+            lines += ["", f"  {_C.BYELLOW}{self.message}{_C.RST}"]
+        return lines
+
+    def _tab_bar(self) -> str:
+        return " ".join(f"{_C.BGCYAN}{_C.BOLD} {name} {_C.RST}" if i == self.tab
+                        else f"{_C.GRAY} {name} {_C.RST}" for i, name in enumerate(DEV_TABS))
+
+    def _blocking_lines(self) -> list[str]:
+        if self.dead is not None:
+            return hil_dead_lines(self.dead)
+        if not self.devices_known:
+            return [f"  {_C.GRAY}Looking for the board…{_C.RST}"]
+        if self._no_device():
+            return ["  No CrossPad connected — plug it in over USB."]
+        if self.bench_busy is not None:
+            return bench_busy_lines(self.bench_busy, self.bench, self._wall(), self.holder,
+                                    self._claim_key())
+        if self.busy is not None:
+            return busy_lines(self.busy, self._wall())
+        if self.tab in (DEV_TAB_TRACE, DEV_TAB_FILES) and self.audio:
+            return [f"  {AUDIO_NOTICE}"]
+        return []
+
+    def _tab_lines(self, width: int, height: int) -> list[str]:
+        lines = self._tab_part("lines")
+        return lines(width, height) if lines is not None else []
+
+    def run(self, tui) -> None:
+        drawn: list[str] | None = None
+        key = ""
+        try:
+            while True:
+                self.tick()
+                cols, rows = _get_size()
+                lines = self.render(cols, rows)
+                if lines != drawn or key == "resize":
+                    with _frame():
+                        _clear()
+                        tui._header("CrossPad", "Developer tools")
+                        for line in lines:
+                            _w(line + "\n")
+                        tui._footer(self.hints())
+                    drawn = lines
+                key = _read_key(self.KEY_POLL_S)
+                if not self.handle_key(key):
+                    return
+                if key not in ("", "resize"):
+                    drawn = None        # a prompt or a menu may have drawn over the frame
+        finally:
+            self.leave()
+
+    # -- Pads ------------------------------------------------------------------
+
+    _pads_hints = ("1234 qwer asdf zxcv  hit a pad   Shift+key  hold, again to let go   "
+                   "← →  turn the knob   [Enter] press the knob   [l] apps   "
+                   "[b] claim or release the bench   [Tab] next tab   [Esc] back")
+
+    def _pads_enter(self) -> None:
+        self._refresh_pads()
+
+    def _refresh_pads(self) -> None:
+        self._verb("leds", "led_state", {}, self._got_leds)
+        self._verb("ui", "ui_state", {}, self._got_ui)
+        self._verb("focus", "enc_focus", {}, self._got_focus)
+
+    def _got_leds(self, result: dict) -> None:
+        self.leds = list(result.get("colors") or [])
+
+    def _got_ui(self, result: dict) -> None:
+        self.ui = result
+
+    def _got_focus(self, result: dict) -> None:
+        self.focus = result
+
+    def _pads_lines(self, width: int, height: int) -> list[str]:
+        focus = self.focus.get("label") or "-"
+        if self.focus.get("editing"):
+            focus += " (editing)"
+        lines = [f"  App {_C.BWHITE}{self.ui.get('app') or '-'}{_C.RST}    "
+                 f"Focus {_C.BWHITE}{focus}{_C.RST}", ""]
+        if self.leds is None:
+            return lines + [f"  {_C.GRAY}reading the pads…{_C.RST}"]
+        lines += pad_grid_lines(self.leds, self.held, color_mode())
+        if self.held:
+            lines += ["", f"  {_C.GRAY}held: "
+                          f"{', '.join(str(i) for i in sorted(self.held))}{_C.RST}"]
+        return lines
+
+    def _pads_key(self, key: str) -> None:
+        pad = pad_for_key(key)
+        if pad is not None:
+            self._hit(*pad)
+        elif key in ("left", "right"):
+            self._fire("enc_rotate", {"delta": -1 if key == "left" else 1})
+        elif key == "enter":
+            self._fire("enc_press", {})
+        elif key == "l":
+            self._apps_menu()
+
+    def _hit(self, idx: int, hold: bool) -> None:
+        """A terminal has no key-up: a key is a hit, Shift+key holds until pressed again."""
+        if idx in self.held:
+            self.held.discard(idx)
+            self._fire("pad_release", {"idx": idx})
+            return
+        press = self._fire("pad_press", {"idx": idx, "vel": self.PAD_VELOCITY})
+        if hold:
+            self.held.add(idx)
+            return
+        self._pending_release.add(idx)
+        self._after(self.PAD_RELEASE_AFTER_S, lambda: self._release_after(idx, press))
+
+    def _release_after(self, idx: int, press: Future) -> None:
+        # serve answers on a pool: a release sent before its press has been
+        # answered could overtake it.
+        if idx not in self._pending_release:
+            return                          # a menu or leaving already let go of it
+        if not press.done():
+            self._after(0.02, lambda: self._release_after(idx, press))
+            return
+        self._pending_release.discard(idx)
+        self._fire("pad_release", {"idx": idx})
+
+    def _apps_menu(self) -> None:
+        # The menu holds the loop: a hit's 120 ms release would wait for it.
+        self._let_go_of_pads(self._clock() + self.LEAVE_SETTLE_S, held_too=False)
+        try:
+            r = self._request("app_list", {})
+        except HilFailure as e:
+            self._failed("apps", e)
+            return
+        apps, running = list(r.get("apps") or []), r.get("running")
+        items = [f"{a}{'   (running)' if a == running else ''}" for a in apps]
+        idx = _menu_select("Apps on the board", items + ["Stop the running app"])
+        if idx < 0:
+            return
+        try:
+            if idx == len(apps):
+                self._request("app_stop", {})
+            else:
+                self._request("app_start", {"name": apps[idx]}, timeout=8.0)
+        except HilFailure as e:
+            self._failed("apps", e)
+
+    # -- Trace -----------------------------------------------------------------
+
+    _trace_hints = ("← →  pick   [Enter] run   ↑ ↓ PgUp PgDn Home End  scroll   "
+                    "[s] save to a file   [c] claim or release the bench   "
+                    "1-4 or [Tab] tabs   [q] back")
+
+    def _trace_lines(self, width: int, height: int) -> list[str]:
+        picks = " ".join(f"{_C.BGCYAN}{_C.BOLD} {label} {_C.RST}" if i == self.trace_pick
+                         else f" {label} " for i, (label, _verb, _what) in enumerate(TRACE_ACTIONS))
+        self._pane = max(height - 14, 3)
+        lines = ["  " + picks, ""]
+        if "trace" in self._inflight:
+            lines.append(f"  {_C.GRAY}running…{_C.RST}")
+        shown = self.trace_out[self.trace_top:self.trace_top + self._pane]
+        return lines + (shown or [f"  {_C.GRAY}Pick a trace and press Enter; "
+                                  f"its output lands here.{_C.RST}"])
+
+    def _trace_key(self, key: str) -> None:
+        last = max(len(self.trace_out) - self._pane, 0)
+        if key in ("left", "right"):
+            step = 1 if key == "right" else -1
+            self.trace_pick = (self.trace_pick + step) % len(TRACE_ACTIONS)
+        elif key == "enter":
+            label, verb, what = TRACE_ACTIONS[self.trace_pick]
+            self._verb("trace", verb, {"what": what},
+                       lambda r, l=label, v=verb: self._got_trace(l, v, r),
+                       timeout=TRACE_TIMEOUT_S)
+        elif key in ("home", "end"):
+            self.trace_top = 0 if key == "home" else last
+        elif key in ("up", "down", "pgup", "pgdn"):
+            step = {"up": -1, "down": 1, "pgup": -self._pane, "pgdn": self._pane}[key]
+            self.trace_top = min(max(self.trace_top + step, 0), last)
+        elif key == "s":
+            if not self.trace_out:
+                self.message = "Nothing to save yet."
+                return
+            path = save_trace(self.project_dir, self.trace_out, self._wall())
+            self.message = f"Saved {path.relative_to(self.project_dir).as_posix()}"
+
+    def _got_trace(self, label: str, verb: str, result: dict) -> None:
+        stamp = datetime.fromtimestamp(self._wall()).strftime("%H:%M:%S")
+        body = heap_trace_lines(result) if verb == "heap_trace" else touch_trace_lines(result)
+        self.trace_out = (self.trace_out + [f"  {_C.BCYAN}── {label} {stamp}{_C.RST}"]
+                          + body)[-TRACE_KEEP_LINES:]
+        self.trace_top = max(len(self.trace_out) - self._pane, 0)
+
+    # -- Files -----------------------------------------------------------------
+
+    _files_hints = ("↑ ↓  pick   [Enter] open   ← back up   [p] pull to this computer   "
+                    "[u] push a file here   [n] new folder   [x] delete   "
+                    "[e] save settings to the card   [i] load settings from the card   "
+                    "[r] refresh   [c] claim or release the bench   1-4 or [Tab] tabs   [q] back")
+
+    def _files_enter(self) -> None:
+        self._files_refresh()
+        self._verb("settings", "settings_status", {}, self._got_settings)
+
+    def _files_refresh(self) -> None:
+        path = self.cwd
+        if path is None:
+            self._verb("fs:", "fs_roots", {}, self._got_roots)
+        else:
+            self._verb(f"fs:{path}", "fs_list", {"path": path},
+                       lambda r, p=path: self._got_list(p, r))
+
+    def _got_roots(self, result: dict) -> None:
+        self.roots = fs_root_rows(result)
+        self.file_pick = min(self.file_pick, max(len(self.roots) - 1, 0))
+
+    def _got_list(self, path: str, result: dict) -> None:
+        if path != self.cwd:
+            return              # an answer for a folder already left
+        self.entries = fs_entries(result)
+        self.file_pick = min(self.file_pick, max(len(self.entries) - 1, 0))
+
+    def _files_lines(self, width: int, height: int) -> list[str]:
+        if self.cwd is None:
+            lines = [f"  {_C.GRAY}On the board{_C.RST}"]
+            for i, r in enumerate(self.roots):
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == self.file_pick else " "
+                size = (f"{_TUI._fmt_size(r['used'])} used of {_TUI._fmt_size(r['total'])}"
+                        if r["total"] is not None and r["used"] is not None else "not mounted")
+                lines.append(f"  {mark} {r['mount']:<12} {_C.GRAY}{size}{_C.RST}")
+        else:
+            lines = [f"  {_C.BWHITE}{self.cwd}{_C.RST}"]
+            start, end = _viewport(self.file_pick, len(self.entries), max(height - 16, 3))
+            for i in range(start, end):
+                e = self.entries[i]
+                mark = f"{_C.BYELLOW}>{_C.RST}" if i == self.file_pick else " "
+                name = e["name"] + ("/" if e["dir"] else "")
+                size = "" if e["dir"] else _TUI._fmt_size(e["size"])
+                lines.append(f"  {mark} {name:<40} {_C.GRAY}{size}{_C.RST}")
+            if not self.entries:
+                lines.append(f"    {_C.GRAY}(empty){_C.RST}")
+        if self.transfer:
+            lines += ["", f"  {_C.BCYAN}{self.transfer}{_C.RST}"]
+        path = (self.settings or {}).get("path") or SETTINGS_BACKUP_PATH
+        return lines + ["", f"  {_C.GRAY}Settings backup{_C.RST}  {path}  "
+                            f"{settings_text(self.settings)}"]
+
+    def _files_key(self, key: str) -> None:
+        rows = self.roots if self.cwd is None else self.entries
+        if key in ("up", "down") and rows:
+            self.file_pick = (self.file_pick + (1 if key == "down" else -1)) % len(rows)
+        elif key == "enter" and rows:
+            row = rows[self.file_pick]
+            if self.cwd is None:
+                self._open_dir(row["mount"])
+            elif row["dir"]:
+                self._open_dir(_join_remote(self.cwd, row["name"]))
+        elif key in ("left", "backspace"):
+            self._up_dir()
+        elif key == "r":
+            self._files_refresh()
+        elif key == "e":
+            self._verb("settings_op", "settings_export", {}, self._settings_started)
+        elif key == "i":
+            if _confirm(f"Load the settings in {SETTINGS_BACKUP_PATH} into the board?"):
+                self._verb("settings_op", "settings_import", {"path": SETTINGS_BACKUP_PATH},
+                           self._settings_started)
+        elif self.cwd is None:
+            return
+        elif key == "p" and rows:
+            self._pull(rows[self.file_pick])
+        elif key == "u":
+            self._push()
+        elif key == "n":
+            self._mkdir()
+        elif key == "x" and rows:
+            self._delete(rows[self.file_pick])
+
+    def _open_dir(self, path: str | None) -> None:
+        self.cwd, self.entries, self.file_pick = path, [], 0
+        self._files_refresh()
+
+    def _up_dir(self) -> None:
+        if self.cwd is None:
+            return
+        parent = self.cwd.rstrip("/").rsplit("/", 1)[0]
+        mounts = {r["mount"] for r in self.roots}
+        self._open_dir(None if self.cwd in mounts or not parent else parent)
+
+    def _transfer(self, op: str, args: dict, text: str, on_ok) -> None:
+        """fs.pull / fs.push: hil takes the board's lease itself for as long as it runs."""
+        self.transfer = text
+        self._call("transfer", op, args, on_ok, timeout=TRANSFER_TIMEOUT_S)
+
+    def _transferred(self, text: str, result: dict) -> None:
+        self.transfer = None
+        n, secs = result.get("bytes"), result.get("seconds")
+        self.message = text + (f" ({_TUI._fmt_size(n)} in {secs:.1f} s)"
+                               if n is not None and secs else "")
+        self._files_refresh()
+
+    def _pull(self, row: dict) -> None:
+        if row["dir"]:
+            self.message = "Pick a file — folders are not pulled."
+            return
+        local = _text_input("Save as", str(self.project_dir / FILES_DIR / row["name"]))
+        if not local:
+            return
+        local = os.path.expanduser(local)
+        Path(local).parent.mkdir(parents=True, exist_ok=True)
+        self._transfer("fs.pull", {"remote": _join_remote(self.cwd, row["name"]), "local": local},
+                       f"Pulling {row['name']}…", lambda r, l=local: self._transferred(f"Saved {l}", r))
+
+    def _push(self) -> None:
+        local = _text_input("File to send", "")
+        if not local:
+            return
+        local = os.path.expanduser(local)
+        if not os.path.isfile(local):
+            self.message = f"No such file: {local}"
+            return
+        name = os.path.basename(local)
+        self._transfer("fs.push", {"local": local, "remote": _join_remote(self.cwd, name)},
+                       f"Pushing {name}…", lambda r, n=name: self._transferred(f"Sent {n}", r))
+
+    def _mkdir(self) -> None:
+        name = _text_input("New folder name", "")
+        if not name:
+            return
+        if "/" in name:
+            self.message = "A folder name has no '/'."
+            return
+        path = _join_remote(self.cwd, name)
+        self._verb(f"mkdir:{path}", "fs_mkdir", {"path": path}, lambda _r: self._files_refresh())
+
+    def _delete(self, row: dict) -> None:
+        path = _join_remote(self.cwd, row["name"])
+        if _confirm(f"Delete {path} from the board?"):
+            self._verb(f"rm:{path}", "fs_delete", {"path": path}, lambda _r: self._files_refresh())
+
+    def _settings_started(self, _result: dict) -> None:
+        self._verb("settings", "settings_status", {}, self._got_settings)
+
+    def _got_settings(self, result: dict) -> None:
+        self.settings = result
+        if result.get("busy"):
+            self._after(SETTINGS_POLL_S, lambda: self._verb(
+                "settings", "settings_status", {}, self._got_settings))
+
+    # -- Connections -----------------------------------------------------------
+
+    _conn_hints = ("[u] switch the USB profile   ↑ ↓  pick a network   [n] add a network   "
+                   "[x] forget it   [b] Bluetooth on/off   [r] refresh   "
+                   "[c] claim or release the bench   1-4 or [Tab] tabs   [q] back")
+
+    def _conn_enter(self) -> None:
+        self._verb("wifi", "wifi_status", {}, self._got_wifi)
+        self._verb("nets", "wifi_list", {}, self._got_nets)
+        self._verb("ble", "ble_status", {}, self._got_ble)
+
+    def _got_wifi(self, result: dict) -> None:
+        self.wifi = result
+
+    def _got_nets(self, result) -> None:
+        self.nets = list(result) if isinstance(result, list) else list(result.get("nets") or [])
+        self.net_pick = min(self.net_pick, max(len(self.nets) - 1, 0))
+
+    def _got_ble(self, result: dict) -> None:
+        self.ble = result
+
+    def _conn_lines(self, width: int, height: int) -> list[str]:
+        mode = (self.dev or {}).get("usb_mode")
+        other = USB_MODE_NAMES["audio" if mode == "default" else "default"]
+        lines = [f"  {_C.BWHITE}USB{_C.RST}        {USB_MODE_LONG.get(mode, 'unknown')}   "
+                 f"{_C.GRAY}[u] switch to {other}{_C.RST}",
+                 f"             {_C.GRAY}A board with the serial guard on asks on its screen "
+                 f"first — press Allow there.{_C.RST}",
+                 "",
+                 f"  {_C.BWHITE}WiFi{_C.RST}       {wifi_text(self.wifi)}"]
+        for i, net in enumerate(self.nets):
+            mark = f"{_C.BYELLOW}>{_C.RST}" if i == self.net_pick else " "
+            lines.append(f"           {mark} {net}")
+        if not self.nets:
+            lines.append(f"             {_C.GRAY}no saved networks{_C.RST}")
+        return lines + ["", f"  {_C.BWHITE}Bluetooth{_C.RST}  {ble_text(self.ble)}"]
+
+    def _conn_key(self, key: str) -> None:
+        if key == "u":
+            self._switch_usb()
+        elif key in ("up", "down") and self.nets:
+            self.net_pick = (self.net_pick + (1 if key == "down" else -1)) % len(self.nets)
+        elif key == "n":
+            self._add_net()
+        elif key == "x" and self.nets:
+            ssid = self.nets[self.net_pick]
+            if _confirm(f"Forget the network {ssid}?"):
+                self._verb("wifi_forget", "wifi_forget", {"ssid": ssid},
+                           lambda _r: self._conn_enter())
+        elif key == "b" and self.ble is not None:
+            self._verb("ble_enable", "ble_enable", {"on": not self.ble.get("running")},
+                       lambda _r: self._conn_enter())
+        elif key == "r":
+            self._conn_enter()
+
+    def _switch_usb(self) -> None:
+        mode = (self.dev or {}).get("usb_mode")
+        target = "audio" if mode == "default" else "default"
+        if not _confirm(f"Switch the board to {USB_MODE_NAMES[target]}? It reconnects; a board "
+                        f"with the serial guard asks on its screen"):
+            return
+        self.message = "Switching — press Allow on the board if it asks."
+        self._call("usbmode", "usbmode.set", {"mode": target}, self._got_usbmode,
+                   timeout=USB_SWITCH_TIMEOUT_S)
+
+    def _got_usbmode(self, dev: dict) -> None:
+        self.dev = dev
+        self.audio = dev.get("usb_mode") == "audio"
+        self.message = f"The board is in {USB_MODE_NAMES.get(dev.get('usb_mode'), 'unknown')} now."
+        self._next["devices"] = 0.0
+
+    def _add_net(self) -> None:
+        ssid = _text_input("Network name", "")
+        if not ssid:
+            return
+        password = _text_input("Password (empty for an open network)", "")
+        if password is None:
+            return
+        if password and len(password) < 8:
+            self.message = "A WiFi password has at least 8 characters."
+            return
+        self._verb("wifi_set", "wifi_set", {"ssid": ssid, "password": password},
+                   lambda _r: self._conn_enter())
+
+
+# -- STM tracer ----------------------------------------------------------------
+#
+# A shortcut only: crosspad-trace (crosspad-mcp) checks the ST-Link, starts the
+# SWD session and its page on :7373 and opens the browser. CP Tools runs it,
+# shows what it prints, and stops it the way Ctrl+C would.
+
+TRACER_TAIL_LINES = 15
+TRACER_MISSING_LINES = (
+    "  The STM tracer (crosspad-trace) is not installed here.",
+    "",
+    "  It comes with crosspad-mcp:",
+    "    git clone https://github.com/CrossPad/crosspad-mcp ~/GIT/crosspad-mcp",
+    "    cd ~/GIT/crosspad-mcp && npm install && npm run build",
+    "",
+    "  CP Tools then runs ~/GIT/crosspad-mcp/dist/trace-cli.js with node,",
+    "  or crosspad-trace itself once it is on PATH.",
+)
+
+
+def find_trace_cli(home: Path | None = None) -> list[str] | None:
+    """crosspad-trace on PATH, else node + ~/GIT/crosspad-mcp/dist/trace-cli.js; CROSSPAD_TRACE overrides."""
+    forced = os.environ.get("CROSSPAD_TRACE")
+    if forced is not None:
+        return [forced] if forced and os.path.isfile(forced) else None
+    exe = shutil.which("crosspad-trace")
+    if exe:
+        return [exe]
+    script = (home or Path.home()) / "GIT" / "crosspad-mcp" / "dist" / "trace-cli.js"
+    node = shutil.which("node")
+    if node and script.is_file():
+        return [node, str(script)]
+    return None
+
+
+def tracer_verdict(rc: int | None, tail: list[str], stopped: bool) -> list[str]:
+    """What to say when crosspad-trace ends: 1 = the probe or its check, 2 = the tools."""
+    if stopped:
+        return ["  The tracer stopped."]
+    last = [f"  {_C.GRAY}{line}{_C.RST}" for line in tail[-TRACER_TAIL_LINES:]]
+    if rc == 0:
+        return ["  The tracer finished:", ""] + last
+    if rc == 1:
+        head = "The tracer could not reach the STM32 — its check says:"
+    elif rc == 2:
+        head = "The tracer's tools are not set up — its check says:"
+    else:
+        head = f"The tracer stopped with exit code {rc}:"
+    return [f"  {_C.BRED}{head}{_C.RST}", ""] + last
+
+
+class _TracerRun:
+    """crosspad-trace as a child: its output kept, stopped the way Ctrl+C stops it."""
+
+    KEEP_LINES = 200
+
+    def __init__(self, argv: list[str]):
+        self.argv = list(argv)
+        self.proc: subprocess.Popen | None = None
+        self._tail: collections.deque = collections.deque(maxlen=self.KEEP_LINES)
+        self._pump_t: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.proc = subprocess.Popen(
+            self.argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            bufsize=1, **_own_group())
+        self._pump_t = threading.Thread(target=self._pump, daemon=True)
+        self._pump_t.start()
+
+    def _pump(self) -> None:
+        for raw in self.proc.stdout:
+            self._tail.append(_scrub(raw.rstrip("\r\n")))
+
+    def poll(self) -> int | None:
+        rc = self.proc.poll()
+        if rc is not None:
+            self._pump_t.join(1.0)
+        return rc
+
+    def lines(self) -> list[str]:
+        return list(self._tail)
+
+    def stop(self, grace: float = 5.0) -> int | None:
+        if self.proc.poll() is None:
+            try:
+                if sys.platform == "win32":
+                    self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    os.killpg(self.proc.pid, signal.SIGINT)
+                self.proc.wait(grace)
+            except (OSError, subprocess.TimeoutExpired):
+                _kill_tree(self.proc)
+        self._pump_t.join(1.0)
+        return self.proc.returncode
+
 
 class _TUI:
     """Interactive TUI for CrossPad App Manager."""
@@ -5877,6 +7428,10 @@ class _TUI:
         if getattr(self.config, "board_revs", None):
             entries.insert(4, ("Board", "choose the board revision to build for",
                                lambda: self._choose_board()))
+        if self.config.platform == "esp-idf":
+            entries.insert(2, ("CrossPad", "pads, encoder, apps, files, WiFi, Bluetooth — "
+                                           "the board from here", lambda: self._crosspad_screen()))
+            entries.insert(3, ("Tracer", "STM over SWD, ESP heap and touch", self._tracer_menu))
         return entries
 
     def _submit_flow(self):
@@ -6228,6 +7783,78 @@ class _TUI:
                 return
             if key == "r":
                 report = None
+
+    def _crosspad_screen(self, tab: int = DEV_TAB_PADS):
+        """The board itself, through one crosspad-hil serve held for this screen."""
+        try:
+            client = self.mgr.hil_open()
+        except HilFailure as e:
+            _clear()
+            self._header("CrossPad", "Developer tools")
+            reason = "" if e.code == HIL_MISSING and "not installed" in e.message else e.message
+            for line in hil_missing_lines(reason):
+                _w(line + "\n")
+            self._footer("any key: back")
+            _read_key_blocking()
+            return
+        try:
+            _DeviceScreen(client, tab=tab, project_dir=self.mgr.project_dir,
+                          device=self.mgr.chosen_device).run(self)
+        finally:
+            self.mgr.hil_close()
+
+    def _tracer_menu(self):
+        while True:
+            idx = _menu_select("Tracer", ["STM (SWD)", "ESP (CDC)"],
+                               ["live STM32 variables over an ST-Link, in the browser",
+                                "heap and touch traces off the ESP: CrossPad → Trace"])
+            if idx < 0:
+                return
+            if idx == 0:
+                self._tracer_stm()
+            else:
+                self._crosspad_screen(tab=DEV_TAB_TRACE)
+
+    def _tracer_stm(self):
+        argv = find_trace_cli()
+        if argv is None:
+            _clear()
+            self._header("STM tracer")
+            for line in TRACER_MISSING_LINES:
+                _w(line + "\n")
+            _pause()
+            return
+        run = _TracerRun(argv)
+        try:
+            run.start()
+        except OSError as e:
+            self._toast_here(f"crosspad-trace did not start: {e}")
+            return
+        stopped = False
+        try:
+            while run.poll() is None:
+                with _frame():
+                    _clear()
+                    self._header("STM tracer", "SWD · http://localhost:7373")
+                    _w("\n")
+                    for line in run.lines()[-max(_get_size()[1] - 8, 3):]:
+                        _w(f"  {_C.DIM}{line[:self._cols - 4]}{_C.RST}\n")
+                    self._footer("[q] stop the tracer")
+                if _read_key(0.25) in ("q", "esc", "ctrl-c"):
+                    stopped = True
+                    break
+        except KeyboardInterrupt:
+            stopped = True
+        except BaseException:
+            run.stop()              # it holds the ST-Link and :7373 in its own session
+            raise
+        rc = run.stop() if stopped else run.poll()
+        _clear()
+        self._header("STM tracer")
+        for line in tracer_verdict(rc, run.lines(), stopped):
+            _w(line + "\n")
+        _pause()
+
 
     # -- Browse ---------------------------------------------------------------
 
