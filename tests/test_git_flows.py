@@ -13,11 +13,27 @@ def git(cwd, *args):
                           capture_output=True, text=True).stdout.strip()
 
 
-@pytest.fixture
-def project(tmp_path, monkeypatch):
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+def no_git_identity(tmp_path, monkeypatch):
+    """Git as a musician (or a CI runner) has it: no name or email set up.
+    useConfigOnly stops git guessing one from the host name, which works on
+    some machines and not others."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for var in ("NAME", "EMAIL"):
+        for who in ("AUTHOR", "COMMITTER"):
+            monkeypatch.delenv(f"GIT_{who}_{var}", raising=False)
+    monkeypatch.delenv("EMAIL", raising=False)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "user.useConfigOnly")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "true")
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    no_git_identity(tmp_path, monkeypatch)
     app = tmp_path / "crosspad-sampler"
     app.mkdir()
     git(app, "init", "-q", "-b", "main")
@@ -130,6 +146,16 @@ def test_carry_rebases_your_commits_onto_the_update(app_behind):
     assert git(sub, "log", "-1", "--format=%s") == "my change"
 
 
+def test_carry_rebase_keeps_your_own_name_on_the_commits(app_behind):
+    mgr, sub, upstream = app_behind
+    git(sub, "config", "user.name", "Me")
+    git(sub, "config", "user.email", "me@example.com")
+    (sub / "b.txt").write_text("mine\n")
+    git(sub, "commit", "-qam", "my change")
+    assert mgr.update(app_name="sampler", carry=True) == []
+    assert git(sub, "log", "-1", "--format=%cn <%ce>") == "Me <me@example.com>"
+
+
 def test_carry_leaves_clashing_commits_where_they_were(app_behind):
     mgr, sub, upstream = app_behind
     (sub / "a.txt").write_text("mine")
@@ -144,9 +170,7 @@ def test_carry_leaves_clashing_commits_where_they_were(app_behind):
 @pytest.fixture
 def behind(tmp_path, monkeypatch):
     """A project clone two commits behind origin, with an app submodule."""
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
+    no_git_identity(tmp_path, monkeypatch)
     app = tmp_path / "crosspad-sampler"
     app.mkdir()
     git(app, "init", "-q", "-b", "main")
