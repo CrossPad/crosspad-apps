@@ -29,9 +29,9 @@ $IdfTools    = "C:\esp\.espressif"           # short, ASCII-only: user names bre
 $IdfVersion  = "v5.5.5"
 $Repo        = "CrossPad/platform-idf"
 $PcDir       = Env-Or "CROSSPAD_PC_DIR" "C:\CrossPad-PC"
-# The simulator and the Arduino version live on their development branches:
-# master/main there predate the app manager and the 2.0 board.
-$PcBranch    = Env-Or "CROSSPAD_PC_BRANCH" "feat/virtual-audio-on-pipeline"
+$PcBranch    = Env-Or "CROSSPAD_PC_BRANCH" "master"
+# The Arduino version lives on its development branch: main there predates
+# the app manager and the 2.0 board.
 $ArduinoDir  = Env-Or "CROSSPAD_ARDUINO_DIR" "C:\CrossPad-Arduino"
 $ArduinoBranch = Env-Or "CROSSPAD_ARDUINO_BRANCH" "feat/audio-module-arduino"
 $WithPc      = [bool]$env:CROSSPAD_WITH_PC
@@ -514,7 +514,7 @@ if ($WithPc) {
         if (Clone-Or-Update $PcDir "CrossPad/crosspad-pc" $PcBranch) {
             Ok "crosspad-pc in $PcDir"
             # build.bat names Visual Studio Community; vswhere finds any edition.
-            cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_FREERTOS=ON && cmake --build build" *> "$tmp\pc-build.log"
+            cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug && cmake --build build" *> "$tmp\pc-build.log"
             if ($LASTEXITCODE -eq 0 -and (Test-Path "$PcDir\bin\CrossPad.exe")) { Ok "the simulator is built - start it with: crosspad-sim" }
             else { Bad "the PC simulator did not build" "details in $tmp\pc-build.log - send it on Discord (#support)" }
         } else { Bad "crosspad-pc did not download" "check the connection and run this again" }
