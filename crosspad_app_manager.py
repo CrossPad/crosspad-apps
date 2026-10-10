@@ -665,6 +665,21 @@ class AppManager:
             return subprocess.run(cmd, check=check, capture_output=True, text=True)
         return subprocess.run(cmd, check=check)
 
+    @staticmethod
+    def _committer_args(repo) -> tuple:
+        """`-c` options that let a rebase write commits in `repo`.
+
+        A rebase records a committer on every commit it replays; with no
+        user.name/user.email (a fresh machine, a CI runner) git refuses, and
+        the rebase looks like a clash. Whoever is set up stays the committer —
+        the stand-in is only for when nobody is.
+        """
+        known = subprocess.run(["git", "-C", str(repo), "var", "GIT_COMMITTER_IDENT"],
+                               capture_output=True, text=True, check=False)
+        if known.returncode == 0:
+            return ()
+        return ("-c", "user.name=cptools", "-c", "user.email=cptools@localhost")
+
     def _get_submodule_commit(self, path: str) -> str:
         result = self._git("submodule", "status", path, check=False, capture=True)
         if result.returncode == 0 and result.stdout.strip():
@@ -1940,7 +1955,8 @@ class AppManager:
                       "stash", "push", "--quiet", "-m", "cptools: project update", "--", *carry,
                       check=False, capture=True)
         if ahead:
-            moved = self._git(*no_recurse, "rebase", "--quiet", "@{u}", check=False, capture=True)
+            moved = self._git(*no_recurse, *self._committer_args(self.project_dir),
+                              "rebase", "--quiet", "@{u}", check=False, capture=True)
             if moved.returncode != 0:
                 self._git(*no_recurse, "rebase", "--abort", check=False, capture=True)
                 if carry:
@@ -3310,7 +3326,9 @@ class AppManager:
                 r = self._sub_git(install_path, "merge", "--ff-only",
                                   f"origin/{ref}")
                 if r.returncode != 0 and carrying:
-                    r = self._sub_git(install_path, "rebase", "--quiet", f"origin/{ref}")
+                    r = self._sub_git(install_path,
+                                      *self._committer_args(self.project_dir / install_path),
+                                      "rebase", "--quiet", f"origin/{ref}")
                     if r.returncode != 0:
                         self._sub_git(install_path, "rebase", "--abort")
                 if r.returncode != 0:
