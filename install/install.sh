@@ -28,9 +28,9 @@ IDF_DIR="${CROSSPAD_IDF_DIR:-$HOME/esp/esp-idf}"
 IDF_VERSION="v5.5.5"          # what CI builds with
 IDF_TARGET="esp32s3"
 PC_DIR="${CROSSPAD_PC_DIR:-$HOME/CrossPad-PC}"
-# The simulator and the Arduino version live on their development branches:
-# master/main there predate the app manager and the 2.0 board.
-PC_BRANCH="${CROSSPAD_PC_BRANCH:-feat/virtual-audio-on-pipeline}"
+PC_BRANCH="${CROSSPAD_PC_BRANCH:-master}"
+# The Arduino version lives on its development branch: main there predates
+# the app manager and the 2.0 board.
 ARDUINO_DIR="${CROSSPAD_ARDUINO_DIR:-$HOME/CrossPad-Arduino}"
 ARDUINO_BRANCH="${CROSSPAD_ARDUINO_BRANCH:-feat/audio-module-arduino}"
 WITH_PC="${CROSSPAD_WITH_PC:-}"
@@ -582,7 +582,7 @@ if [ -n "$WITH_PC" ]; then
     fi
     if clone_or_update "$PC_DIR" "CrossPad/crosspad-pc" "$PC_BRANCH"; then
         ok "crosspad-pc in $PC_DIR"
-        if (cd "$PC_DIR" && cmake -B build -G Ninja -DUSE_FREERTOS=ON -DCMAKE_BUILD_TYPE=Debug \
+        if (cd "$PC_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
                 && cmake --build build) >/tmp/crosspad-pc-build.log 2>&1 && [ -x "$PC_DIR/bin/CrossPad" ]; then
             ok "the simulator is built — start it with: crosspad-sim"
         else
