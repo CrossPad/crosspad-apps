@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 """CrossPad App Package Manager — shared core.
 
 Platform-agnostic app management logic. Each platform repo provides
