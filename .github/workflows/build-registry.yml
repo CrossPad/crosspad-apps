@@ -2,11 +2,18 @@ name: Build App Registry
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+    - cron: '0 */6 * * *'  # Every 6 hours (backstop)
   workflow_dispatch:        # Manual trigger
+  repository_dispatch:      # an app repo released a version (app-release.yml)
+    types: [app-released]
   push:
     branches: [main]
     paths: ['build_registry.py', 'external-apps.json']
+
+# Every run rebuilds every app, so GitHub replacing a pending run loses nothing.
+concurrency:
+  group: registry
+  cancel-in-progress: false
 
 jobs:
   build:
