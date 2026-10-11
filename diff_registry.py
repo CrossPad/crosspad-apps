@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare old and new registry.json, output change details for CI.
 
-Sets GitHub Actions outputs as JSON arrays for rich Discord embeds:
+Sets GitHub Actions outputs (JSON arrays) describing the change; nothing
+consumes them today:
   new_apps_json       — JSON array of {name, version, description, platforms, repo}
   new_platforms_json   — JSON array of {name, version, gained, all_platforms, repo}
   version_updates_json — JSON array of {name, old_version, new_version, repo}

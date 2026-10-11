@@ -62,10 +62,11 @@ Answer them and the rest runs without you.
 
 ![Both questions answered with y, steps 1 and 2 already done](img/win-7-extras.png)
 
-### 3. Sign in to GitHub (once)
+### 3. Sign in to GitHub (if it asks)
 
-Early on (step 2) the installer shows a **one-time code** — it is already
-copied for you. Press **Enter**: your browser opens GitHub. Sign in if it asks,
+Only while the CrossPad project is private: when the installer cannot reach the
+project without an account, early on (step 2) it shows a **one-time code** — it
+is already copied for you. Press **Enter**: your browser opens GitHub. Sign in if it asks,
 press **Ctrl+V** to paste the code, and click **Continue**, then
 **Authorize**. Come back to the PowerShell window — it carries on by itself.
 Next time it remembers you.
@@ -79,7 +80,8 @@ one ends with a green **[OK]**. The longest is step 4, ESP-IDF — about 15
 minutes. **An ESP-IDF 5.5.x you already have** (from the VS Code extension, the
 Espressif installer, or your own folder) is found and used as it is, the newest
 one if there are several. CrossPad needs 5.5.4 or newer, so update an older 5.5
-first. One of another version (6.x is not supported) is left alone, and the
+first ([how](https://crosspad.app/docs/how-to/esp-idf-versions/)), or point
+`CROSSPAD_IDF_DIR` at a 5.5.4+ folder (see the options at the end). One of another version (6.x is not supported) is left alone, and the
 installer puts v5.5.5 in `C:\esp\esp-idf` (Mac/Linux: `~/esp/esp-idf`), or next
 to it in `C:\esp\esp-idf-v5.5` (`~/esp/esp-idf-v5.5`) when that folder is
 taken. The installer also sets up **VS Code** (with the ESP-IDF extension and
@@ -123,7 +125,7 @@ From now on, open **CP Tools** from the shortcut on your desktop.
 3. Type your computer password when asked (it installs a few system tools).
    On a Mac, if a window asks to install the *Command Line Tools*, click
    **Install**, wait, then paste the line again.
-4. Sign in to GitHub when the code appears (same as step 3 above).
+4. If a code appears, sign in to GitHub (same as step 3 above).
 5. Wait for **All set**. It looks like this:
 
    ```
@@ -319,7 +321,7 @@ Set these before running the install line:
 | `CROSSPAD_PC_DIR`, `CROSSPAD_ARDUINO_DIR` | `C:\CrossPad-PC`, `~/CrossPad-PC`; `C:\CrossPad-Arduino`, `~/CrossPad-Arduino` | where they go |
 | `CROSSPAD_YES=1` | | answer yes to every question (the PC and Arduino extras stay off) |
 | `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_VSCODE=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, VS Code, the AI-assistant tools, or opening CP Tools at the end |
-| `IDF_TOOLS_PATH` | `~/.espressif` | Mac/Linux only: where ESP-IDF's tools go. Windows always uses `C:\esp\.espressif` |
+| `IDF_TOOLS_PATH` | `~/.espressif` | Mac/Linux only: where the tools of the ESP-IDF the installer makes go. On Windows that ESP-IDF always uses `C:\esp\.espressif`; an ESP-IDF you already have keeps its own tools folder |
 | `NO_COLOR=1` | | Mac/Linux only: no colours in the installer's output |
 
 Windows installs everything for your user where it can, so no administrator is

@@ -43,9 +43,13 @@ app folders only then:
 The mouse (wheel scrolls, a click on a `[key]` label presses it) works in
 Linux and macOS terminals only. On Windows it is always off.
 
-New app, Configure, Device, Profiles, Registry tools, Settings and **Submit an
-app to the catalog** are entries under **[4] Developer tools**; `/` finds any of
-them by name.
+In **Update my CrossPad**, `q` or Ctrl+C stops a step, and after a failure `r`
+retries from the step that failed.
+
+**[4] Developer tools** holds: Workspace, Device, Browse registry, Configure,
+Board (ESP-IDF only), Profiles, **Build & Flash** (the raw `idf.py` / `cmake`
+commands), OTA Flash, New app, Registry tools, **Submit an app to the catalog**
+and Settings. `/` finds any of them by name.
 
 ## Workspace: intent and state
 
@@ -173,7 +177,7 @@ extension, the status bar gets buttons for the project's VS Code tasks:
 |---|---|---|
 | platform-idf | `$(package) CP Tools` | `CrossPad: CP Tools` (the TUI) |
 | platform-idf | `$(zap) OTA` | `CrossPad: OTA Flash` (flash the last build over USB CDC) |
-| Arduino firmware | `$(package) CP Tools` | `CrossPad: App Manager` |
+| Arduino firmware | `$(package) App Manager` | `CrossPad: App Manager` |
 
 platform-idf ships them in `.vscode/settings.template.json`; the one-line
 installer merges that into `.vscode/settings.json` with this computer's paths.
@@ -188,4 +192,5 @@ By hand, copy the `VsCodeTaskButtons.tasks` block into `.vscode/settings.json`:
 }
 ```
 
-In the Arduino firmware the task is `CrossPad: App Manager`.
+The Arduino firmware already ships its button in its committed
+`.vscode/settings.json`, so nothing needs copying there.
