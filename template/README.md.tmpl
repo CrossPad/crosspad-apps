@@ -16,9 +16,10 @@ Generated from the [CrossPad app template](https://github.com/CrossPad/crosspad-
 ## Install into a project
 
 ```bash
-# ESP-IDF
+# ESP-IDF (board v2; a v1 board uses build_v1 / sdkconfig.v1)
 idf.py app-install --app __APP_ID__ --origin <this repo URL>
-idf.py fullclean && idf.py build
+idf.py -B build_v2 fullclean
+idf.py -B build_v2 -DSDKCONFIG=sdkconfig.v2 build
 
 # PC simulator
 python3 scripts/app_manager.py install __APP_ID__ --origin <this repo URL>
@@ -36,7 +37,9 @@ is required once after installing.
 
 ## Publishing
 
-To list it in the public registry, add the repo to `external-apps.json` in
-[CrossPad/crosspad-apps](https://github.com/CrossPad/crosspad-apps) and give the
-repo the `crosspad-app` topic. A private repo works fine without that — it just
-stays yours.
+To list it in the catalog: a repo in the CrossPad org gets the `crosspad-app`
+topic; any other repo must be public and is added to `external-apps.json` in
+[CrossPad/crosspad-apps](https://github.com/CrossPad/crosspad-apps) by pull
+request (CP Tools: Developer tools → Submit an app to the catalog). Step by
+step: [Publish an app](https://crosspad.app/docs/how-to/publish-app/). A
+private repo works fine without that — it just stays yours.
