@@ -34,6 +34,23 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.9.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.34.0",
+        "crosspad-gui": ">=1.17.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.0",
@@ -67,15 +84,17 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
-    "serial-monitor": {
-      "name": "Serial Monitor",
-      "version": "0.1.0",
-      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
-      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
-      "component_path": "components/crosspad-serial-monitor",
-      "icon": "terminal.png",
+    "instructions": {
+      "name": "Instructions",
+      "version": "0.2.0",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "info.png",
       "category": "tools",
       "platforms": [
+        "esp-idf",
+        "arduino",
         "pc"
       ],
       "requires": {
@@ -100,34 +119,15 @@
         "crosspad-gui": ">=1.12.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.9.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.34.0",
-        "crosspad-gui": ">=1.17.0"
-      }
-    },
-    "instructions": {
-      "name": "Instructions",
-      "version": "0.2.0",
-      "description": "Markdown-based instructions and help viewer",
-      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
-      "component_path": "components/crosspad-instructions",
-      "icon": "info.png",
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.0",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
       "category": "tools",
       "platforms": [
-        "esp-idf",
-        "arduino",
         "pc"
       ],
       "requires": {
