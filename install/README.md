@@ -1,5 +1,12 @@
 # Install the CrossPad tools
 
+> **The recommended way is to set things up by hand:** follow
+> [Start here](https://crosspad.app/docs/start-here/) on the CrossPad docs
+> site, and you learn what each piece is and where it lives. This installer is
+> the shortcut: one line does all of
+> [step 1, Set up the toolchain](https://crosspad.app/docs/start-here/1-toolchain/),
+> plus VS Code and a few extras.
+
 This puts everything your computer needs to update your CrossPad on it, and
 opens **CP Tools** — the program that updates the CrossPad and chooses its apps.
 
@@ -8,8 +15,10 @@ opens **CP Tools** — the program that updates the CrossPad and chooses its app
 - a Windows, Mac or Linux computer with about **10 GB free** (about **25 GB**
   with the PC simulator and the Arduino version)
 - the **USB-C cable** of your CrossPad
-- a **GitHub account** that has access to CrossPad (ask on the CrossPad Discord
-  with your GitHub user name if you don't have access yet)
+- while the CrossPad project is private: a **GitHub account** that has access
+  to it (ask on the CrossPad Discord with your GitHub user name if you don't
+  have access yet). The installer asks you to sign in only when it cannot reach
+  the project without an account.
 - **30 minutes** the first time (mostly waiting for downloads)
 
 You type one line. Everything else happens by itself.
@@ -65,15 +74,18 @@ Next time it remembers you.
 
 ### 4. Wait while the steps tick by
 
-The installer works through 10 steps (12 with the PC and Arduino extras). Each one ends with a green **[OK]**. The
-longest is step 4, ESP-IDF — about 15 minutes. **An ESP-IDF 5.5 you already
-have** (from the VS Code extension, the Espressif installer, or your own
-folder) is found and used as it is; one of another version is left alone and
-5.5 goes next to it. The installer also sets up **VS Code** (with the ESP-IDF
-extension and the CP Tools buttons, pointed at the right ESP-IDF) and
-**Node.js** with the CrossPad MCP server for AI assistants (VS Code and Claude
-Code), and checks at the end that every command below works in a new
-terminal. You can leave the window alone.
+The installer works through 10 steps (12 with the PC and Arduino extras). Each
+one ends with a green **[OK]**. The longest is step 4, ESP-IDF — about 15
+minutes. **An ESP-IDF 5.5.x you already have** (from the VS Code extension, the
+Espressif installer, or your own folder) is found and used as it is, the newest
+one if there are several. CrossPad needs 5.5.4 or newer, so update an older 5.5
+first. One of another version (6.x is not supported) is left alone, and the
+installer puts v5.5.5 in `C:\esp\esp-idf` (Mac/Linux: `~/esp/esp-idf`), or next
+to it in `C:\esp\esp-idf-v5.5` (`~/esp/esp-idf-v5.5`) when that folder is
+taken. The installer also sets up **VS Code** (with the ESP-IDF extension and
+the CP Tools buttons, pointed at the right ESP-IDF) and **Node.js** with the
+CrossPad MCP server for AI assistants (VS Code and Claude Code), and checks at
+the end that every command below works in a new terminal. You can leave the window alone.
 
 ![Steps 1 and 2 finished with [OK], step 3 working](img/win-3-steps.png)
 
@@ -152,6 +164,8 @@ Every command works in any new terminal (PowerShell, cmd, Terminal) — no
 | `crosspad-sim`, `crosspad-pc` | the PC simulator and its app manager (if you said yes to it) |
 | `crosspad-arduino`, `pio` | the Arduino version's app manager and PlatformIO (if you said yes to it) |
 
+Every option of these commands: [Command-line tools](https://crosspad.app/docs/reference/cli/#installer-shims).
+
 ---
 
 ## The first time in CP Tools
@@ -173,6 +187,7 @@ its firmware fits, and the list shows every app on it:
 - **1** Update my CrossPad — downloads, builds and puts it on the board
 - **2** Add or remove apps
 - **3** Something's wrong — every check, with what to do about it
+- **4** Developer tools — for people who write apps
 - **?** help on any screen · **q** back
 
 ---
@@ -204,8 +219,10 @@ its own the first time an assistant asks for it (Node.js, installed in step 8).
 
 ## FL Studio
 
-With **FL Studio** installed, the installer also puts the CrossPad controller
-script where FL looks for it (`Documents\Image-Line\FL Studio\Settings\Hardware\CrossPad`).
+With **FL Studio** installed on Windows or a Mac, the installer also puts the
+CrossPad controller script where FL looks for it
+(`Documents\Image-Line\FL Studio\Settings\Hardware\CrossPad`; Mac:
+`~/Documents/Image-Line/FL Studio/Settings/Hardware/CrossPad`).
 Nothing to set up by hand:
 
 1. On the CrossPad, open **DAW Control**.
@@ -253,7 +270,9 @@ status`, `crosspad-pc update --all`). The project is in `C:\CrossPad-PC`
 
 ## The Arduino version
 
-If you said *y* to the Arduino version, `C:\CrossPad-Arduino` (Mac/Linux:
+The Arduino version is the older firmware; new features land in the ESP-IDF
+one first ([more on the docs site](https://crosspad.app/docs/legacy/esp32-s3-arduino/)).
+If you said *y* to it, `C:\CrossPad-Arduino` (Mac/Linux:
 `~/CrossPad-Arduino`) holds the Arduino firmware with PlatformIO, already
 built once. For the 2.0 board:
 
@@ -276,6 +295,9 @@ regular one back. `crosspad_rev2` is the older 1.9 board — never flash it on a
 - In CP Tools press **3** (*Something's wrong*). Every red line says what to do.
   A **?** line is advice, not an error — e.g. *Windows Defender* only means
   builds could be twice as fast with the project folder excluded.
+- On the docs site: [the installer stops with an error](https://crosspad.app/docs/troubleshooting/#the-one-line-installer-stops-with-an-error),
+  [it picked a different ESP-IDF](https://crosspad.app/docs/troubleshooting/#the-installer-picked-a-different-esp-idf),
+  and the rest of [Troubleshooting](https://crosspad.app/docs/troubleshooting/).
 - Still stuck? In *Something's wrong* press **s**. It saves one file with
   everything a helper needs (no passwords). Send it on the CrossPad Discord,
   channel **#support**, with one line about what you were doing.
@@ -291,15 +313,19 @@ Set these before running the install line:
 |---|---|---|
 | `CROSSPAD_DIR` | `C:\CrossPad`, `~/CrossPad` | where the project goes (no spaces) |
 | `CROSSPAD_BRANCH` | `main` | branch of CrossPad/platform-idf (a checkout still on `crosspad_v20` is moved to `main`) |
-| `CROSSPAD_IDF_DIR` | an ESP-IDF 5.5 already here, else `C:\esp\esp-idf`, `~/esp/esp-idf` | which ESP-IDF to use or where it goes |
+| `CROSSPAD_IDF_DIR` | the newest ESP-IDF 5.5.x already here, else `C:\esp\esp-idf`, `~/esp/esp-idf` (or `…\esp-idf-v5.5` when that folder holds another version) | which ESP-IDF to use or where it goes. A folder you name that the installer did not make is used as it is, without a version check |
 | `CROSSPAD_WITH_PC=1`, `CROSSPAD_WITH_ARDUINO=1` | | set up the PC simulator / the Arduino version without asking |
 | `CROSSPAD_PC_BRANCH`, `CROSSPAD_ARDUINO_BRANCH` | `master`, `feat/audio-module-arduino` | branches of CrossPad/crosspad-pc and CrossPad/ESP32-S3 |
 | `CROSSPAD_PC_DIR`, `CROSSPAD_ARDUINO_DIR` | `C:\CrossPad-PC`, `~/CrossPad-PC`; `C:\CrossPad-Arduino`, `~/CrossPad-Arduino` | where they go |
 | `CROSSPAD_YES=1` | | answer yes to every question (the PC and Arduino extras stay off) |
 | `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_VSCODE=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, VS Code, the AI-assistant tools, or opening CP Tools at the end |
+| `IDF_TOOLS_PATH` | `~/.espressif` | Mac/Linux only: where ESP-IDF's tools go. Windows always uses `C:\esp\.espressif` |
+| `NO_COLOR=1` | | Mac/Linux only: no colours in the installer's output |
 
-Windows installs everything for your user only (no administrator needed — except
-Visual Studio's C++ tools for the PC simulator, which Windows asks for once) and
-keeps to short folders, because ESP-IDF cannot build in paths with spaces or
-non-English letters.
+Windows installs everything for your user where it can, so no administrator is
+needed. If winget cannot install a program for your user only, it installs it
+for the whole computer, and Windows may ask for permission; Visual Studio's C++
+tools for the PC simulator always ask once. The installer keeps to short
+folders, because ESP-IDF cannot build in paths with spaces or non-English
+letters.
 </details>
