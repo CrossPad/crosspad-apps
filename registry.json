@@ -1,6 +1,22 @@
 {
   "version": 1,
   "apps": {
+    "pitchplay": {
+      "name": "Pitch Play",
+      "version": "0.5.0",
+      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
+      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
+      "component_path": "components/crosspad-pitchplay",
+      "icon": "pitchplay.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.38.0",
+        "crosspad-gui": ">=1.18.0"
+      }
+    },
     "recorder": {
       "name": "Recorder",
       "version": "0.4.2",
@@ -16,22 +32,6 @@
       "requires": {
         "crosspad-core": ">=1.28.0",
         "crosspad-gui": ">=1.14.0"
-      }
-    },
-    "pitchplay": {
-      "name": "Pitch Play",
-      "version": "0.5.0",
-      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
-      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
-      "component_path": "components/crosspad-pitchplay",
-      "icon": "pitchplay.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.38.0",
-        "crosspad-gui": ">=1.18.0"
       }
     },
     "arrange": {
