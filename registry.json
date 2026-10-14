@@ -237,7 +237,7 @@
     },
     "sampler": {
       "name": "Sampler",
-      "version": "0.8.4",
+      "version": "0.9.0",
       "description": "Sample player with 16 pads, waveform editing, kit management",
       "repo": "https://github.com/CrossPad/crosspad-sampler.git",
       "component_path": "components/crosspad-sampler",
@@ -249,7 +249,7 @@
       ],
       "requires": {
         "crosspad-core": ">=1.45.0",
-        "crosspad-gui": ">=1.16.0"
+        "crosspad-gui": ">=1.25.0"
       }
     }
   }
