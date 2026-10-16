@@ -84,40 +84,6 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
-    "dawcontrol": {
-      "name": "DAW Control",
-      "version": "0.4.1",
-      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub",
-      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
-      "component_path": "components/crosspad-dawcontrol",
-      "icon": "dawcontrol.png",
-      "category": "tools",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.23.0",
-        "crosspad-gui": ">=1.3.0"
-      }
-    },
-    "song": {
-      "name": "Song",
-      "version": "0.2.0",
-      "description": "Arrange scenes on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-song.git",
-      "component_path": "components/crosspad-song",
-      "icon": "song.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.21.0",
-        "crosspad-gui": ">=1.12.0"
-      }
-    },
     "instructions": {
       "name": "Instructions",
       "version": "0.2.0",
@@ -184,6 +150,40 @@
       "requires": {
         "crosspad-core": ">=1.55.0",
         "crosspad-gui": ">=1.14.0"
+      }
+    },
+    "song": {
+      "name": "Song",
+      "version": "0.2.0",
+      "description": "Arrange scenes on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-song.git",
+      "component_path": "components/crosspad-song",
+      "icon": "song.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.21.0",
+        "crosspad-gui": ">=1.12.0"
+      }
+    },
+    "dawcontrol": {
+      "name": "DAW Control",
+      "version": "0.4.1",
+      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub",
+      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
+      "component_path": "components/crosspad-dawcontrol",
+      "icon": "dawcontrol.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.23.0",
+        "crosspad-gui": ">=1.3.0"
       }
     },
     "synthesizer": {
