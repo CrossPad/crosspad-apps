@@ -44,6 +44,8 @@ class FakeMgr:
         self.calls.append(("update", app_name, force) + (("carry",) if carry else ()))
         return []
     def infra_submodules(self): return ["components/crosspad-core"]
+    synced = []
+    def sync_app_submodules(self): return self.synced
     project = ("current", "up to date")
     def update_project(self, carry_commits=False):
         self.calls.append(("update_project", carry_commits))
@@ -367,3 +369,16 @@ def test_an_app_waiting_for_a_newer_core_says_so_in_the_download_step(tmp_path):
     p = cam.UpdatePipeline(mgr, FakeUI())
     assert p.run() is True
     assert f"Sampler {why}" in p.step("download").detail
+
+
+def test_components_report_app_folders_brought_to_the_project_pins(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.last_update = lambda: {"ok": True, "installed_set": ["sampler", "dawcontrol"], "steps": []}
+    mgr.synced = [("fishtank", "added"), ("instructions", "on its version 3b6e4985"),
+                  ("mixer", "left where it is: dirty (your work)")]
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True
+    detail = p.step("components").detail
+    assert "Fishtank added" in detail and "Instructions on its version 3b6e4985" in detail
+    assert "Mixer left where it is: dirty (your work)" in detail
+    assert any(c[0] == "run" and "fullclean" in c[1] for c in mgr.calls)   # a new folder

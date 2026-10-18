@@ -1944,6 +1944,84 @@ class AppManager:
     def infra_submodules(self) -> list[str]:
         return [s["path"] for s in self.get_all_submodules() if s["infra"]]
 
+    def _app_id_at(self, path: str) -> str:
+        """The app id whose folder is `path` (registry first, then the folder name)."""
+        for app_id, info in self._load_registry().get("apps", {}).items():
+            if self._resolve_install_path(info) == path:
+                return app_id
+        base = os.path.basename(path)
+        prefix = self.config.lib_prefix
+        return base[len(prefix):] if base.startswith(prefix) else base
+
+    def sync_app_submodules(self) -> list[tuple[str, str]]:
+        """Bring the app folders to what the project pins, after it moved.
+
+        update() moves the apps that follow a release or a branch; this does
+        the rest. An app folder the project added is downloaded; an app that
+        apps.json does not list goes to the commit the project records; an app
+        that stays on a version is checked out at that version. Nothing moves
+        over local work: an app with changes or commits of its own is left
+        where it is, and says why. Returns (app_id, what happened) for every
+        app it moved, downloaded or left alone.
+        """
+        manifest = self._load_manifest()
+        installed = manifest.get("installed", {})
+        out, recorded_moved = [], False
+        for sub in self.get_all_submodules():
+            if not sub["is_app"]:
+                continue
+            path = sub["path"]
+            app_id = self._app_id_at(path)
+            policy = self.app_policy(app_id)
+            if sub["uninitialized"]:
+                r = self._git("submodule", "update", "--init", "--", path,
+                              check=False, capture=True)
+                out.append((app_id, "added" if r.returncode == 0 else "could not be downloaded"))
+                if r.returncode != 0 or policy["track"] != TRACK_PINNED:
+                    continue
+            if policy["track"] == TRACK_PINNED:
+                target = policy.get("commit") or ""
+            elif policy["track"] == TRACK_REGISTRY and app_id not in installed:
+                target = ""
+            else:
+                continue
+            recorded = self._git("rev-parse", f"HEAD:{path}", check=False, capture=True)
+            target = target or recorded.stdout.strip()
+            if not target:
+                continue
+            head = self._sub_git(path, "rev-parse", "HEAD").stdout.strip()
+            want = self._sub_git(path, "rev-parse", "--verify", "--quiet", f"{target}^{{commit}}")
+            if want.returncode != 0:
+                self._sub_git(path, "fetch", "--tags", "--quiet", "origin", timeout=60)
+                want = self._sub_git(path, "rev-parse", "--verify", "--quiet",
+                                     f"{target}^{{commit}}")
+            if want.returncode != 0:
+                out.append((app_id, f"left where it is: {target[:8]} is not on its origin"))
+                continue
+            if want.stdout.strip() == head:
+                continue
+            blocking = self.app_status(app_id)["blocking"]
+            if blocking:
+                out.append((app_id, f"left where it is: {', '.join(blocking)} (your work)"))
+                continue
+            if self._sub_git(path, "checkout", "--quiet", target).returncode != 0:
+                out.append((app_id, f"left where it is: checkout {target[:8]} failed"))
+                continue
+            commit = self._get_submodule_commit(path)
+            if policy["track"] == TRACK_PINNED:
+                self._git("add", path, check=False, capture=True)
+                inst = installed.get(app_id)
+                if inst is not None:
+                    inst["version"] = commit
+                    inst["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    recorded_moved = True
+                out.append((app_id, f"on its version {commit}"))
+            else:
+                out.append((app_id, f"on {commit}, as the project records"))
+        if recorded_moved:
+            self._save_manifest(manifest)
+        return out
+
     def update_project(self, carry_commits: bool = False) -> tuple[str, str]:
         """Fast-forward the project itself to its upstream, carrying local edits.
 
@@ -3873,18 +3951,23 @@ class UpdatePipeline:
             return False
         if state == "updated":
             self.plan["fullclean"] = True      # new app folders arrive with the project
-        project = f"project: {msg}"
+        bits = [f"project: {msg}"]
         paths = self.mgr.infra_submodules()
-        if not paths:
-            s.detail = project
-            return True
-        r = self.mgr._git("submodule", "update", "--init", "--", *paths,
-                          check=False, capture=True)
-        self.log.write((r.stdout or "") + "\n")
-        if r.returncode != 0:
-            s.error = error_line("components", "failed", "core, gui")
-            return False
-        s.detail = f"{project}; " + ", ".join(os.path.basename(p) for p in paths)
+        if paths:
+            r = self.mgr._git("submodule", "update", "--init", "--", *paths,
+                              check=False, capture=True)
+            self.log.write((r.stdout or "") + "\n")
+            if r.returncode != 0:
+                s.error = error_line("components", "failed", "core, gui")
+                return False
+            bits.append(", ".join(os.path.basename(p) for p in paths))
+        for app_id, what in self.mgr.sync_app_submodules():
+            line = f"{self.mgr.app_display_name(app_id)} {what}"
+            self.log.write(line + "\n")
+            bits.append(line)
+            if what == "added":
+                self.plan["fullclean"] = True  # a new app folder: CMake globs at configure
+        s.detail = "; ".join(bits)
         return True
 
     def _build(self, s: StepResult) -> bool:

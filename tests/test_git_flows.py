@@ -339,3 +339,75 @@ def test_branch_track_waits_while_the_branch_needs_a_newer_core(releases):
     core_header(proj, "2.0.1")
     assert mgr.update(app_name="sampler") == []
     assert git(sub, "rev-parse", "HEAD") == shas["v0.3.0"]
+
+
+@pytest.fixture
+def moved_pins(tmp_path, monkeypatch):
+    """A fresh clone (no apps.json) one commit behind a project that moved
+    its sampler pin and added a fishtank app."""
+    no_git_identity(tmp_path, monkeypatch)
+    repos = {}
+    for name in ("crosspad-sampler", "crosspad-fishtank"):
+        repo = tmp_path / name
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / "a.txt").write_text("1")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "one")
+        repos[name] = repo
+    first = git(repos["crosspad-sampler"], "rev-parse", "HEAD")
+    up = tmp_path / "up"
+    up.mkdir()
+    git(up, "init", "-q", "-b", "main")
+    git(up, "submodule", "add", "-q", str(repos["crosspad-sampler"]), "components/crosspad-sampler")
+    git(up, "commit", "-qm", "base")
+    git(tmp_path, "clone", "-q", "--recurse-submodules", str(up), "proj")
+    proj = tmp_path / "proj"
+    (repos["crosspad-sampler"] / "a.txt").write_text("2")
+    git(repos["crosspad-sampler"], "commit", "-qam", "two")
+    second = git(repos["crosspad-sampler"], "rev-parse", "HEAD")
+    git(up / "components/crosspad-sampler", "pull", "-q", "origin", "main")
+    git(up, "submodule", "add", "-q", str(repos["crosspad-fishtank"]), "components/crosspad-fishtank")
+    git(up, "commit", "-qam", "sampler two, fishtank")
+    (proj / "app-registry.json").write_text(json.dumps({"apps": {}}))
+    mgr = cam.AppManager(str(proj), cam.PlatformConfig(platform="idf", lib_dir="components"))
+    assert mgr.update_project()[0] == "updated"
+    return mgr, proj, first, second
+
+
+def test_components_bring_apps_to_what_the_project_now_pins(moved_pins):
+    mgr, proj, first, second = moved_pins
+    sampler = proj / "components/crosspad-sampler"
+    assert git(sampler, "rev-parse", "HEAD") == first           # the project moved, the app not
+    done = dict(mgr.sync_app_submodules())
+    assert done == {"sampler": f"on {second[:8]}, as the project records", "fishtank": "added"}
+    assert git(sampler, "rev-parse", "HEAD") == second
+    assert (proj / "components/crosspad-fishtank/a.txt").read_text() == "1"
+    assert mgr.sync_app_submodules() == []                      # nothing left to do
+
+
+def test_components_check_a_pinned_app_out_at_its_version(moved_pins):
+    mgr, proj, first, second = moved_pins
+    sampler = proj / "components/crosspad-sampler"
+    mgr.sync_app_submodules()
+    (proj / "apps.json").write_text(json.dumps({"installed": {"sampler": {"ref": "main"}}}))
+    mgr.set_app_policy("sampler", "pinned", commit=first)
+    assert mgr.sync_app_submodules() == [("sampler", f"on its version {first[:8]}")]
+    assert git(sampler, "rev-parse", "HEAD") == first
+    assert git(proj, "diff", "--cached", "--name-only") == "components/crosspad-sampler"
+    assert json.loads((proj / "apps.json").read_text())["installed"]["sampler"]["version"] == first[:8]
+
+
+def test_components_leave_local_work_where_it_is(moved_pins):
+    mgr, proj, first, second = moved_pins
+    sampler = proj / "components/crosspad-sampler"
+    (sampler / "a.txt").write_text("mine")                      # not in apps.json, pin moved
+    assert ("sampler", "left where it is: dirty (your work)") in mgr.sync_app_submodules()
+    assert git(sampler, "rev-parse", "HEAD") == first
+    assert (sampler / "a.txt").read_text() == "mine"
+    git(sampler, "commit", "-qam", "my change")                 # unpushed, detached
+    mine = git(sampler, "rev-parse", "HEAD")
+    assert ("sampler", "left where it is: ahead (your work)") in mgr.sync_app_submodules()
+    mgr.set_app_policy("sampler", "pinned", commit=second)
+    assert mgr.sync_app_submodules() == [("sampler", "left where it is: ahead (your work)")]
+    assert git(sampler, "rev-parse", "HEAD") == mine
