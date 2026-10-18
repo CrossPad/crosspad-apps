@@ -234,10 +234,17 @@ def app_row(status: dict, avail: dict | None, in_registry: bool) -> dict:
         return {"state": "current", "installed": installed, "available": ""}
     if rule == "release":
         newest = newest_release([tuple(t) for t in avail.get("tags", [])])
-        if newest and avail.get("release_behind", 0) > 0:
+        pick = avail.get("release_pick", newest)
+        if pick and avail.get("release_behind", 0) > 0:
             return {"state": "update", "installed": installed,
-                    "available": _bare_version(newest)}
+                    "available": _bare_version(pick)}
+        if avail.get("release_waits"):
+            return {"state": "waits", "installed": installed,
+                    "available": _bare_version(newest), "why": avail["release_waits"]}
     elif rule == "development":
+        if avail.get("dev_waits"):
+            return {"state": "waits", "installed": installed,
+                    "available": avail.get("default_branch", target), "why": avail["dev_waits"]}
         if avail.get("dev_behind", 0) > 0:
             return {"state": "update", "installed": installed,
                     "available": f"{avail.get('default_branch', target)} {avail.get('dev_head', '')}".strip()}
@@ -556,6 +563,16 @@ def wrong_rows(f: dict) -> list[dict]:
                  "detail": "never fetched" if age < 0 else f"last fetched {age // 3600} h ago"
                  if age >= 3600 else f"fetched {age // 60} min ago",
                  "fix": "[Enter] refresh", "action": "refresh"})
+    gaps = f.get("requirement_problems") or []
+    if gaps:
+        g = gaps[0]
+        rows.append({"ok": False, "title": "Apps fit the firmware",
+                     "detail": "; ".join(f"{x['name']} {x['unmet'][0]}" for x in gaps),
+                     "fix": (f"[1] Update my CrossPad once a firmware has it, or [2] put "
+                             f"{g['name']} on an older version" if g["project_behind"] else
+                             f"[2] let {g['name']} follow the latest release, or pick a "
+                             f"version that fits"),
+                     "action": None})
     last = f.get("last_update")
     rows.append({"ok": (last or {}).get("ok") if last else None, "title": "Last update",
                  "detail": (f"{last['finished'][:16].replace('T', ' ')}, "
@@ -1476,6 +1493,9 @@ class AppManager:
             "defender_hint": str(self.project_dir.resolve()) if is_win else None,
             "can_go_back": ", ".join(self.app_display_name(a) for a in self.rollback_plan()),
             "previous_firmware": prev_fw.get("ver", "-") if prev_fw else None,
+            "requirement_problems": [
+                dict(g, name=self.app_display_name(g["app"]))
+                for g in self.requirement_problems()],
         }
 
     def support_bundle(self, facts: dict | None = None) -> Path:
@@ -1893,6 +1913,7 @@ class AppManager:
             records = json.loads(self.available_path.read_text())
         except (OSError, ValueError):
             pass
+        have = self.component_versions()
         for app_id in app_ids:
             path = self.app_status(app_id)["path"]
             if not (self.project_dir / path / ".git").exists():
@@ -1913,11 +1934,20 @@ class AppManager:
             tags = parse_tag_lines(self._sub_git(
                 path, "for-each-ref", "--sort=-v:refname",
                 "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
-            newest = newest_release(tags)
+            # What update() would take: the newest release this core and gui
+            # can build, not simply the newest.
+            newest, waits = None, ""
+            if newest_release(tags):
+                newest, waits = pick_release(
+                    tags, lambda t: self._requires_in(path, t), have,
+                    lambda t: self._sub_git(path, "merge-base", "--is-ancestor",
+                                            t, "HEAD").returncode == 0)
             rec = {"tags": [list(t) for t in tags], "default_branch": default,
                    "dev_head": self._sub_git(path, "rev-parse", "--short",
                                              f"origin/{default}").stdout.strip(),
                    "dev_behind": self._count(path, f"HEAD..origin/{default}"),
+                   "dev_waits": self._waits_at(path, f"origin/{default}", default, have),
+                   "release_pick": newest, "release_waits": waits,
                    "release_behind": self._count(path, f"HEAD..{newest}") if newest else 0,
                    "installed_tag": None,
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
@@ -3656,6 +3686,13 @@ class AppManager:
                   f"{self.describe_status(st):<34} "
                   f"{n_backups if n_backups else ''}")
         print("\n  ! = blocked for updates   ~ = protected by policy\n")
+        registry_apps = self._load_registry().get("apps", {})
+        for name in targets:
+            row = app_row(self.app_status(name), self.available(name), name in registry_apps)
+            if row["state"] == "waits":
+                print(f"  {name}: {row['why']}")
+        for g in self.requirement_problems():
+            print(f"  {g['app']}: {'; '.join(g['unmet'])} — the build stops here")
 
     def sync(self):
         """Detect existing app submodules and sync manifest."""
@@ -4488,6 +4525,7 @@ def _json_cli(mgr: "AppManager", args) -> int:
             out["apps"].append(dict(st, follows=rule, follows_target=target,
                                     row=app_row(st, mgr.available(a),
                                                 a in mgr._load_registry().get("apps", {}))))
+        out["requirement_problems"] = mgr.requirement_problems()
     elif args.command == "list":
         installed = mgr._load_manifest().get("installed", {})
         out["apps"] = [dict(info, id=a, installed=a in installed,
@@ -5718,6 +5756,9 @@ class _TUI:
                 name = self.mgr.app_display_name(a)
                 if r["state"] == "update":
                     tail = f"{r['installed']} {G['arrow']} {_C.BGREEN}{r['available']}{_C.RST}"
+                elif r["state"] == "waits":
+                    tail = (f"{r['installed']:<8} {_C.GRAY}{r['available']} "
+                            f"{WAITS_FOR_UPDATE}{_C.RST}")
                 elif r["state"] == "own":
                     tail = f"{r['installed']:<8} {_C.GRAY}your own copy{_C.RST}"
                 elif r["state"] == "changes":
@@ -5916,7 +5957,8 @@ class _TUI:
                     r = self._rows.get(val, {"installed": "", "state": "current"})
                     note = {"own": "your own copy", "changes": "your changes",
                             "broken": "broken — [Enter] to repair",
-                            "update": f"{r.get('available', '')} available"}.get(r["state"], "")
+                            "update": f"{r.get('available', '')} available",
+                            "waits": f"{r.get('available', '')} {WAITS_FOR_UPDATE}"}.get(r["state"], "")
                     _w(f" {mark} {_C.BGREEN}{G['ok']}{_C.RST} {name:<16} {r['installed']:<8} "
                        f"{_C.GRAY}{(note or info.get('description', ''))[:w - 34]}{_C.RST}\n")
                 else:
@@ -6960,9 +7002,11 @@ class _TUI:
             for i in range(start, end):
                 r = rows[i]
                 if r.kind == "version":
-                    unmet[i] = unmet_requirements(self.mgr.requires_at(app_id, r.target), have)
+                    req = self.mgr.requires_at(app_id, r.target)
+                    unmet[i] = unmet_requirements(req, have)
                     if unmet[i]:
-                        r.detail = f"{r.detail}  needs a newer system"
+                        r.detail = (f"{r.detail}  needs a newer system" if project_behind(req, have)
+                                    else f"{r.detail}  needs an older system")
                 mark = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
                 dot = G["dot_on"] if r.current else G["dot_off"]
                 tags = []

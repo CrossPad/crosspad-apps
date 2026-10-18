@@ -411,3 +411,18 @@ def test_components_leave_local_work_where_it_is(moved_pins):
     mgr.set_app_policy("sampler", "pinned", commit=second)
     assert mgr.sync_app_submodules() == [("sampler", "left where it is: ahead (your work)")]
     assert git(sampler, "rev-parse", "HEAD") == mine
+
+
+def test_the_update_check_records_what_update_would_take(releases):
+    mgr, proj, sub, shas = releases
+    mgr.set_app_policy("sampler", "registry")
+    rec = mgr.refresh_available(["sampler"])["sampler"]
+    assert rec["release_pick"] == "v0.2.0" and rec["release_behind"] == 1
+    assert rec["release_waits"].startswith("0.3.0 waits for a CrossPad update")
+    assert rec["dev_waits"].startswith("main waits for a CrossPad update")
+    assert cam.app_row(mgr.app_status("sampler"), rec, False)["state"] == "own"   # not in the registry
+    mgr.update(app_name="sampler")
+    rec = mgr.refresh_available(["sampler"])["sampler"]
+    assert rec["release_pick"] is None and rec["release_behind"] == 0
+    row = cam.app_row(mgr.app_status("sampler"), rec, True)
+    assert row["state"] == "waits" and row["available"] == "0.3.0"

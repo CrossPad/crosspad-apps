@@ -214,3 +214,35 @@ def test_an_unfinished_update_is_offered_first_after_a_mismatch():
     n = cam.whats_next(ctx(unfinished="Build", updates=["Sampler"]))
     assert n == {"line": "The last update stopped at Build", "action": "resume", "estimate": None}
     assert cam.whats_next(ctx(unfinished="Build", mismatch=True, fw_rev="v1"))["action"] == "update"
+
+
+WAITS = "0.3.0 waits for a CrossPad update: needs core ^2.0.0, this project has 1.70.0"
+
+
+def test_app_row_offers_the_release_this_core_can_build():
+    row = cam.app_row(status(), dict(AVAIL, release_pick="v0.2.1", release_waits=WAITS,
+                                     installed_tag="v0.2.0"), True)
+    assert row == {"state": "update", "installed": "0.2.0", "available": "0.2.1"}
+    # On it already: what is left is the release that waits.
+    row = cam.app_row(status(), dict(AVAIL, release_pick="v0.2.1", release_waits=WAITS,
+                                     release_behind=0), True)
+    assert row["state"] == "waits" and row["available"] == "0.3.0"
+
+
+def test_app_row_says_when_an_update_waits_for_a_newer_core():
+    row = cam.app_row(status(), dict(AVAIL, release_pick=None, release_waits=WAITS), True)
+    assert row == {"state": "waits", "installed": "0.2.1", "available": "0.3.0", "why": WAITS}
+    dev = cam.app_row(status("branch", ref="master"),
+                      dict(AVAIL, dev_waits="master " + WAITS[6:]), True)
+    assert dev["state"] == "waits" and dev["why"].startswith("master waits for a CrossPad update")
+
+
+def test_wrong_rows_name_an_app_that_does_not_fit_the_firmware():
+    gap = {"app": "instructions", "name": "Instructions", "project_behind": False,
+           "unmet": ["needs core ^1.0.0, this project has 2.0.0"]}
+    rows = {r["title"]: r for r in cam.wrong_rows({"device": None, "requirement_problems": [gap]})}
+    row = rows["Apps fit the firmware"]
+    assert row["ok"] is False
+    assert row["detail"] == "Instructions needs core ^1.0.0, this project has 2.0.0"
+    assert row["fix"].startswith("[2] let Instructions follow the latest release")
+    assert "Apps fit the firmware" not in {r["title"] for r in cam.wrong_rows({"device": None})}
