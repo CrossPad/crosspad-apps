@@ -85,7 +85,7 @@ messages).
 
 | Key | Screen | What it does |
 |-----|--------|--------------|
-| `1` | Update my CrossPad | download → firmware components → build → flash → check, one log; `q` or Ctrl+C stops a step, `r` retries from it. When the project is exactly a published release, the release's image is downloaded instead of compiling |
+| `1` | Update my CrossPad | firmware components → download → build → flash → check, one log; `q` or Ctrl+C stops a step, `r` retries from it. When the project is exactly a published release, the release's image is downloaded instead of compiling |
 | `2` | Add or remove apps | type to filter; `Enter` on an app picks what it follows: the latest release, development, or one version. A broken app folder is repaired from here |
 | `3` | Something's wrong | every check with its fix: board, firmware, tools, USB, internet, disk, project folder; go back to the versions from before; switch the board to its previous firmware slot; `s` saves a report for support |
 | `4` | Developer tools | workspace, device, registry, feature flags, profiles, board revision, raw build & flash, new app, submit an app to the catalog, settings |

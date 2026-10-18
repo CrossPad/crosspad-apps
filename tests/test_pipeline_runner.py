@@ -84,6 +84,16 @@ def test_pipeline_happy_path(tmp_path):
     assert all(s.ok for s in p.steps)
 
 
+def test_pipeline_updates_the_project_before_the_apps(tmp_path):
+    # An app's requires are judged against the core the build will use: the
+    # one the updated project pins, so the project moves first.
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    assert cam.UpdatePipeline(mgr, FakeUI()).run() is True
+    first_app = next(i for i, c in enumerate(mgr.calls) if c[0] == "update")
+    assert mgr.calls.index(("update_project", False)) < first_app
+
+
 def test_pipeline_backup_then_update_local_work(tmp_path):
     mgr = FakeMgr(tmp_path)
     mgr.config.flash_ota = lambda rev, on_line: 0
@@ -153,7 +163,7 @@ def test_pipeline_without_flash_hook_stops_after_build(tmp_path):
         del mgr.config.flash_ota
     p = cam.UpdatePipeline(mgr, FakeUI())
     assert p.run() is True
-    assert [s.name for s in p.steps] == ["download", "components", "build"]
+    assert [s.name for s in p.steps] == ["components", "download", "build"]
 
 
 def test_pipeline_flash_output_reaches_the_log(tmp_path):
@@ -346,3 +356,4 @@ def test_a_project_that_cannot_update_stops_before_the_build(tmp_path):
     assert p.run() is False
     assert "main/x.cpp" in p.step("components").error
     assert not any(c[0] == "run" for c in mgr.calls)
+    assert not any(c[0] == "update" for c in mgr.calls)          # apps stay too

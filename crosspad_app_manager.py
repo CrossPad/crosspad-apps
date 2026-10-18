@@ -3542,10 +3542,12 @@ class AppManager:
 
 # == Update pipeline ==========================================================
 #
-# One Enter: download → firmware components → build → flash → check. The plan
+# One Enter: firmware components → download → build → flash → check. The plan
 # and the error copy are pure; UpdatePipeline (below) runs the subprocesses.
+# The components come first: an app's `requires` is checked against the core
+# and gui the build will use, which are the ones the updated project pins.
 
-STEP_NAMES = ("download", "components", "build", "flash", "check")
+STEP_NAMES = ("components", "download", "build", "flash", "check")
 STEP_TITLES = {"download": "Download updates", "components": "Firmware components",
                "build": "Build", "flash": "Flash", "check": "Check"}
 STEP_IDLE = {"download": "apps that follow a newer version",
@@ -3654,7 +3656,7 @@ TAIL_LINES = 50
 
 
 class UpdatePipeline:
-    """Download → components → build → flash → check, rendered through `ui`.
+    """Components → download → build → flash → check, rendered through `ui`.
 
     Every step returns instead of raising; the failing step carries the line
     the screen shows. The full output of every subprocess goes to
