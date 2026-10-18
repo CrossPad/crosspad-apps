@@ -153,3 +153,38 @@ def test_pick_release_none_fits():
     assert tag is None and why.startswith("0.18.0 waits")
     # A release that declares nothing is not refused.
     assert cam.pick_release(RELEASES, lambda t: None, CORE_1_70, never) == ("v0.18.0", "")
+
+
+def test_project_behind_tells_an_old_core_from_a_new_one():
+    assert cam.project_behind({"crosspad-core": "^2.0.0"}, CORE_1_70)
+    assert cam.project_behind({"crosspad-gui": ">1.28.0"}, CORE_1_70)
+    assert not cam.project_behind({"crosspad-core": "^1.68.0"}, CORE_2_0)
+    assert not cam.project_behind({"crosspad-core": ">=1.60.0,<2.0.0"}, CORE_2_0)
+    assert not cam.project_behind({"crosspad-core": ">=1.60.0"}, CORE_1_70)
+
+
+def test_build_gate_error_lines_name_the_fix():
+    gap = "Sampler needs core ^2.0.0, this project has 1.70.0"
+    assert cam.error_line("build", "needs-newer", gap) == (
+        "Sampler needs core ^2.0.0, this project has 1.70.0 → [1] Update my CrossPad "
+        "once a firmware has it, or [2] put the app on an older version")
+    assert cam.error_line("build", "needs-older", gap).endswith(
+        "→ [2] let the app follow the latest release, or pick a version that fits")
+
+
+def test_requirement_problems_reads_every_app_folder_the_build_compiles(tmp_path):
+    import json
+    inc = tmp_path / "components/crosspad-core/include/crosspad"
+    inc.mkdir(parents=True)
+    (inc / "CrosspadCoreVersion.hpp").write_text(
+        "#define CROSSPAD_CORE_VERSION_MAJOR 1\n#define CROSSPAD_CORE_VERSION_MINOR 70\n"
+        "#define CROSSPAD_CORE_VERSION_PATCH 0\n")
+    for app, spec in (("sampler", "^2.0.0"), ("mixer", ">=1.70.0,<3.0.0")):
+        d = tmp_path / f"components/crosspad-{app}"
+        d.mkdir(parents=True)
+        (d / "crosspad-app.json").write_text(json.dumps({"requires": {"crosspad-core": spec}}))
+    (tmp_path / "app-registry.json").write_text(json.dumps({"apps": {}}))
+    mgr = cam.AppManager(str(tmp_path), cam.PlatformConfig(platform="pc", lib_dir="components"))
+    assert mgr.requirement_problems() == [
+        {"app": "sampler", "unmet": ["needs core ^2.0.0, this project has 1.70.0"],
+         "project_behind": True}]

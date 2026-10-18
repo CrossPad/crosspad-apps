@@ -46,6 +46,8 @@ class FakeMgr:
     def infra_submodules(self): return ["components/crosspad-core"]
     synced = []
     def sync_app_submodules(self): return self.synced
+    gaps = []
+    def requirement_problems(self): return self.gaps
     project = ("current", "up to date")
     def update_project(self, carry_commits=False):
         self.calls.append(("update_project", carry_commits))
@@ -382,3 +384,20 @@ def test_components_report_app_folders_brought_to_the_project_pins(tmp_path):
     assert "Fishtank added" in detail and "Instructions on its version 3b6e4985" in detail
     assert "Mixer left where it is: dirty (your work)" in detail
     assert any(c[0] == "run" and "fullclean" in c[1] for c in mgr.calls)   # a new folder
+
+
+def test_an_app_this_core_cannot_build_stops_the_build_before_compiling(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.gaps = [{"app": "sampler", "unmet": ["needs core ^2.0.0, this project has 1.70.0"],
+                 "project_behind": True}]
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is False
+    assert p.step("build").error.startswith(
+        "Sampler needs core ^2.0.0, this project has 1.70.0 → [1] Update my CrossPad")
+    assert not any(c[0] == "run" for c in mgr.calls)
+    assert p.step("flash").ok is None
+    mgr.gaps = [{"app": "instructions", "unmet": ["needs core ^1.0.0, this project has 2.0.0"],
+                 "project_behind": False}]
+    assert p.retry_from("build") is False
+    assert "[2] let the app follow the latest release" in p.step("build").error

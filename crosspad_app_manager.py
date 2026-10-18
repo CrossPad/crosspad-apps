@@ -292,6 +292,24 @@ def unmet_requirements(requires, have: dict) -> list[str]:
     return out
 
 
+def project_behind(requires, have: dict) -> bool:
+    """Is a requirement missed because the core/gui here is older than asked
+    (rather than newer than the app allows)?"""
+    if isinstance(requires, list):
+        return False
+    for dep, spec in (requires or {}).items():
+        v = have.get(dep)
+        if v is None or version_satisfies(v, spec):
+            continue
+        for part in spec.split(","):
+            op = _re.match(r"^\s*(>=|<=|>|<|==|=|\^|~)?\s*(.*)$", part)
+            want = parse_semver(op.group(2))
+            o = op.group(1) or "=="
+            if want is not None and o not in ("<", "<=") and (v <= want if o == ">" else v < want):
+                return True
+    return False
+
+
 WAITS_FOR_UPDATE = "waits for a CrossPad update"
 
 
@@ -1066,6 +1084,28 @@ class AppManager:
                     ("MAJOR", "MINOR", "PATCH")]
             if all(nums):
                 out[comp] = tuple(int(m.group(1)) for m in nums)
+        return out
+
+    def requirement_problems(self) -> list[dict]:
+        """Every app folder the build compiles whose crosspad-app.json asks for
+        a core or gui this checkout does not have.
+
+        [{app, unmet: ['needs core ^2.0.0, this project has 1.70.0'],
+        project_behind}]: project_behind when the core/gui here is older than
+        the app asks, not newer than it allows.
+        """
+        have = self.component_versions()
+        out = []
+        for meta_path in sorted((self.project_dir / self.config.lib_dir).glob("*/crosspad-app.json")):
+            try:
+                requires = json.loads(meta_path.read_text()).get("requires")
+            except (OSError, ValueError):
+                continue
+            unmet = unmet_requirements(requires, have)
+            if unmet:
+                path = f"{self.config.lib_dir}/{meta_path.parent.name}"
+                out.append({"app": self._app_id_at(path), "unmet": unmet,
+                            "project_behind": project_behind(requires, have)})
         return out
 
     def requires_at(self, app_id: str, ref: str) -> dict | None:
@@ -3793,6 +3833,10 @@ def error_line(step: str, reason: str, subject: str = "") -> str:
         ("build", "no-tools"): "Build tools are missing → [3] Something's wrong",
         ("build", "no-board"): "Which board? Answer above, then [r] retry",
         ("build", "failed"): "Build failed in {s} → [c] show the error   [3] Something's wrong",
+        ("build", "needs-newer"): "{s} → [1] Update my CrossPad once a firmware has it, "
+                                  "or [2] put the app on an older version",
+        ("build", "needs-older"): "{s} → [2] let the app follow the latest release, "
+                                  "or pick a version that fits",
         ("flash", "no-answer"): "The board isn't answering → [r] retry   [3] Something's wrong",
         ("flash", "failed"): "Flash failed → [c] show the error   [r] retry",
         ("check", "mismatch"): "The board still runs the old {s} → [r] flash again",
@@ -3985,6 +4029,16 @@ class UpdatePipeline:
                               getattr(self.mgr, "windows_longpaths", lambda: None)())
         if probs:
             s.error = f"Can't build here: {probs[0]} → move the project to a short plain folder"
+            return False
+        # An app written for another core or gui fails minutes in, as a
+        # compiler error in its own code; say which app and which version now.
+        gaps = self.mgr.requirement_problems()
+        for g in gaps:
+            self.log.write(f"{g['app']}: {'; '.join(g['unmet'])}\n")
+        if gaps:
+            g = gaps[0]
+            s.error = error_line("build", "needs-newer" if g["project_behind"] else "needs-older",
+                                 f"{self.mgr.app_display_name(g['app'])} {g['unmet'][0]}")
             return False
         if plat == "esp-idf":
             b = self.mgr.board_info(refresh=True)
