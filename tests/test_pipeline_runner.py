@@ -357,3 +357,13 @@ def test_a_project_that_cannot_update_stops_before_the_build(tmp_path):
     assert "main/x.cpp" in p.step("components").error
     assert not any(c[0] == "run" for c in mgr.calls)
     assert not any(c[0] == "update" for c in mgr.calls)          # apps stay too
+
+
+def test_an_app_waiting_for_a_newer_core_says_so_in_the_download_step(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    why = "0.18.0 waits for a CrossPad update: needs core ^2.0.0, this project has 1.70.0"
+    mgr.update = lambda app_name=None, **kw: [(app_name, why)] if app_name == "sampler" else []
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True
+    assert f"Sampler {why}" in p.step("download").detail

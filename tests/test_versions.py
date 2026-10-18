@@ -104,3 +104,52 @@ def test_catalog_problems_say_what_an_author_must_fix():
     assert 'no "platforms"' in cam.catalog_problems(dict(meta, platforms=[]), "PUBLIC", "me/x", [])[0]
     assert "already" in cam.catalog_problems(meta, "PUBLIC", "Me/X", ["me/x"])[0]
     assert "missing" in cam.catalog_problems(None, "PUBLIC", "me/x", [])[0]
+
+
+CORE_1_70 = {"crosspad-core": (1, 70, 0), "crosspad-gui": (1, 28, 0)}
+CORE_2_0 = {"crosspad-core": (2, 0, 0), "crosspad-gui": (2, 0, 0)}
+RELEASES = [("v0.18.0", ""), ("v0.17.1", ""), ("v0.17.0", ""), ("nightly", "")]
+REQUIRES = {"v0.18.0": {"crosspad-core": "^2.0.0", "crosspad-gui": "^2.0.0"},
+            "v0.17.1": {"crosspad-core": ">=1.70.0,<3.0.0", "crosspad-gui": ">=1.28.0"},
+            "v0.17.0": {"crosspad-core": ">=1.68.0", "crosspad-gui": ">=1.28.0"}}
+
+
+def never(tag):
+    return False
+
+
+def test_pick_release_takes_the_newest_one_that_fits():
+    tag, why = cam.pick_release(RELEASES, REQUIRES.get, CORE_1_70, never)
+    assert tag == "v0.17.1"
+    assert why == ("0.18.0 waits for a CrossPad update: needs core ^2.0.0, this project "
+                   "has 1.70.0; needs gui ^2.0.0, this project has 1.28.0")
+
+
+def test_pick_release_takes_the_newest_when_it_fits():
+    assert cam.pick_release(RELEASES, REQUIRES.get, CORE_2_0, never) == ("v0.18.0", "")
+    # `>=1.70.0,<3.0.0` is met by 2.0 as well as by 1.70: the comma is AND.
+    assert cam.pick_release(RELEASES[1:], REQUIRES.get, CORE_2_0, never) == ("v0.17.1", "")
+
+
+def test_pick_release_stays_when_nothing_newer_fits():
+    reqs = dict(REQUIRES, **{"v0.17.1": {"crosspad-core": "^2.0.0"}})
+    tag, why = cam.pick_release(RELEASES, reqs.get, CORE_1_70, lambda t: t == "v0.17.0")
+    assert tag is None and why.startswith("0.18.0 waits for a CrossPad update: needs core ^2.0.0")
+
+
+def test_pick_release_never_goes_back_past_where_the_app_is():
+    tag, why = cam.pick_release(RELEASES, REQUIRES.get, CORE_1_70, lambda t: t != "v0.18.0")
+    assert tag is None and "0.18.0" in why
+    # Already on the newest, and it fits: checked out as before.
+    assert cam.pick_release(RELEASES, REQUIRES.get, CORE_2_0, lambda t: True) == ("v0.18.0", "")
+    # Already on the newest, and it does not fit: nothing to wait for — the
+    # build gate says what is wrong.
+    assert cam.pick_release(RELEASES, REQUIRES.get, CORE_1_70, lambda t: True) == (None, "")
+
+
+def test_pick_release_none_fits():
+    reqs = {t: {"crosspad-core": "^3.0.0"} for t in REQUIRES}
+    tag, why = cam.pick_release(RELEASES, reqs.get, CORE_1_70, never)
+    assert tag is None and why.startswith("0.18.0 waits")
+    # A release that declares nothing is not refused.
+    assert cam.pick_release(RELEASES, lambda t: None, CORE_1_70, never) == ("v0.18.0", "")

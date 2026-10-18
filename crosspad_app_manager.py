@@ -292,6 +292,37 @@ def unmet_requirements(requires, have: dict) -> list[str]:
     return out
 
 
+WAITS_FOR_UPDATE = "waits for a CrossPad update"
+
+
+def waits_reason(version: str, unmet: list[str]) -> str:
+    """'0.18.0 waits for a CrossPad update: needs core ^2.0.0, this project has 1.70.0'"""
+    return f"{version} {WAITS_FOR_UPDATE}: {'; '.join(unmet)}"
+
+
+def pick_release(tags: list[tuple[str, str]], requires_of, have: dict,
+                 reached) -> tuple[str | None, str]:
+    """The newest release whose `requires` the project's core and gui meet.
+
+    Walks the semver tags newest first. A release that asks for a core or gui
+    this project does not have is passed over; the walk ends at the first one
+    that fits, or at one the app has already reached (HEAD at or past it) —
+    staying beats going back. Returns (tag to check out, or None to stay;
+    why the newest release was passed over, or "").
+    """
+    why = ""
+    for tag, _date in tags:
+        if not RELEASE_TAG_RE.match(tag):
+            continue
+        unmet = unmet_requirements(requires_of(tag), have)
+        if reached(tag):
+            return (None if unmet or why else tag), why
+        if not unmet:
+            return tag, why
+        why = why or waits_reason(_bare_version(tag), unmet)
+    return None, why
+
+
 def release_asset_names(tag: str, rev: str) -> dict:
     """The file names platform-idf's release job gives its outputs."""
     return {"image": f"CrossPad-{tag}-{rev}.bin",
@@ -1039,7 +1070,9 @@ class AppManager:
 
     def requires_at(self, app_id: str, ref: str) -> dict | None:
         """The requirements an app declares at a tag or commit (after a fetch)."""
-        path = self.app_status(app_id)["path"]
+        return self._requires_in(self.app_status(app_id)["path"], ref)
+
+    def _requires_in(self, path: str, ref: str) -> dict | None:
         r = self._sub_git(path, "show", f"{ref}:crosspad-app.json")
         if r.returncode != 0:
             return None
@@ -1047,6 +1080,17 @@ class AppManager:
             return json.loads(r.stdout).get("requires")
         except ValueError:
             return None
+
+    def _waits_at(self, path: str, ref: str, label: str, have: dict) -> str:
+        """Why moving the app at `path` on to `ref` must wait, or "".
+
+        Nothing to move is nothing to wait for: an app already at `ref` that
+        does not fit this core is the build gate's to report.
+        """
+        if not self._count(path, f"HEAD..{ref}"):
+            return ""
+        unmet = unmet_requirements(self._requires_in(path, ref), have)
+        return waits_reason(label, unmet) if unmet else ""
 
     # -- ready-built firmware ---------------------------------------------------
 
@@ -3304,6 +3348,9 @@ class AppManager:
 
         skipped = []
         updated = 0
+        # The core and gui the build will use: the pipeline updates the
+        # project (and with it these) before it gets here.
+        have = self.component_versions()
 
         for name in targets:
             info = apps.get(name, {})
@@ -3343,6 +3390,40 @@ class AppManager:
             if r.returncode != 0:
                 skipped.append((name, "fetch failed"))
                 continue
+
+            # Where the app goes, decided before anything is touched: a
+            # version that asks for a core or gui this project does not have
+            # yet would not build, so the app stays where it is.
+            if track == TRACK_BRANCH:
+                why = self._waits_at(install_path, f"origin/{ref}", ref, have)
+                if why:
+                    skipped.append((name, why))
+                    continue
+            else:
+                # Latest release = the newest semver tag on origin that fits
+                # this core and gui; an app without tags follows its default
+                # branch instead.
+                tags = parse_tag_lines(self._sub_git(
+                    install_path, "for-each-ref", "--sort=-v:refname",
+                    "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
+                default = self._get_default_branch(install_path)
+                checkout_ref = _release_target(tags, default)
+                if newest_release(tags):
+                    checkout_ref, why = pick_release(
+                        tags, lambda t: self._requires_in(install_path, t), have,
+                        lambda t: self._sub_git(install_path, "merge-base", "--is-ancestor",
+                                                t, "HEAD").returncode == 0)
+                    if checkout_ref is None:
+                        if why:
+                            skipped.append((name, why))
+                        continue
+                else:
+                    why = self._waits_at(install_path, checkout_ref, default, have)
+                    if why:
+                        skipped.append((name, why))
+                        continue
+                if why:
+                    print(f"  {name}: {why} — takes {_bare_version(checkout_ref)}")
 
             old_head = self._sub_git(install_path, "rev-parse", "HEAD").stdout.strip()
             old_branch = st["git"]["branch"]
@@ -3405,12 +3486,6 @@ class AppManager:
                                     "not fast-forwardable (diverged from origin)"))
                     continue
             else:
-                # Latest release = the newest semver tag on origin; an app
-                # without tags follows its default branch instead.
-                tags = parse_tag_lines(self._sub_git(
-                    install_path, "for-each-ref", "--sort=-v:refname",
-                    "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
-                checkout_ref = _release_target(tags, self._get_default_branch(install_path))
                 r = self._sub_git(install_path, "checkout", "--quiet", checkout_ref)
                 if r.returncode != 0:
                     put_back()
@@ -3751,7 +3826,7 @@ class UpdatePipeline:
     # -- steps -----------------------------------------------------------------
 
     def _download(self, s: StepResult) -> bool:
-        done, left, clashed = [], [], []
+        done, left, clashed, waiting = [], [], [], []
         for app_id in self.installed:
             st = self.mgr.app_status(app_id)
             name = self.mgr.app_display_name(app_id)
@@ -3772,8 +3847,11 @@ class UpdatePipeline:
             self._render()
             with _capture_stdout(self.log):
                 skipped = self.mgr.update(app_name=app_id, force=force, carry=carry) or []
-            if carry:
-                clashed.extend(f"{name}: {reason}" for _, reason in skipped)
+            for _, reason in skipped:
+                if WAITS_FOR_UPDATE in reason:
+                    waiting.append(f"{name} {reason}")
+                elif carry:
+                    clashed.append(f"{name}: {reason}")
             after = self.mgr.app_status(app_id)["git"]["head"]
             if after != st["git"]["head"]:
                 done.append(f"{name} {after}" + (" + your changes" if carry else ""))
@@ -3781,6 +3859,7 @@ class UpdatePipeline:
         if left:
             bits.append(f"{', '.join(left)} — your changes, left alone")
         bits.extend(clashed)
+        bits.extend(waiting)
         s.detail = "; ".join(bits)
         return True
 

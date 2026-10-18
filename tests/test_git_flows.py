@@ -271,3 +271,71 @@ def test_project_update_never_merges_over_local_commits(behind):
     head = git(proj, "rev-parse", "HEAD")
     assert mgr.update_project()[0] == "local-commits"
     assert git(proj, "rev-parse", "HEAD") == head
+
+
+def core_header(proj, version):
+    major, minor, patch = version.split(".")
+    inc = proj / "components/crosspad-core/include/crosspad"
+    inc.mkdir(parents=True, exist_ok=True)
+    (inc / "CrosspadCoreVersion.hpp").write_text(
+        f"#define CROSSPAD_CORE_VERSION_MAJOR {major}\n"
+        f"#define CROSSPAD_CORE_VERSION_MINOR {minor}\n"
+        f"#define CROSSPAD_CORE_VERSION_PATCH {patch}\n")
+
+
+@pytest.fixture
+def releases(tmp_path, monkeypatch):
+    """An app with three releases on origin; the newest wants core 2.0. The
+    project builds against core 1.70 and has the app on v0.1.0."""
+    no_git_identity(tmp_path, monkeypatch)
+    app = tmp_path / "crosspad-sampler"
+    app.mkdir()
+    git(app, "init", "-q", "-b", "main")
+    shas = {}
+    for tag, spec in (("v0.1.0", ">=1.60.0"), ("v0.2.0", ">=1.70.0,<3.0.0"),
+                      ("v0.3.0", "^2.0.0")):
+        (app / "crosspad-app.json").write_text(json.dumps({"requires": {"crosspad-core": spec}}))
+        git(app, "add", ".")
+        git(app, "commit", "-qm", tag)
+        git(app, "tag", tag)
+        shas[tag] = git(app, "rev-parse", "HEAD")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    git(proj, "init", "-q", "-b", "main")
+    git(proj, "submodule", "add", "-q", str(app), "components/crosspad-sampler")
+    sub = proj / "components/crosspad-sampler"
+    git(sub, "checkout", "-q", "v0.1.0")
+    git(proj, "add", ".")
+    git(proj, "commit", "-qm", "sub")
+    core_header(proj, "1.70.0")
+    (proj / "apps.json").write_text(json.dumps({"installed": {"sampler": {"ref": "main"}}}))
+    (proj / "app-registry.json").write_text(json.dumps({"apps": {}}))
+    mgr = cam.AppManager(str(proj), cam.PlatformConfig(platform="pc", lib_dir="components"))
+    return mgr, proj, sub, shas
+
+
+def test_release_track_takes_the_newest_release_this_core_can_build(releases):
+    mgr, proj, sub, shas = releases
+    mgr.set_app_policy("sampler", "registry")
+    assert mgr.update(app_name="sampler") == []
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.2.0"]
+    # The next update finds nothing that fits: it stays, and says why.
+    assert mgr.update(app_name="sampler") == [
+        ("sampler", "0.3.0 waits for a CrossPad update: needs core ^2.0.0, "
+                    "this project has 1.70.0")]
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.2.0"]
+    core_header(proj, "2.0.0")
+    assert mgr.update(app_name="sampler") == []
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.3.0"]
+
+
+def test_branch_track_waits_while_the_branch_needs_a_newer_core(releases):
+    mgr, proj, sub, shas = releases
+    mgr.set_app_policy("sampler", "branch", ref="main")
+    assert mgr.update(app_name="sampler") == [
+        ("sampler", "main waits for a CrossPad update: needs core ^2.0.0, "
+                    "this project has 1.70.0")]
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.1.0"]
+    core_header(proj, "2.0.1")
+    assert mgr.update(app_name="sampler") == []
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.3.0"]
