@@ -1,6 +1,22 @@
 {
   "version": 1,
   "apps": {
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.0",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "recorder": {
       "name": "Recorder",
       "version": "0.5.0",
@@ -16,22 +32,6 @@
       "requires": {
         "crosspad-core": ">=1.28.0",
         "crosspad-gui": ">=1.14.0"
-      }
-    },
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
       }
     },
     "pitchplay": {
@@ -84,6 +84,24 @@
         "crosspad-gui": ">=1.14.0"
       }
     },
+    "instructions": {
+      "name": "Instructions",
+      "version": "0.2.0",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "info.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "arduino",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "pad-mixer": {
       "name": "Pad Mixer",
       "version": "0.2.1",
@@ -110,24 +128,6 @@
       "icon": "terminal.png",
       "category": "tools",
       "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "instructions": {
-      "name": "Instructions",
-      "version": "0.2.0",
-      "description": "Markdown-based instructions and help viewer",
-      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
-      "component_path": "components/crosspad-instructions",
-      "icon": "info.png",
-      "category": "tools",
-      "platforms": [
-        "esp-idf",
-        "arduino",
         "pc"
       ],
       "requires": {
