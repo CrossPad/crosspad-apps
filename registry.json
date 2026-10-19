@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "recorder": {
       "name": "Recorder",
       "version": "0.5.0",
@@ -32,6 +16,22 @@
       "requires": {
         "crosspad-core": ">=1.28.0",
         "crosspad-gui": ">=1.14.0"
+      }
+    },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.0",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
       }
     },
     "pitchplay": {
@@ -135,21 +135,21 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "song": {
-      "name": "Song",
-      "version": "0.2.0",
-      "description": "Arrange scenes on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-song.git",
-      "component_path": "components/crosspad-song",
-      "icon": "song.png",
-      "category": "music",
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.14.4",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
       "platforms": [
-        "esp-idf",
-        "pc"
+        "pc",
+        "esp-idf"
       ],
       "requires": {
-        "crosspad-core": ">=1.21.0",
-        "crosspad-gui": ">=1.12.0"
+        "crosspad-core": ">=1.64.0",
+        "crosspad-gui": ">=1.14.0"
       }
     },
     "dawcontrol": {
@@ -169,21 +169,21 @@
         "crosspad-gui": ">=1.3.0"
       }
     },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.14.4",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
+    "song": {
+      "name": "Song",
+      "version": "0.2.0",
+      "description": "Arrange scenes on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-song.git",
+      "component_path": "components/crosspad-song",
+      "icon": "song.png",
+      "category": "music",
       "platforms": [
-        "pc",
-        "esp-idf"
+        "esp-idf",
+        "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.64.0",
-        "crosspad-gui": ">=1.14.0"
+        "crosspad-core": ">=1.21.0",
+        "crosspad-gui": ">=1.12.0"
       }
     },
     "synthesizer": {
