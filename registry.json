@@ -3,7 +3,7 @@
   "apps": {
     "recorder": {
       "name": "Recorder",
-      "version": "0.5.0",
+      "version": "0.5.2",
       "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
       "repo": "https://github.com/CrossPad/crosspad-recorder.git",
       "component_path": "components/crosspad-recorder",
@@ -14,8 +14,8 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.28.0",
-        "crosspad-gui": ">=1.14.0"
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
     "pitchplay": {
@@ -102,6 +102,22 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.0",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
     "pad-mixer": {
       "name": "Pad Mixer",
       "version": "0.2.2",
@@ -117,22 +133,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "serial-monitor": {
-      "name": "Serial Monitor",
-      "version": "0.1.0",
-      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
-      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
-      "component_path": "components/crosspad-serial-monitor",
-      "icon": "terminal.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
       }
     },
     "mixer": {
@@ -152,14 +152,14 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "song": {
-      "name": "Song",
-      "version": "0.3.0",
-      "description": "Arrange scenes on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-song.git",
-      "component_path": "components/crosspad-song",
-      "icon": "song.png",
-      "category": "music",
+    "dawcontrol": {
+      "name": "DAW Control",
+      "version": "0.4.2",
+      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub",
+      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
+      "component_path": "components/crosspad-dawcontrol",
+      "icon": "dawcontrol.png",
+      "category": "tools",
       "platforms": [
         "esp-idf",
         "pc"
@@ -169,14 +169,14 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "dawcontrol": {
-      "name": "DAW Control",
-      "version": "0.4.2",
-      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub",
-      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
-      "component_path": "components/crosspad-dawcontrol",
-      "icon": "dawcontrol.png",
-      "category": "tools",
+    "song": {
+      "name": "Song",
+      "version": "0.3.0",
+      "description": "Arrange scenes on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-song.git",
+      "component_path": "components/crosspad-song",
+      "icon": "song.png",
+      "category": "music",
       "platforms": [
         "esp-idf",
         "pc"
@@ -204,7 +204,7 @@
     },
     "sequencer": {
       "name": "Sequencer",
-      "version": "0.9.0",
+      "version": "0.10.0",
       "description": "Record, loop and erase scenes on the pads",
       "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
       "component_path": "components/crosspad-sequencer",
@@ -215,8 +215,8 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.58.0",
-        "crosspad-gui": ">=1.13.0"
+        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "piano": {
