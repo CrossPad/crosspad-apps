@@ -20,18 +20,18 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 <!-- APP_TABLE_START -->
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
-| **App Store** | 0.1.0 | Browse, install, and manage CrossPad apps from the registry | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
+| **App Store** | 0.1.1 | Browse, install, and manage CrossPad apps from the registry | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
 | **Arrange** | 0.16.0 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=2.2.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
 | **DAW Control** | 0.4.2 | DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-dawcontrol](https://github.com/CrossPad/crosspad-dawcontrol) |
 | **Instructions** | 0.3.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
 | **Mixer** | 0.15.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Pad Mixer** | 0.2.2 | Sixteen faders, one per pad | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-pad-mixer](https://github.com/CrossPad/crosspad-pad-mixer) |
-| **Piano** | 0.1.0 | Synth piano with parameter sliders, presets, octave control | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
+| **Piano** | 0.1.1 | Synth piano with parameter sliders, presets, octave control | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
 | **Pitch Play** | 0.10.0 | One sample or many, played chromatically on the pads and from a MIDI keyboard | esp-idf | core >=2.2.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pitchplay](https://github.com/CrossPad/crosspad-pitchplay) |
 | **Recorder** | 0.5.2 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
 | **Sampler** | 0.19.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=2.2.0,<3.0.0, gui >=2.2.0,<3.0.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.10.0 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=2.2.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
-| **Serial Monitor** | 0.1.0 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
+| **Serial Monitor** | 0.1.1 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Slicer** | 0.3.2 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
 | **Song** | 0.3.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |

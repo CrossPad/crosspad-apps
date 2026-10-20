@@ -1,22 +1,6 @@
 {
   "version": 1,
   "apps": {
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.0",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "recorder": {
       "name": "Recorder",
       "version": "0.5.2",
@@ -50,6 +34,22 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.1",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
     "arrange": {
       "name": "Arrange",
       "version": "0.16.0",
@@ -65,6 +65,23 @@
       "requires": {
         "crosspad-core": ">=2.2.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "slicer": {
+      "name": "Slicer",
+      "version": "0.3.2",
+      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
+      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
+      "component_path": "components/crosspad-slicer",
+      "icon": "slicer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
     "instructions": {
@@ -85,26 +102,9 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "slicer": {
-      "name": "Slicer",
-      "version": "0.3.2",
-      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
-      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
-      "component_path": "components/crosspad-slicer",
-      "icon": "slicer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "serial-monitor": {
       "name": "Serial Monitor",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
       "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
       "component_path": "components/crosspad-serial-monitor",
@@ -114,8 +114,8 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
     "pad-mixer": {
@@ -219,22 +219,6 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
-    "piano": {
-      "name": "Piano",
-      "version": "0.1.0",
-      "description": "Synth piano with parameter sliders, presets, octave control",
-      "repo": "https://github.com/CrossPad/crosspad-piano.git",
-      "component_path": "components/crosspad-piano",
-      "icon": "piano.png",
-      "category": "music",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
     "sampler": {
       "name": "Sampler",
       "version": "0.19.0",
@@ -250,6 +234,22 @@
       "requires": {
         "crosspad-core": ">=2.2.0,<3.0.0",
         "crosspad-gui": ">=2.2.0,<3.0.0"
+      }
+    },
+    "piano": {
+      "name": "Piano",
+      "version": "0.1.1",
+      "description": "Synth piano with parameter sliders, presets, octave control",
+      "repo": "https://github.com/CrossPad/crosspad-piano.git",
+      "component_path": "components/crosspad-piano",
+      "icon": "piano.png",
+      "category": "music",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     }
   }
