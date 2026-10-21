@@ -136,6 +136,56 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "synthesizer": {
+      "name": "Synthesizer",
+      "version": "0.1.0",
+      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
+      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
+      "component_path": "components/crosspad-synthesizer",
+      "icon": "synth.png",
+      "category": "music",
+      "platforms": [
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=0.3.0",
+        "crosspad-gui": ">=0.2.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.10.0",
+      "description": "Record, loop and erase scenes on the pads",
+      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "doom": {
+      "name": "DOOM",
+      "version": "0.1.0",
+      "description": "DOOM (doomgeneric) on the pads, the encoder and the panel; the one app of the doom firmware kit",
+      "repo": "https://github.com/CrossPad/crosspad-doom.git",
+      "component_path": "components/crosspad-doom",
+      "icon": "doom.png",
+      "category": "games",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.0.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
     "serial-monitor": {
       "name": "Serial Monitor",
       "version": "0.1.1",
@@ -201,56 +251,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "synthesizer": {
-      "name": "Synthesizer",
-      "version": "0.1.0",
-      "description": "Polyphonic synth with 3 oscillators, ADSR, filter, effects",
-      "repo": "https://github.com/CrossPad/crosspad-synthesizer.git",
-      "component_path": "components/crosspad-synthesizer",
-      "icon": "synth.png",
-      "category": "music",
-      "platforms": [
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=0.3.0",
-        "crosspad-gui": ">=0.2.0"
-      }
-    },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.10.0",
-      "description": "Record, loop and erase scenes on the pads",
-      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
-    "doom": {
-      "name": "DOOM",
-      "version": "0.1.0",
-      "description": "DOOM (doomgeneric) on the pads, the encoder and the panel; the one app of the doom firmware kit",
-      "repo": "https://github.com/CrossPad/crosspad-doom.git",
-      "component_path": "components/crosspad-doom",
-      "icon": "doom.png",
-      "category": "games",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.0.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "sampler": {
