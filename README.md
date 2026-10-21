@@ -27,7 +27,9 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Mixer** | 0.15.0 | Audio mixer/router — dynamic IAudioNode channels, multi-output routing | pc, esp-idf | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-mixer](https://github.com/CrossPad/crosspad-mixer) |
 | **Pad Mixer** | 0.2.2 | Sixteen faders, one per pad | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-pad-mixer](https://github.com/CrossPad/crosspad-pad-mixer) |
 | **Piano** | 0.1.1 | Synth piano with parameter sliders, presets, octave control | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-piano](https://github.com/CrossPad/crosspad-piano) |
+| **Piano Tiles** | 0.1.0 | Piano Tiles for the pads: tiles fall in four lanes, the pads show what comes, each tile plays the next note of a public-domain tune on a small piano synth; levels speed it up, best scores saved on the card; the one app of the pianotiles firmware kit | pc, esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pianotiles](https://github.com/CrossPad/crosspad-pianotiles) |
 | **Pitch Play** | 0.10.0 | One sample or many, played chromatically on the pads and from a MIDI keyboard | esp-idf | core >=2.2.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pitchplay](https://github.com/CrossPad/crosspad-pitchplay) |
+| **Pong** | 0.1.0 | Pong against the CPU over nine levels, or two players: encoder and pads as paddles, the pads light the court, square-wave effects; the one app of the pong firmware kit | pc, esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pong](https://github.com/CrossPad/crosspad-pong) |
 | **Recorder** | 0.5.2 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
 | **Sampler** | 0.19.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=2.2.0,<3.0.0, gui >=2.2.0,<3.0.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.10.0 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=2.2.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
@@ -36,7 +38,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Song** | 0.3.0 | Arrange scenes on a timeline | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*15 official app(s)*
+*17 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps
