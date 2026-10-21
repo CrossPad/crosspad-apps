@@ -18,6 +18,22 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
+    "pitchplay": {
+      "name": "Pitch Play",
+      "version": "0.10.0",
+      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
+      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
+      "component_path": "components/crosspad-pitchplay",
+      "icon": "pitchplay.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
     "recorder": {
       "name": "Recorder",
       "version": "0.5.2",
@@ -33,22 +49,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "pitchplay": {
-      "name": "Pitch Play",
-      "version": "0.10.0",
-      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
-      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
-      "component_path": "components/crosspad-pitchplay",
-      "icon": "pitchplay.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "arrange": {
@@ -203,56 +203,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "sampler": {
-      "name": "Sampler",
-      "version": "0.19.0",
-      "description": "Sample player with 16 pads, waveform editing, kit management",
-      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
-      "component_path": "components/crosspad-sampler",
-      "icon": "audio.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
-        "crosspad-gui": ">=2.2.0,<3.0.0"
-      }
-    },
-    "piano": {
-      "name": "Piano",
-      "version": "0.1.1",
-      "description": "Synth piano with parameter sliders, presets, octave control",
-      "repo": "https://github.com/CrossPad/crosspad-piano.git",
-      "component_path": "components/crosspad-piano",
-      "icon": "piano.png",
-      "category": "music",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "pong": {
-      "name": "Pong",
-      "version": "0.1.0",
-      "description": "Pong against the CPU over nine levels, or two players: encoder and pads as paddles, the pads light the court, square-wave effects; the one app of the pong firmware kit",
-      "repo": "https://github.com/CrossPad/crosspad-pong.git",
-      "component_path": "components/crosspad-pong",
-      "icon": "pong.png",
-      "category": "games",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.0.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
     "synthesizer": {
       "name": "Synthesizer",
       "version": "0.1.0",
@@ -293,6 +243,56 @@
       "repo": "https://github.com/CrossPad/crosspad-doom.git",
       "component_path": "components/crosspad-doom",
       "icon": "doom.png",
+      "category": "games",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.0.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "sampler": {
+      "name": "Sampler",
+      "version": "0.19.0",
+      "description": "Sample player with 16 pads, waveform editing, kit management",
+      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
+      "component_path": "components/crosspad-sampler",
+      "icon": "audio.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-gui": ">=2.2.0,<3.0.0"
+      }
+    },
+    "piano": {
+      "name": "Piano",
+      "version": "0.1.1",
+      "description": "Synth piano with parameter sliders, presets, octave control",
+      "repo": "https://github.com/CrossPad/crosspad-piano.git",
+      "component_path": "components/crosspad-piano",
+      "icon": "piano.png",
+      "category": "music",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "pong": {
+      "name": "Pong",
+      "version": "0.1.0",
+      "description": "Pong against the CPU over nine levels, or two players: encoder and pads as paddles, the pads light the court, square-wave effects; the one app of the pong firmware kit",
+      "repo": "https://github.com/CrossPad/crosspad-pong.git",
+      "component_path": "components/crosspad-pong",
+      "icon": "pong.png",
       "category": "games",
       "platforms": [
         "pc",
