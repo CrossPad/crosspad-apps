@@ -182,7 +182,7 @@ its firmware fits, and the list shows every app on it:
 The installer puts VS Code on the computer with the ESP-IDF, C/C++ and
 task-button extensions, and points it at the ESP-IDF it set up.
 
-1. Open VS Code, **File → Open Folder…**, pick `C:\CrossPad` (Mac/Linux:
+1. Open VS Code, **File → Open Folder…**, pick `C:\CrossPad\firmware` (Mac/Linux:
    `~/CrossPad`).
 2. VS Code asks whether you trust the folder. Click **Trust** — without it the
    extensions stay off.
@@ -246,19 +246,19 @@ crosspad-sim
 ![The CrossPad simulator on Windows, next to FL Studio](img/pc-1-simulator.png)
 
 Its app manager is `crosspad-pc` (same commands as CP Tools: `crosspad-pc
-status`, `crosspad-pc update --all`). The project is in `C:\CrossPad-PC`
+status`, `crosspad-pc update --all`). The project is in `C:\CrossPad\pc`
 (Mac/Linux: `~/CrossPad-PC`).
 
 ---
 
 ## The Arduino version
 
-If you said *y* to the Arduino version, `C:\CrossPad-Arduino` (Mac/Linux:
+If you said *y* to the Arduino version, `C:\CrossPad\arduino` (Mac/Linux:
 `~/CrossPad-Arduino`) holds the Arduino firmware with PlatformIO, already
 built once. For the 2.0 board:
 
 ```
-cd C:\CrossPad-Arduino
+cd C:\CrossPad\arduino
 pio run -e crosspad_v2
 ```
 
@@ -289,17 +289,21 @@ Set these before running the install line:
 
 | Variable | Default | What |
 |---|---|---|
-| `CROSSPAD_DIR` | `C:\CrossPad`, `~/CrossPad` | where the project goes (no spaces) |
+| `CROSSPAD_ROOT` | `C:\CrossPad` | Windows: the one folder the project, ESP-IDF, its tools and the extras go into (no spaces) |
+| `CROSSPAD_DIR` | `C:\CrossPad\firmware`, `~/CrossPad` | where the project goes (no spaces) |
 | `CROSSPAD_BRANCH` | `main` | branch of CrossPad/platform-idf (a checkout still on `crosspad_v20` is moved to `main`) |
-| `CROSSPAD_IDF_DIR` | an ESP-IDF 5.5 already here, else `C:\esp\esp-idf`, `~/esp/esp-idf` | which ESP-IDF to use or where it goes |
+| `CROSSPAD_IDF_DIR` | an ESP-IDF 5.5 already here, else `C:\CrossPad\esp-idf`, `~/esp/esp-idf` | which ESP-IDF to use or where it goes |
 | `CROSSPAD_WITH_PC=1`, `CROSSPAD_WITH_ARDUINO=1` | | set up the PC simulator / the Arduino version without asking |
 | `CROSSPAD_PC_BRANCH`, `CROSSPAD_ARDUINO_BRANCH` | `master`, `feat/audio-module-arduino` | branches of CrossPad/crosspad-pc and CrossPad/ESP32-S3 |
-| `CROSSPAD_PC_DIR`, `CROSSPAD_ARDUINO_DIR` | `C:\CrossPad-PC`, `~/CrossPad-PC`; `C:\CrossPad-Arduino`, `~/CrossPad-Arduino` | where they go |
+| `CROSSPAD_PC_DIR`, `CROSSPAD_ARDUINO_DIR` | `C:\CrossPad\pc`, `~/CrossPad-PC`; `C:\CrossPad\arduino`, `~/CrossPad-Arduino` | where they go |
 | `CROSSPAD_YES=1` | | answer yes to every question (the PC and Arduino extras stay off) |
 | `CROSSPAD_NO_HIL=1`, `CROSSPAD_NO_VSCODE=1`, `CROSSPAD_NO_MCP=1`, `CROSSPAD_NO_TUI=1` | | skip the test tools, VS Code, the AI-assistant tools, or opening CP Tools at the end |
 
 Windows installs everything for your user only (no administrator needed — except
-Visual Studio's C++ tools for the PC simulator, which Windows asks for once) and
-keeps to short folders, because ESP-IDF cannot build in paths with spaces or
-non-English letters.
+Visual Studio's C++ tools for the PC simulator, which Windows asks for once) into
+one short folder, `C:\CrossPad` — `firmware` (the project), `esp-idf` and
+`.espressif` (ESP-IDF and its tools), `pc`, `arduino` and `vcpkg` (the extras),
+`cptools.cmd` (CP Tools) — because ESP-IDF cannot build in paths with spaces or
+non-English letters. A setup from before 22 October 2026, with the project in
+`C:\CrossPad` itself and ESP-IDF in `C:\esp`, keeps its folders.
 </details>

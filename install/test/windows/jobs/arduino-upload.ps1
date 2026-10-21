@@ -10,7 +10,7 @@ $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Envir
     "== ports"; Get-CimInstance Win32_SerialPort | ForEach-Object { "$($_.DeviceID)  $($_.Name)  $($_.PNPDeviceID)" }
     "== board before"; cmd /c "crosspad-hil devices"
     "== pio run -e crosspad_v2 -t upload"
-    Set-Location C:\CrossPad-Arduino
+    Set-Location C:\CrossPad\arduino
     cmd /c "pio run -e crosspad_v2 -t upload" 2>&1 | Select-Object -Last 40
     "upload exit=$LASTEXITCODE $(Get-Date -Format o)"
     Start-Sleep 20

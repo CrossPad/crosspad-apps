@@ -1,4 +1,4 @@
-# Started by C:\runner.ps1 at logon (as run-test.ps1): runs every job.ps1 the
+# Started by C:\OEM\runner.ps1 at logon (as run-test.ps1): runs every job.ps1 the
 # host drops into \\host.lan\Data, one at a time, and keeps waiting. Output in
 # job.out, then job.done. The file is looked up by name: a directory listing of
 # the share stays stale after the host changes it (Samba does not break the

@@ -6,33 +6,43 @@
 #
 # Safe to run again at any time: every step checks what is already there and
 # only installs or repairs what is missing or broken. No administrator rights
-# needed: everything goes into your user account and C:\esp, C:\CrossPad. The
-# one exception is the PC simulator's Visual Studio C++ tools (Windows asks once).
+# needed: everything goes into your user account and one folder, C:\CrossPad
+# (the project, ESP-IDF and its tools, the extras). The one exception is the
+# PC simulator's Visual Studio C++ tools (Windows asks once).
 #
 # Options (environment variables):
-#   CROSSPAD_DIR=C:\CrossPad       where the project goes (short, no spaces)
+#   CROSSPAD_ROOT=C:\CrossPad      the one folder everything below goes into (short, no spaces)
+#   CROSSPAD_DIR=C:\CrossPad\firmware   where the project goes
 #   CROSSPAD_BRANCH=main           which branch of CrossPad/platform-idf
-#   CROSSPAD_IDF_DIR=C:\esp\esp-idf   (default: an ESP-IDF 5.5 already here, else this)
+#   CROSSPAD_IDF_DIR=C:\CrossPad\esp-idf   (default: an ESP-IDF 5.5 already here, else this)
 #   CROSSPAD_YES=1                 answer yes to every question (extras stay off)
-#   CROSSPAD_WITH_PC=1             also set up the PC simulator (C:\CrossPad-PC)
-#   CROSSPAD_WITH_ARDUINO=1        also set up the Arduino version (C:\CrossPad-Arduino)
+#   CROSSPAD_WITH_PC=1             also set up the PC simulator (C:\CrossPad\pc)
+#   CROSSPAD_WITH_ARDUINO=1        also set up the Arduino version (C:\CrossPad\arduino)
 #   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_VSCODE=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"      # Invoke-WebRequest is 10x slower with the bar
 
 function Env-Or($name, $default) { $v = [Environment]::GetEnvironmentVariable($name); if ($v) { $v } else { $default } }
-$CrossPadDir = Env-Or "CROSSPAD_DIR" "C:\CrossPad"
+$Root        = Env-Or "CROSSPAD_ROOT" "C:\CrossPad"
+# Installers before 2026-10-22 made the root the project itself and put
+# ESP-IDF, the simulator, the Arduino version and vcpkg next to it on C:\.
+# Such a setup keeps its folders: moving a project breaks its .venv and
+# build directories, and VS Code may hold it open.
+$Legacy      = (-not $env:CROSSPAD_DIR) -and (Test-Path "$Root\.git")
+$CrossPadDir = Env-Or "CROSSPAD_DIR" $(if ($Legacy) { $Root } else { "$Root\firmware" })
 $Branch      = Env-Or "CROSSPAD_BRANCH" "main"
-$IdfDir      = Env-Or "CROSSPAD_IDF_DIR" "C:\esp\esp-idf"
-$IdfTools    = "C:\esp\.espressif"           # short, ASCII-only: user names break ESP-IDF tools
+$IdfHome     = if ($Legacy) { "C:\esp" } else { $Root }
+$IdfDir      = Env-Or "CROSSPAD_IDF_DIR" "$IdfHome\esp-idf"
+$IdfTools    = "$IdfHome\.espressif"         # short, ASCII-only: user names break ESP-IDF tools
 $IdfVersion  = "v5.5.5"
 $Repo        = "CrossPad/platform-idf"
-$PcDir       = Env-Or "CROSSPAD_PC_DIR" "C:\CrossPad-PC"
+$PcDir       = Env-Or "CROSSPAD_PC_DIR" $(if ($Legacy) { "C:\CrossPad-PC" } else { "$Root\pc" })
 $PcBranch    = Env-Or "CROSSPAD_PC_BRANCH" "master"
+$Vcpkg       = if ($Legacy) { "C:\vcpkg" } else { "$Root\vcpkg" }
 # The Arduino version lives on its development branch: main there predates
 # the app manager and the 2.0 board.
-$ArduinoDir  = Env-Or "CROSSPAD_ARDUINO_DIR" "C:\CrossPad-Arduino"
+$ArduinoDir  = Env-Or "CROSSPAD_ARDUINO_DIR" $(if ($Legacy) { "C:\CrossPad-Arduino" } else { "$Root\arduino" })
 $ArduinoBranch = Env-Or "CROSSPAD_ARDUINO_BRANCH" "feat/audio-module-arduino"
 $WithPc      = [bool]$env:CROSSPAD_WITH_PC
 $WithArduino = [bool]$env:CROSSPAD_WITH_ARDUINO
@@ -73,8 +83,8 @@ function Download($url, $dest) { Invoke-WebRequest -UseBasicParsing $url -OutFil
 Write-Host "CrossPad setup" -ForegroundColor White
 Write-Host "This installs what the CrossPad tools need and opens CP Tools."
 Write-Host "It takes 15-30 minutes the first time (mostly downloading), a minute after that."
-Write-Host "Project folder: $CrossPadDir"
-if (($CrossPadDir + $IdfDir) -match ' ') { Bad "The folders must not contain spaces (ESP-IDF cannot build there)" "set CROSSPAD_DIR to a path without spaces"; exit 1 }
+Write-Host "Folder: $(if ($Legacy) { $CrossPadDir } else { $Root })"
+if (($Root + $CrossPadDir + $IdfDir) -match ' ') { Bad "The folders must not contain spaces (ESP-IDF cannot build there)" "set CROSSPAD_ROOT to a path without spaces"; exit 1 }
 $tmp = Join-Path $env:TEMP "crosspad-setup"; New-Item -ItemType Directory -Force $tmp | Out-Null
 if (-not ($WithPc -or $WithArduino) -and -not $env:CROSSPAD_YES) {
     Write-Host ""
@@ -191,6 +201,7 @@ import glob, json, os, re, sys
 home = os.path.expanduser("~")
 want = sys.argv[1] if len(sys.argv) > 1 else "5.5"
 recorded = sys.argv[2] if len(sys.argv) > 2 else ""   # idf_tools_path from crosspad.local.json
+ours = sys.argv[3] if len(sys.argv) > 3 else ""       # where this installer puts ESP-IDF
 found = []
 
 
@@ -215,6 +226,9 @@ def add(path, tools=None):
 
 
 add(os.environ.get("IDF_PATH"), os.environ.get("IDF_TOOLS_PATH"))
+if ours:
+    for p in [os.path.join(ours, "esp-idf")] + sorted(glob.glob(os.path.join(ours, "esp-idf-v*")), reverse=True):
+        add(p)
 # The IDE / EIM records: esp_idf.json (VS Code extension, EIM) and eim_idf.json.
 for tools_dir in (os.environ.get("IDF_TOOLS_PATH"), os.path.join(home, ".espressif"),
                   "C:/Espressif/tools", "C:/Espressif", "C:/esp/.espressif"):
@@ -275,7 +289,7 @@ if ($env:CROSSPAD_IDF_DIR) {
     if (Test-Path "$CrossPadDir\crosspad.local.json") {
         try { $recorded = [string](Get-Content "$CrossPadDir\crosspad.local.json" -Raw | ConvertFrom-Json).idf_tools_path } catch {}
     }
-    $found = (& python "$tmp\find_idf.py" 5.5 $recorded) | ConvertFrom-Json
+    $found = (& python "$tmp\find_idf.py" 5.5 $recorded $IdfHome) | ConvertFrom-Json
     if ($found.use) {
         $IdfDir = $found.use.path; $IdfTools = $found.use.tools
         if (-not (Test-Path "$IdfDir\.crosspad-installed")) {
@@ -284,7 +298,7 @@ if ($env:CROSSPAD_IDF_DIR) {
         }
     } else {
         if ($found.others) { Note "found ESP-IDF $($found.others -join '; ') - CrossPad needs 5.5; it goes next to them, yours stay as they are" }
-        if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.crosspad-installed")) { $IdfDir = "C:\esp\esp-idf-v5.5" }
+        if ((Test-Path $IdfDir) -and -not (Test-Path "$IdfDir\.crosspad-installed")) { $IdfDir = "$IdfHome\esp-idf-v5.5" }
     }
 }
 $env:IDF_TOOLS_PATH = $IdfTools
@@ -318,7 +332,7 @@ if (-not (Idf-Ok)) {
     }
 }
 if (Idf-Ok) { Ok "ESP-IDF $(git -C $IdfDir describe --tags 2>$null) at $IdfDir" }
-elseif (-not $ownIdf) { Bad "your ESP-IDF at $IdfDir does not start" "repair it with the tool you installed it with, or set CROSSPAD_IDF_DIR=C:\esp\crosspad-idf and run this again for a separate one" }
+elseif (-not $ownIdf) { Bad "your ESP-IDF at $IdfDir does not start" "repair it with the tool you installed it with, or set CROSSPAD_IDF_DIR=$IdfHome\crosspad-idf and run this again for a separate one" }
 else { Bad "ESP-IDF did not install" "the details are in $idfLog - send it on Discord (#support)" }
 
 # ---------------------------------------------------------------------------
@@ -505,16 +519,16 @@ if ($WithPc) {
     $vcvars = Find-Vcvars
     if (-not $vcvars) { Bad "Visual Studio's C++ build tools did not install" "details in $tmp\vs-buildtools.log" } else {
         Ok "C++ build tools"
-        if (-not (Test-Path "C:\vcpkg\vcpkg.exe")) {
-            if (-not (Test-Path "C:\vcpkg")) { git clone --quiet https://github.com/microsoft/vcpkg C:\vcpkg }
-            cmd /c "C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics" *> "$tmp\vcpkg.log"
+        if (-not (Test-Path "$Vcpkg\vcpkg.exe")) {
+            if (-not (Test-Path $Vcpkg)) { git clone --quiet https://github.com/microsoft/vcpkg $Vcpkg }
+            cmd /c "$Vcpkg\bootstrap-vcpkg.bat -disableMetrics" *> "$tmp\vcpkg.log"
         }
-        cmd /c "C:\vcpkg\vcpkg.exe install sdl2:x64-windows" *>> "$tmp\vcpkg.log"
+        cmd /c "$Vcpkg\vcpkg.exe install sdl2:x64-windows" *>> "$tmp\vcpkg.log"
         if ($LASTEXITCODE -eq 0) { Ok "SDL2 (vcpkg)" } else { Bad "SDL2 did not install" "details in $tmp\vcpkg.log" }
         if (Clone-Or-Update $PcDir "CrossPad/crosspad-pc" $PcBranch) {
             Ok "crosspad-pc in $PcDir"
             # build.bat names Visual Studio Community; vswhere finds any edition.
-            cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug && cmake --build build" *> "$tmp\pc-build.log"
+            cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=$($Vcpkg -replace '\\', '/')/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug && cmake --build build" *> "$tmp\pc-build.log"
             if ($LASTEXITCODE -eq 0 -and (Test-Path "$PcDir\bin\CrossPad.exe")) { Ok "the simulator is built - start it with: crosspad-sim" }
             else { Bad "the PC simulator did not build" "details in $tmp\pc-build.log - send it on Discord (#support)" }
         } else { Bad "crosspad-pc did not download" "check the connection and run this again" }
@@ -583,7 +597,7 @@ call "$IdfDir\export.bat" >nul 2>&1
 if "%~1"=="" (python "$CrossPadDir\tools\app_manager.py" tui) else (python "$CrossPadDir\tools\app_manager.py" %*)
 "@ | Set-Content -Encoding ASCII "$bin\cptools.cmd"
 $launcher = "$bin\cptools.cmd"
-Copy-Item $launcher "$CrossPadDir\cptools.cmd" -Force     # the path older shortcuts point at
+Copy-Item $launcher "$Root\cptools.cmd" -Force     # in the folder a user opens; older shortcuts point here too
 # Python edits the personal config: it keeps every other key (Windows
 # PowerShell 5.1 cannot round-trip JSON into a hashtable).
 & python -c "import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); c=json.loads(p.read_text()) if p.exists() else {}; c['idf_path']=sys.argv[2]; c['idf_tools_path']=sys.argv[3]; p.write_text(json.dumps(c, indent=2)+chr(10))" "$CrossPadDir\crosspad.local.json" $IdfDir $IdfTools

@@ -929,7 +929,8 @@ class AppManager:
             Path.home() / "esp" / "esp-idf",
             Path.home() / "esp" / "v5.5" / "esp-idf",
             Path("/opt/esp-idf"),
-            Path("C:/esp/esp-idf"),        # the installer's short path on Windows
+            Path("C:/CrossPad/esp-idf"),   # the installer's short path on Windows
+            Path("C:/esp/esp-idf"),        # ... before 2026-10-22
         ]:
             if candidate.is_dir():
                 return str(candidate)

@@ -14,9 +14,9 @@ function Run($name) {
     "doctor exit=$LASTEXITCODE" | Out-File -Append "$S\win-$name.log"
 }
 Run "1-fresh"
-Remove-Item -Recurse -Force C:\esp\.espressif\python_env -ErrorAction SilentlyContinue
-Remove-Item -Force C:\CrossPad\components\crosspad-sampler\.git -ErrorAction SilentlyContinue
-Rename-Item C:\esp\esp-idf\tools tools.gone -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force C:\CrossPad\.espressif\python_env -ErrorAction SilentlyContinue
+Remove-Item -Force C:\CrossPad\firmware\components\crosspad-sampler\.git -ErrorAction SilentlyContinue
+Rename-Item C:\CrossPad\esp-idf\tools tools.gone -ErrorAction SilentlyContinue
 Run "2-broken"
 Remove-Item "$S\token.txt" -Force
 [Environment]::SetEnvironmentVariable("GH_TOKEN", $null, "User")
