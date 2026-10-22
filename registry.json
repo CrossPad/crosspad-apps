@@ -53,7 +53,7 @@
     },
     "pitchplay": {
       "name": "Pitch Play",
-      "version": "0.10.1",
+      "version": "0.10.2",
       "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
       "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
       "component_path": "components/crosspad-pitchplay",
