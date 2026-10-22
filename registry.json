@@ -51,23 +51,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.16.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.1",
@@ -82,6 +65,23 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.17.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.6.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "instructions": {
@@ -288,7 +288,7 @@
     },
     "sampler": {
       "name": "Sampler",
-      "version": "0.20.0",
+      "version": "0.21.0",
       "description": "Sample player with 16 pads, waveform editing, kit management",
       "repo": "https://github.com/CrossPad/crosspad-sampler.git",
       "component_path": "components/crosspad-sampler",
@@ -299,7 +299,7 @@
         "arduino"
       ],
       "requires": {
-        "crosspad-core": ">=2.5.0,<3.0.0",
+        "crosspad-core": ">=2.6.0,<3.0.0",
         "crosspad-gui": ">=2.2.0,<3.0.0"
       }
     }
