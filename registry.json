@@ -84,23 +84,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "slicer": {
-      "name": "Slicer",
-      "version": "0.3.2",
-      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
-      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
-      "component_path": "components/crosspad-slicer",
-      "icon": "slicer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "instructions": {
       "name": "Instructions",
       "version": "0.3.0",
@@ -130,6 +113,23 @@
       "platforms": [
         "pc",
         "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "slicer": {
+      "name": "Slicer",
+      "version": "0.4.0",
+      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
+      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
+      "component_path": "components/crosspad-slicer",
+      "icon": "slicer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
       ],
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
@@ -253,23 +253,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "sampler": {
-      "name": "Sampler",
-      "version": "0.19.0",
-      "description": "Sample player with 16 pads, waveform editing, kit management",
-      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
-      "component_path": "components/crosspad-sampler",
-      "icon": "audio.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "arduino"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
-        "crosspad-gui": ">=2.2.0,<3.0.0"
-      }
-    },
     "piano": {
       "name": "Piano",
       "version": "0.1.1",
@@ -301,6 +284,23 @@
       "requires": {
         "crosspad-core": ">=2.0.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "sampler": {
+      "name": "Sampler",
+      "version": "0.20.0",
+      "description": "Sample player with 16 pads, waveform editing, kit management",
+      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
+      "component_path": "components/crosspad-sampler",
+      "icon": "audio.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "arduino"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.5.0,<3.0.0",
+        "crosspad-gui": ">=2.2.0,<3.0.0"
       }
     }
   }
