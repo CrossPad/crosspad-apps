@@ -15,13 +15,13 @@ $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Envir
         $c = Get-Command $t -ErrorAction SilentlyContinue
         "{0,-8} {1}" -f $t, ($(if ($c) { $c.Source } else { "MISSING" })) }
     "== extensions"; cmd /c "code --list-extensions"
-    "== settings.json"; Get-Content C:\CrossPad\.vscode\settings.json
-    "== mcp.json"; Get-Content C:\CrossPad\.vscode\mcp.json } *> (Log "2-environment")
+    "== settings.json"; Get-Content C:\CrossPad\firmware\.vscode\settings.json
+    "== mcp.json"; Get-Content C:\CrossPad\firmware\.vscode\mcp.json } *> (Log "2-environment")
 cmd /c "cptools doctor" *> (Log "3-doctor")
 cmd /c "cptools device" *>> (Log "3-doctor")
 cmd /c "cptools update-board" *> (Log "4-update-board")
 "exit=$LASTEXITCODE" | Out-File -Append (Log "4-update-board")
-Copy-Item C:\CrossPad\.crosspad\last-update.log "$S\board-last-update.log" -ErrorAction SilentlyContinue
+Copy-Item C:\CrossPad\firmware\.crosspad\last-update.log "$S\board-last-update.log" -ErrorAction SilentlyContinue
 Remove-Item "$S\token.txt" -Force
 [Environment]::SetEnvironmentVariable("GH_TOKEN", $null, "User")
 "done $(Get-Date -Format o)" | Out-File "$S\finished"
