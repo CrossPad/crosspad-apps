@@ -238,7 +238,7 @@
     },
     "arrange": {
       "name": "Arrange",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "description": "Four audio tracks of bounced clips on a timeline",
       "repo": "https://github.com/CrossPad/crosspad-arrange.git",
       "component_path": "components/crosspad-arrange",
@@ -249,7 +249,7 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=2.8.0,<3.0.0",
+        "crosspad-core": ">=2.9.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
