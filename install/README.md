@@ -51,12 +51,13 @@ version of the firmware. Press **Enter** for *no* if you only want to update
 your CrossPad — you can run the install line again later and answer *y*.
 Answer them and the rest runs without you.
 
-![Both questions answered with y, steps 1 and 2 already done](img/win-7-extras.png)
+![Both questions answered with y, steps 1 and 2 done, step 3 downloading the project into C:\CrossPad\firmware](img/win-7-extras.png)
 
 ### 3. Sign in to GitHub (once)
 
-Early on (step 2) the installer shows a **one-time code** — it is already
-copied for you. Press **Enter**: your browser opens GitHub. Sign in if it asks,
+Early on (step 2) GitHub asks *Authenticate Git with your GitHub
+credentials?* — press **Enter** for yes. Then the installer shows a **one-time
+code** — it is already copied for you. Press **Enter**: your browser opens GitHub. Sign in if it asks,
 press **Ctrl+V** to paste the code, and click **Continue**, then
 **Authorize**. Come back to the PowerShell window — it carries on by itself.
 Next time it remembers you.
@@ -75,13 +76,11 @@ extension and the CP Tools buttons, pointed at the right ESP-IDF) and
 Code), and checks at the end that every command below works in a new
 terminal. You can leave the window alone.
 
-![Steps 1 and 2 finished with [OK], step 3 working](img/win-3-steps.png)
-
 With both extras the list is longer — the PC simulator needs Visual Studio's
 C++ build tools (about 20 minutes the first time, Windows asks once for
 permission) and the Arduino version brings PlatformIO:
 
-![Steps 4 to 10 with [OK]: ESP-IDF, USB, test tools, VS Code, AI tools, PC simulator, Arduino](img/win-8-extras-steps.png)
+![Steps 4 to 10 with [OK]: ESP-IDF, USB, test tools, VS Code, AI tools, PC simulator in C:\CrossPad\pc, Arduino in C:\CrossPad\arduino](img/win-8-extras-steps.png)
 
 ### 5. "All set"
 
@@ -182,14 +181,16 @@ its firmware fits, and the list shows every app on it:
 The installer puts VS Code on the computer with the ESP-IDF, C/C++ and
 task-button extensions, and points it at the ESP-IDF it set up.
 
-1. Open VS Code, **File → Open Folder…**, pick `C:\CrossPad\firmware` (Mac/Linux:
+1. Open VS Code. The first time it offers to sign in to GitHub Copilot: click
+   **Continue without Signing In**, then **Get Started** (you can sign in later).
+2. **File → Open Folder…**, pick `C:\CrossPad\firmware` (Mac/Linux:
    `~/CrossPad`).
-2. VS Code asks whether you trust the folder. Click **Trust** — without it the
-   extensions stay off.
+3. VS Code opens the folder in *Restricted Mode*. Click **Manage** in the bar
+   at the top, then **Trust** — without it the extensions stay off.
 
-   ![Workspace Trust: click Trust](img/vscode-1-trust.png)
+   ![Restricted Mode: Manage in the top bar, then Trust](img/vscode-1-trust.png)
 
-3. The bottom bar now shows **ESP-IDF v5.5** (v5.5.5 when the installer set it up) and the **CP Tools** button
+4. The bottom bar now shows **ESP-IDF v5.5** (v5.5.5 when the installer set it up) and the **CP Tools** button
    (plus **UART** and **OTA** to put a build on the board). The **CP Tools**
    button opens the same CP Tools as the desktop shortcut.
 
