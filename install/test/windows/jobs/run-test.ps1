@@ -10,6 +10,8 @@ function Run($name) {
     "== $name $(Get-Date -Format o)" | Out-File "$S\win-$name.log"
     powershell -NoProfile -ExecutionPolicy Bypass -Command $line *>> "$S\win-$name.log"
     "exit=$LASTEXITCODE $(Get-Date -Format o)" | Out-File -Append "$S\win-$name.log"
+    # This process started before the installer put Python on PATH.
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
     & C:\CrossPad\cptools.cmd doctor *>> "$S\win-$name.log"
     "doctor exit=$LASTEXITCODE" | Out-File -Append "$S\win-$name.log"
 }
