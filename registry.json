@@ -236,23 +236,6 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.16.1",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "piano": {
       "name": "Piano",
       "version": "0.1.1",
@@ -301,6 +284,23 @@
       "requires": {
         "crosspad-core": ">=2.6.0,<3.0.0",
         "crosspad-gui": ">=2.2.0,<3.0.0"
+      }
+    },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.17.0",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.16.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     }
   }
