@@ -35,6 +35,22 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "pitchplay": {
+      "name": "Pitch Play",
+      "version": "0.10.3",
+      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
+      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
+      "component_path": "components/crosspad-pitchplay",
+      "icon": "pitchplay.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
     "appstore": {
       "name": "App Store",
       "version": "0.1.1",
@@ -51,19 +67,20 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "pitchplay": {
-      "name": "Pitch Play",
-      "version": "0.10.3",
-      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
-      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
-      "component_path": "components/crosspad-pitchplay",
-      "icon": "pitchplay.png",
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.18.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
       "category": "music",
       "platforms": [
-        "esp-idf"
+        "esp-idf",
+        "pc"
       ],
       "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-core": ">=2.9.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
@@ -102,6 +119,23 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.15.1",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
     "serial-monitor": {
       "name": "Serial Monitor",
       "version": "0.1.1",
@@ -129,23 +163,6 @@
       "platforms": [
         "esp-idf",
         "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.15.1",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
       ],
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
@@ -234,23 +251,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.18.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.9.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "piano": {
