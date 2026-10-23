@@ -67,23 +67,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "slicer": {
-      "name": "Slicer",
-      "version": "0.4.0",
-      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
-      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
-      "component_path": "components/crosspad-slicer",
-      "icon": "slicer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "instructions": {
       "name": "Instructions",
       "version": "0.3.0",
@@ -95,6 +78,23 @@
       "platforms": [
         "esp-idf",
         "arduino",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "slicer": {
+      "name": "Slicer",
+      "version": "0.4.0",
+      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
+      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
+      "component_path": "components/crosspad-slicer",
+      "icon": "slicer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
         "pc"
       ],
       "requires": {
@@ -238,7 +238,7 @@
     },
     "arrange": {
       "name": "Arrange",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "description": "Four audio tracks of bounced clips on a timeline",
       "repo": "https://github.com/CrossPad/crosspad-arrange.git",
       "component_path": "components/crosspad-arrange",
