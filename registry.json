@@ -67,23 +67,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.18.1",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.10.1,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
     "slicer": {
       "name": "Slicer",
       "version": "0.4.0",
@@ -119,21 +102,21 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.15.1",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.18.2",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
       "platforms": [
-        "pc",
-        "esp-idf"
+        "esp-idf",
+        "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
+        "crosspad-core": ">=2.11.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "serial-monitor": {
@@ -163,6 +146,23 @@
       "platforms": [
         "esp-idf",
         "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.15.1",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc",
+        "esp-idf"
       ],
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
