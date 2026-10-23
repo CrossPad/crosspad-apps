@@ -7,12 +7,12 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
+- **Sampler v0.21.1** — the waveform cache's table (~9.7 kB of names and pointers the UI reads) in PSRAM where the board has it (EXT_RAM_BSS_ATTR), so internal RAM can pay for the 32 kB I-cache the render runs from.
 - **Sampler v0.21.0** — picking a kit for a track opens on the list of its kind (KitSelectorConfig::list, kit_selector_app_pick_for(..., KitList)): Arrange's DRUMS on the drum kits, SLICE on the Slice kits, PERF on the rest. Requires core 2.6.
 - **Arrange v0.20.1** — BOUNCE renders as a freeze does (core 2.14) -- off the clock, a looping block's two passes, nothing rendered for a track already frozen -- and shows in the processing box (BOUNCING TRACK n), the header saying BOUNCING... Requires core 2.14.
 - **Arrange v0.20.0** — a freeze shows in the processing box over the lanes, as a time stretch does -- FREEZING TRACK 2, render 1 of 3, 40 % -- and core 2.13 renders it off the clock where the board can. Requires core 2.13.
 - **Sampler v0.20.0** — the kit types down the kit browser's left are PERF (was KITS), DRUMS, SLICE, PITCH, SONGS, USER -- six keys, 22 px each. SLICE lists the Slice kits ("engine": "slice", what the Slicer writes): one WAV in regions, one voice. Drums are told by KitInfo::isDrums(). Requires core 2.5.
 - **Arrange v0.19.1** — fits under the 40 px top bar (crosspad-gui 2.4): the key row sat 5 px under it -- the screen is laid out from the export's 30 px bar -- and the screen is 200 px tall, not 210. The key row is 2 px under the bar, the lanes 28 px, the tool row 2 px higher.
-- **Arrange v0.19.0** — auto-freeze starts the moment ARM moves on -- a new track added -- with the song stopped, not 3 s later; the header shows the whole freeze, FREEZING 2/5 40%. Core 2.12 renders only the blocks that changed or are new: a block the same as another, or as at the last freeze, is found on the card. Requires core 2.12.
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -32,7 +32,7 @@ Central registry of available CrossPad applications. Auto-discovered from GitHub
 | **Pitch Play** | 0.10.3 | One sample or many, played chromatically on the pads and from a MIDI keyboard | esp-idf | core >=2.2.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pitchplay](https://github.com/CrossPad/crosspad-pitchplay) |
 | **Pong** | 0.1.0 | Pong against the CPU over nine levels, or two players: encoder and pads as paddles, the pads light the court, square-wave effects; the one app of the pong firmware kit | pc, esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pong](https://github.com/CrossPad/crosspad-pong) |
 | **Recorder** | 0.5.2 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
-| **Sampler** | 0.21.0 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=2.6.0,<3.0.0, gui >=2.2.0,<3.0.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
+| **Sampler** | 0.21.1 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=2.6.0,<3.0.0, gui >=2.2.0,<3.0.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
 | **Sequencer** | 0.10.1 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=2.7.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
 | **Serial Monitor** | 0.1.1 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Slicer** | 0.4.0 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
