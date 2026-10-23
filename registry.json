@@ -35,6 +35,22 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.1",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
     "pitchplay": {
       "name": "Pitch Play",
       "version": "0.10.3",
@@ -51,20 +67,21 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.1",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.20.1",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
       "platforms": [
+        "esp-idf",
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
+        "crosspad-core": ">=2.14.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "instructions": {
@@ -134,23 +151,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.20.1",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.14.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "serial-monitor": {
