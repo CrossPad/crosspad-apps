@@ -135,23 +135,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "mixer": {
-      "name": "Mixer",
-      "version": "0.15.1",
-      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
-      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
-      "component_path": "components/crosspad-mixer",
-      "icon": "mixer.png",
-      "category": "audio",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "synthesizer": {
       "name": "Synthesizer",
       "version": "0.1.0",
@@ -236,9 +219,26 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "mixer": {
+      "name": "Mixer",
+      "version": "0.16.0",
+      "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
+      "repo": "https://github.com/CrossPad/crosspad-mixer.git",
+      "component_path": "components/crosspad-mixer",
+      "icon": "mixer.png",
+      "category": "audio",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
     "arrange": {
       "name": "Arrange",
-      "version": "0.19.1",
+      "version": "0.20.0",
       "description": "Four audio tracks of bounced clips on a timeline",
       "repo": "https://github.com/CrossPad/crosspad-arrange.git",
       "component_path": "components/crosspad-arrange",
@@ -249,7 +249,7 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=2.12.0,<3.0.0",
+        "crosspad-core": ">=2.13.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
