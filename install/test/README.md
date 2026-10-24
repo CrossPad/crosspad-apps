@@ -66,3 +66,33 @@ Traps, each found the hard way:
   150 ms, down, 120 ms, up.
 - `-NoExit` in front of `irm … | iex` is flagged as Trojan:Win32/Commando.A!ml;
   the README's line, without it, passes.
+
+## Windows CI runner — `windows/winrunner.sh`
+
+The same VM, kept running, as a GitHub Actions runner for a private
+repository (default `CrossPad/crosspad-hil`), whose hosted Windows minutes are
+paid. Public repositories stay on `windows-latest`: free there, and a
+self-hosted runner would run a fork's pull request on this machine. Disk and
+share in `$WINRUNNER_HOME` (`/mnt/backup/winrunner`), noVNC on
+http://127.0.0.1:8007; it runs beside `wintest.sh`.
+
+```bash
+windows/winrunner.sh create      # once: the golden disk + Git + the runner as a service (SYSTEM)
+windows/winrunner.sh on          # CI_WIN_RUNNER=crosspad-win: jobs come to the VM
+windows/winrunner.sh status      # VM, runner online/busy, the variable
+windows/winrunner.sh off         # back to windows-latest — before powering the PC down
+windows/winrunner.sh job FILE.ps1   # run a script in the VM (after start)
+```
+
+The workflow reads `runs-on: ${{ vars.CI_WIN_RUNNER || 'windows-latest' }}`.
+The container restarts with Docker, the runner with Windows.
+
+- **The clock.** The VM's RTC runs in UTC and Windows reads it as local
+  time: 7 h ahead under the golden disk's Pacific zone, 2 h behind under
+  CEST, and GitHub refuses the runner's tokens either way (`The token is not
+  valid until …`, then a misleading "runner registration has been deleted").
+  The time service does not save it: its first sync comes before the network
+  and the next one hours later. `runner-setup.ps1` sets `RealTimeIsUniversal`
+  and a manual NTP peer.
+- **The job queue** runs only after `start`: at the first logon after
+  `create` the setup takes the one `run-test.ps1` slot.
