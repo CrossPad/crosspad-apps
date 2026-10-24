@@ -271,3 +271,158 @@ def test_project_update_never_merges_over_local_commits(behind):
     head = git(proj, "rev-parse", "HEAD")
     assert mgr.update_project()[0] == "local-commits"
     assert git(proj, "rev-parse", "HEAD") == head
+
+
+def core_header(proj, version):
+    major, minor, patch = version.split(".")
+    inc = proj / "components/crosspad-core/include/crosspad"
+    inc.mkdir(parents=True, exist_ok=True)
+    (inc / "CrosspadCoreVersion.hpp").write_text(
+        f"#define CROSSPAD_CORE_VERSION_MAJOR {major}\n"
+        f"#define CROSSPAD_CORE_VERSION_MINOR {minor}\n"
+        f"#define CROSSPAD_CORE_VERSION_PATCH {patch}\n")
+
+
+@pytest.fixture
+def releases(tmp_path, monkeypatch):
+    """An app with three releases on origin; the newest wants core 2.0. The
+    project builds against core 1.70 and has the app on v0.1.0."""
+    no_git_identity(tmp_path, monkeypatch)
+    app = tmp_path / "crosspad-sampler"
+    app.mkdir()
+    git(app, "init", "-q", "-b", "main")
+    shas = {}
+    for tag, spec in (("v0.1.0", ">=1.60.0"), ("v0.2.0", ">=1.70.0,<3.0.0"),
+                      ("v0.3.0", "^2.0.0")):
+        (app / "crosspad-app.json").write_text(json.dumps({"requires": {"crosspad-core": spec}}))
+        git(app, "add", ".")
+        git(app, "commit", "-qm", tag)
+        git(app, "tag", tag)
+        shas[tag] = git(app, "rev-parse", "HEAD")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    git(proj, "init", "-q", "-b", "main")
+    git(proj, "submodule", "add", "-q", str(app), "components/crosspad-sampler")
+    sub = proj / "components/crosspad-sampler"
+    git(sub, "checkout", "-q", "v0.1.0")
+    git(proj, "add", ".")
+    git(proj, "commit", "-qm", "sub")
+    core_header(proj, "1.70.0")
+    (proj / "apps.json").write_text(json.dumps({"installed": {"sampler": {"ref": "main"}}}))
+    (proj / "app-registry.json").write_text(json.dumps({"apps": {}}))
+    mgr = cam.AppManager(str(proj), cam.PlatformConfig(platform="pc", lib_dir="components"))
+    return mgr, proj, sub, shas
+
+
+def test_release_track_takes_the_newest_release_this_core_can_build(releases):
+    mgr, proj, sub, shas = releases
+    mgr.set_app_policy("sampler", "registry")
+    assert mgr.update(app_name="sampler") == []
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.2.0"]
+    # The next update finds nothing that fits: it stays, and says why.
+    assert mgr.update(app_name="sampler") == [
+        ("sampler", "0.3.0 waits for a CrossPad update: needs core ^2.0.0, "
+                    "this project has 1.70.0")]
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.2.0"]
+    core_header(proj, "2.0.0")
+    assert mgr.update(app_name="sampler") == []
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.3.0"]
+
+
+def test_branch_track_waits_while_the_branch_needs_a_newer_core(releases):
+    mgr, proj, sub, shas = releases
+    mgr.set_app_policy("sampler", "branch", ref="main")
+    assert mgr.update(app_name="sampler") == [
+        ("sampler", "main waits for a CrossPad update: needs core ^2.0.0, "
+                    "this project has 1.70.0")]
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.1.0"]
+    core_header(proj, "2.0.1")
+    assert mgr.update(app_name="sampler") == []
+    assert git(sub, "rev-parse", "HEAD") == shas["v0.3.0"]
+
+
+@pytest.fixture
+def moved_pins(tmp_path, monkeypatch):
+    """A fresh clone (no apps.json) one commit behind a project that moved
+    its sampler pin and added a fishtank app."""
+    no_git_identity(tmp_path, monkeypatch)
+    repos = {}
+    for name in ("crosspad-sampler", "crosspad-fishtank"):
+        repo = tmp_path / name
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / "a.txt").write_text("1")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "one")
+        repos[name] = repo
+    first = git(repos["crosspad-sampler"], "rev-parse", "HEAD")
+    up = tmp_path / "up"
+    up.mkdir()
+    git(up, "init", "-q", "-b", "main")
+    git(up, "submodule", "add", "-q", str(repos["crosspad-sampler"]), "components/crosspad-sampler")
+    git(up, "commit", "-qm", "base")
+    git(tmp_path, "clone", "-q", "--recurse-submodules", str(up), "proj")
+    proj = tmp_path / "proj"
+    (repos["crosspad-sampler"] / "a.txt").write_text("2")
+    git(repos["crosspad-sampler"], "commit", "-qam", "two")
+    second = git(repos["crosspad-sampler"], "rev-parse", "HEAD")
+    git(up / "components/crosspad-sampler", "pull", "-q", "origin", "main")
+    git(up, "submodule", "add", "-q", str(repos["crosspad-fishtank"]), "components/crosspad-fishtank")
+    git(up, "commit", "-qam", "sampler two, fishtank")
+    (proj / "app-registry.json").write_text(json.dumps({"apps": {}}))
+    mgr = cam.AppManager(str(proj), cam.PlatformConfig(platform="idf", lib_dir="components"))
+    assert mgr.update_project()[0] == "updated"
+    return mgr, proj, first, second
+
+
+def test_components_bring_apps_to_what_the_project_now_pins(moved_pins):
+    mgr, proj, first, second = moved_pins
+    sampler = proj / "components/crosspad-sampler"
+    assert git(sampler, "rev-parse", "HEAD") == first           # the project moved, the app not
+    done = dict(mgr.sync_app_submodules())
+    assert done == {"sampler": f"on {second[:8]}, as the project records", "fishtank": "added"}
+    assert git(sampler, "rev-parse", "HEAD") == second
+    assert (proj / "components/crosspad-fishtank/a.txt").read_text() == "1"
+    assert mgr.sync_app_submodules() == []                      # nothing left to do
+
+
+def test_components_check_a_pinned_app_out_at_its_version(moved_pins):
+    mgr, proj, first, second = moved_pins
+    sampler = proj / "components/crosspad-sampler"
+    mgr.sync_app_submodules()
+    (proj / "apps.json").write_text(json.dumps({"installed": {"sampler": {"ref": "main"}}}))
+    mgr.set_app_policy("sampler", "pinned", commit=first)
+    assert mgr.sync_app_submodules() == [("sampler", f"on its version {first[:8]}")]
+    assert git(sampler, "rev-parse", "HEAD") == first
+    assert git(proj, "diff", "--cached", "--name-only") == "components/crosspad-sampler"
+    assert json.loads((proj / "apps.json").read_text())["installed"]["sampler"]["version"] == first[:8]
+
+
+def test_components_leave_local_work_where_it_is(moved_pins):
+    mgr, proj, first, second = moved_pins
+    sampler = proj / "components/crosspad-sampler"
+    (sampler / "a.txt").write_text("mine")                      # not in apps.json, pin moved
+    assert ("sampler", "left where it is: dirty (your work)") in mgr.sync_app_submodules()
+    assert git(sampler, "rev-parse", "HEAD") == first
+    assert (sampler / "a.txt").read_text() == "mine"
+    git(sampler, "commit", "-qam", "my change")                 # unpushed, detached
+    mine = git(sampler, "rev-parse", "HEAD")
+    assert ("sampler", "left where it is: ahead (your work)") in mgr.sync_app_submodules()
+    mgr.set_app_policy("sampler", "pinned", commit=second)
+    assert mgr.sync_app_submodules() == [("sampler", "left where it is: ahead (your work)")]
+    assert git(sampler, "rev-parse", "HEAD") == mine
+
+
+def test_the_update_check_records_what_update_would_take(releases):
+    mgr, proj, sub, shas = releases
+    mgr.set_app_policy("sampler", "registry")
+    rec = mgr.refresh_available(["sampler"])["sampler"]
+    assert rec["release_pick"] == "v0.2.0" and rec["release_behind"] == 1
+    assert rec["release_waits"].startswith("0.3.0 waits for a CrossPad update")
+    assert rec["dev_waits"].startswith("main waits for a CrossPad update")
+    assert cam.app_row(mgr.app_status("sampler"), rec, False)["state"] == "own"   # not in the registry
+    mgr.update(app_name="sampler")
+    rec = mgr.refresh_available(["sampler"])["sampler"]
+    assert rec["release_pick"] is None and rec["release_behind"] == 0
+    row = cam.app_row(mgr.app_status("sampler"), rec, True)
+    assert row["state"] == "waits" and row["available"] == "0.3.0"
