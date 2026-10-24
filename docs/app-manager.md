@@ -46,8 +46,9 @@ Linux and macOS terminals only. On Windows it is always off.
 In **Update my CrossPad**, `q` or Ctrl+C stops a step, and after a failure `r`
 retries from the step that failed.
 
-**[4] Developer tools** holds: Workspace, Device, Browse registry, Configure,
-Board (ESP-IDF only), Profiles, **Build & Flash** (the raw `idf.py` / `cmake`
+**[4] Developer tools** holds: Workspace, Device, **CrossPad** (the board
+itself: pads, traces, files, connections; needs crosspad-hil), **Tracer** (the
+STM over SWD), Browse registry, Configure, Board (ESP-IDF only), Profiles, **Build & Flash** (the raw `idf.py` / `cmake`
 commands), OTA Flash, New app, Registry tools, **Submit an app to the catalog**
 and Settings. `/` finds any of them by name.
 
@@ -150,7 +151,7 @@ lines on all three platforms:
 
 | Platform | How it answers |
 |---|---|
-| ESP-IDF | `APP_VERSIONS` over USB CDC |
+| ESP-IDF | `APP_VERSIONS` over USB CDC, through crosspad-hil (`serve`, and its hub) |
 | Arduino | `APP_VERSIONS` on the serial console |
 | PC | `./bin/CrossPad --versions` |
 
@@ -159,6 +160,31 @@ the same. A board in the USB audio profile has no CDC: the SysEx
 `F0 7D 1B 01 F7` on its MIDI port switches it back (with the USB serial guard
 on, the board asks first). An app kept in the project rather than as a
 submodule reports `ref=in-tree`, because its commit is the project's.
+
+## The CrossPad screen (ESP-IDF)
+
+Developer tools → **CrossPad** drives the board without a browser, through one
+`crosspad-hil serve --client cp-tools` — CP Tools never opens the board's port
+itself, so a running test, a DAW or another CP Tools is shown, not fought:
+a board leased by someone else reads `<client> (<purpose>), pid N, for M min`
+and the screen comes back by itself. Without crosspad-hil it says how to
+install it (`pip install git+https://github.com/CrossPad/crosspad-hil`).
+
+| Tab | Keys |
+|-----|------|
+| Pads | `1234 qwer asdf zxcv` hit a pad (top row = pads 12–15), Shift+key holds it, `←` `→` turn the knob, `Enter` presses it, `l` app list, `Esc` back |
+| Trace | heap / touch traces; `s` saves to `.crosspad/traces/` |
+| Files | `/assets`, `/spiflash`, `/sdcard`: pull, push, new folder, delete; settings backup to `/sdcard/crosspad-settings.json` |
+| Connections | USB profile (a board with the serial guard asks on its screen), WiFi networks, Bluetooth |
+
+`Tab` / `Shift+Tab` switch tabs everywhere; `1`–`4` also do, except on Pads,
+where they are pads. Every board op names CP Tools on the bench lease
+(`CROSSPAD_BENCH_HOLDER`, else `cp-tools`); a board someone else has claimed
+shows who, since when, for how long and the queue, and `c` (`b` on Pads)
+claims or releases the bench — released, with the running image's sha, when
+the screen closes. Developer tools → **Tracer** starts the STM tracer
+(`crosspad-trace` from crosspad-mcp) or opens this screen on Trace.
+`CROSSPAD_HIL` / `CROSSPAD_TRACE` point CP Tools at a specific executable.
 
 ## Profiles
 
