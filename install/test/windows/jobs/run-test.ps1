@@ -10,13 +10,15 @@ function Run($name) {
     "== $name $(Get-Date -Format o)" | Out-File "$S\win-$name.log"
     powershell -NoProfile -ExecutionPolicy Bypass -Command $line *>> "$S\win-$name.log"
     "exit=$LASTEXITCODE $(Get-Date -Format o)" | Out-File -Append "$S\win-$name.log"
+    # This process started before the installer put Python on PATH.
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
     & C:\CrossPad\cptools.cmd doctor *>> "$S\win-$name.log"
     "doctor exit=$LASTEXITCODE" | Out-File -Append "$S\win-$name.log"
 }
 Run "1-fresh"
-Remove-Item -Recurse -Force C:\esp\.espressif\python_env -ErrorAction SilentlyContinue
-Remove-Item -Force C:\CrossPad\components\crosspad-sampler\.git -ErrorAction SilentlyContinue
-Rename-Item C:\esp\esp-idf\tools tools.gone -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force C:\CrossPad\.espressif\python_env -ErrorAction SilentlyContinue
+Remove-Item -Force C:\CrossPad\firmware\components\crosspad-sampler\.git -ErrorAction SilentlyContinue
+Rename-Item C:\CrossPad\esp-idf\tools tools.gone -ErrorAction SilentlyContinue
 Run "2-broken"
 Remove-Item "$S\token.txt" -Force
 [Environment]::SetEnvironmentVariable("GH_TOKEN", $null, "User")

@@ -44,6 +44,10 @@ class FakeMgr:
         self.calls.append(("update", app_name, force) + (("carry",) if carry else ()))
         return []
     def infra_submodules(self): return ["components/crosspad-core"]
+    synced = []
+    def sync_app_submodules(self): return self.synced
+    gaps = []
+    def requirement_problems(self): return self.gaps
     project = ("current", "up to date")
     def update_project(self, carry_commits=False):
         self.calls.append(("update_project", carry_commits))
@@ -82,6 +86,16 @@ def test_pipeline_happy_path(tmp_path):
     assert any(c[0] == "run" and "fullclean" in c[1] for c in mgr.calls)   # no record → fullclean
     assert mgr.saved["ok"] and [s["name"] for s in mgr.saved["steps"]] == list(cam.STEP_NAMES)
     assert all(s.ok for s in p.steps)
+
+
+def test_pipeline_updates_the_project_before_the_apps(tmp_path):
+    # An app's requires are judged against the core the build will use: the
+    # one the updated project pins, so the project moves first.
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    assert cam.UpdatePipeline(mgr, FakeUI()).run() is True
+    first_app = next(i for i, c in enumerate(mgr.calls) if c[0] == "update")
+    assert mgr.calls.index(("update_project", False)) < first_app
 
 
 def test_pipeline_backup_then_update_local_work(tmp_path):
@@ -153,7 +167,7 @@ def test_pipeline_without_flash_hook_stops_after_build(tmp_path):
         del mgr.config.flash_ota
     p = cam.UpdatePipeline(mgr, FakeUI())
     assert p.run() is True
-    assert [s.name for s in p.steps] == ["download", "components", "build"]
+    assert [s.name for s in p.steps] == ["components", "download", "build"]
 
 
 def test_pipeline_flash_output_reaches_the_log(tmp_path):
@@ -346,3 +360,44 @@ def test_a_project_that_cannot_update_stops_before_the_build(tmp_path):
     assert p.run() is False
     assert "main/x.cpp" in p.step("components").error
     assert not any(c[0] == "run" for c in mgr.calls)
+    assert not any(c[0] == "update" for c in mgr.calls)          # apps stay too
+
+
+def test_an_app_waiting_for_a_newer_core_says_so_in_the_download_step(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    why = "0.18.0 waits for a CrossPad update: needs core ^2.0.0, this project has 1.70.0"
+    mgr.update = lambda app_name=None, **kw: [(app_name, why)] if app_name == "sampler" else []
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True
+    assert f"Sampler {why}" in p.step("download").detail
+
+
+def test_components_report_app_folders_brought_to_the_project_pins(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.last_update = lambda: {"ok": True, "installed_set": ["sampler", "dawcontrol"], "steps": []}
+    mgr.synced = [("fishtank", "added"), ("instructions", "on its version 3b6e4985"),
+                  ("mixer", "left where it is: dirty (your work)")]
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is True
+    detail = p.step("components").detail
+    assert "Fishtank added" in detail and "Instructions on its version 3b6e4985" in detail
+    assert "Mixer left where it is: dirty (your work)" in detail
+    assert any(c[0] == "run" and "fullclean" in c[1] for c in mgr.calls)   # a new folder
+
+
+def test_an_app_this_core_cannot_build_stops_the_build_before_compiling(tmp_path):
+    mgr = FakeMgr(tmp_path)
+    mgr.config.flash_ota = lambda rev, on_line: 0
+    mgr.gaps = [{"app": "sampler", "unmet": ["needs core ^2.0.0, this project has 1.70.0"],
+                 "project_behind": True}]
+    p = cam.UpdatePipeline(mgr, FakeUI())
+    assert p.run() is False
+    assert p.step("build").error.startswith(
+        "Sampler needs core ^2.0.0, this project has 1.70.0 → [1] Update my CrossPad")
+    assert not any(c[0] == "run" for c in mgr.calls)
+    assert p.step("flash").ok is None
+    mgr.gaps = [{"app": "instructions", "unmet": ["needs core ^1.0.0, this project has 2.0.0"],
+                 "project_behind": False}]
+    assert p.retry_from("build") is False
+    assert "[2] let the app follow the latest release" in p.step("build").error

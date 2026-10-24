@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-MANAGER_VERSION = "1.1.0"    # CP Tools; shown in help and in support reports
+MANAGER_VERSION = "1.2.0"    # CP Tools; shown in help and in support reports
 REMOTE_REGISTRY_REPO = "CrossPad/crosspad-apps"
 REMOTE_REGISTRY_PATH = "registry.json"
 LOCAL_REGISTRY_FILE = "app-registry.json"
@@ -234,10 +234,17 @@ def app_row(status: dict, avail: dict | None, in_registry: bool) -> dict:
         return {"state": "current", "installed": installed, "available": ""}
     if rule == "release":
         newest = newest_release([tuple(t) for t in avail.get("tags", [])])
-        if newest and avail.get("release_behind", 0) > 0:
+        pick = avail.get("release_pick", newest)
+        if pick and avail.get("release_behind", 0) > 0:
             return {"state": "update", "installed": installed,
-                    "available": _bare_version(newest)}
+                    "available": _bare_version(pick)}
+        if avail.get("release_waits"):
+            return {"state": "waits", "installed": installed,
+                    "available": _bare_version(newest), "why": avail["release_waits"]}
     elif rule == "development":
+        if avail.get("dev_waits"):
+            return {"state": "waits", "installed": installed,
+                    "available": avail.get("default_branch", target), "why": avail["dev_waits"]}
         if avail.get("dev_behind", 0) > 0:
             return {"state": "update", "installed": installed,
                     "available": f"{avail.get('default_branch', target)} {avail.get('dev_head', '')}".strip()}
@@ -290,6 +297,55 @@ def unmet_requirements(requires, have: dict) -> list[str]:
             out.append(f"needs {short} {spec}, this project has "
                        f"{'.'.join(map(str, v))}")
     return out
+
+
+def project_behind(requires, have: dict) -> bool:
+    """Is a requirement missed because the core/gui here is older than asked
+    (rather than newer than the app allows)?"""
+    if isinstance(requires, list):
+        return False
+    for dep, spec in (requires or {}).items():
+        v = have.get(dep)
+        if v is None or version_satisfies(v, spec):
+            continue
+        for part in spec.split(","):
+            op = _re.match(r"^\s*(>=|<=|>|<|==|=|\^|~)?\s*(.*)$", part)
+            want = parse_semver(op.group(2))
+            o = op.group(1) or "=="
+            if want is not None and o not in ("<", "<=") and (v <= want if o == ">" else v < want):
+                return True
+    return False
+
+
+WAITS_FOR_UPDATE = "waits for a CrossPad update"
+
+
+def waits_reason(version: str, unmet: list[str]) -> str:
+    """'0.18.0 waits for a CrossPad update: needs core ^2.0.0, this project has 1.70.0'"""
+    return f"{version} {WAITS_FOR_UPDATE}: {'; '.join(unmet)}"
+
+
+def pick_release(tags: list[tuple[str, str]], requires_of, have: dict,
+                 reached) -> tuple[str | None, str]:
+    """The newest release whose `requires` the project's core and gui meet.
+
+    Walks the semver tags newest first. A release that asks for a core or gui
+    this project does not have is passed over; the walk ends at the first one
+    that fits, or at one the app has already reached (HEAD at or past it) —
+    staying beats going back. Returns (tag to check out, or None to stay;
+    why the newest release was passed over, or "").
+    """
+    why = ""
+    for tag, _date in tags:
+        if not RELEASE_TAG_RE.match(tag):
+            continue
+        unmet = unmet_requirements(requires_of(tag), have)
+        if reached(tag):
+            return (None if unmet or why else tag), why
+        if not unmet:
+            return tag, why
+        why = why or waits_reason(_bare_version(tag), unmet)
+    return None, why
 
 
 def release_asset_names(tag: str, rev: str) -> dict:
@@ -507,6 +563,16 @@ def wrong_rows(f: dict) -> list[dict]:
                  "detail": "never fetched" if age < 0 else f"last fetched {age // 3600} h ago"
                  if age >= 3600 else f"fetched {age // 60} min ago",
                  "fix": "[Enter] refresh", "action": "refresh"})
+    gaps = f.get("requirement_problems") or []
+    if gaps:
+        g = gaps[0]
+        rows.append({"ok": False, "title": "Apps fit the firmware",
+                     "detail": "; ".join(f"{x['name']} {x['unmet'][0]}" for x in gaps),
+                     "fix": (f"[1] Update my CrossPad once a firmware has it, or [2] put "
+                             f"{g['name']} on an older version" if g["project_behind"] else
+                             f"[2] let {g['name']} follow the latest release, or pick a "
+                             f"version that fits"),
+                     "action": None})
     last = f.get("last_update")
     rows.append({"ok": (last or {}).get("ok") if last else None, "title": "Last update",
                  "detail": (f"{last['finished'][:16].replace('T', ' ')}, "
@@ -863,7 +929,8 @@ class AppManager:
             Path.home() / "esp" / "esp-idf",
             Path.home() / "esp" / "v5.5" / "esp-idf",
             Path("/opt/esp-idf"),
-            Path("C:/esp/esp-idf"),        # the installer's short path on Windows
+            Path("C:/CrossPad/esp-idf"),   # the installer's short path on Windows
+            Path("C:/esp/esp-idf"),        # ... before 2026-10-22
         ]:
             if candidate.is_dir():
                 return str(candidate)
@@ -1037,9 +1104,33 @@ class AppManager:
                 out[comp] = tuple(int(m.group(1)) for m in nums)
         return out
 
+    def requirement_problems(self) -> list[dict]:
+        """Every app folder the build compiles whose crosspad-app.json asks for
+        a core or gui this checkout does not have.
+
+        [{app, unmet: ['needs core ^2.0.0, this project has 1.70.0'],
+        project_behind}]: project_behind when the core/gui here is older than
+        the app asks, not newer than it allows.
+        """
+        have = self.component_versions()
+        out = []
+        for meta_path in sorted((self.project_dir / self.config.lib_dir).glob("*/crosspad-app.json")):
+            try:
+                requires = json.loads(meta_path.read_text()).get("requires")
+            except (OSError, ValueError):
+                continue
+            unmet = unmet_requirements(requires, have)
+            if unmet:
+                path = f"{self.config.lib_dir}/{meta_path.parent.name}"
+                out.append({"app": self._app_id_at(path), "unmet": unmet,
+                            "project_behind": project_behind(requires, have)})
+        return out
+
     def requires_at(self, app_id: str, ref: str) -> dict | None:
         """The requirements an app declares at a tag or commit (after a fetch)."""
-        path = self.app_status(app_id)["path"]
+        return self._requires_in(self.app_status(app_id)["path"], ref)
+
+    def _requires_in(self, path: str, ref: str) -> dict | None:
         r = self._sub_git(path, "show", f"{ref}:crosspad-app.json")
         if r.returncode != 0:
             return None
@@ -1047,6 +1138,17 @@ class AppManager:
             return json.loads(r.stdout).get("requires")
         except ValueError:
             return None
+
+    def _waits_at(self, path: str, ref: str, label: str, have: dict) -> str:
+        """Why moving the app at `path` on to `ref` must wait, or "".
+
+        Nothing to move is nothing to wait for: an app already at `ref` that
+        does not fit this core is the build gate's to report.
+        """
+        if not self._count(path, f"HEAD..{ref}"):
+            return ""
+        unmet = unmet_requirements(self._requires_in(path, ref), have)
+        return waits_reason(label, unmet) if unmet else ""
 
     # -- ready-built firmware ---------------------------------------------------
 
@@ -1392,6 +1494,9 @@ class AppManager:
             "defender_hint": str(self.project_dir.resolve()) if is_win else None,
             "can_go_back": ", ".join(self.app_display_name(a) for a in self.rollback_plan()),
             "previous_firmware": prev_fw.get("ver", "-") if prev_fw else None,
+            "requirement_problems": [
+                dict(g, name=self.app_display_name(g["app"]))
+                for g in self.requirement_problems()],
         }
 
     def support_bundle(self, facts: dict | None = None) -> Path:
@@ -1809,6 +1914,7 @@ class AppManager:
             records = json.loads(self.available_path.read_text())
         except (OSError, ValueError):
             pass
+        have = self.component_versions()
         for app_id in app_ids:
             path = self.app_status(app_id)["path"]
             if not (self.project_dir / path / ".git").exists():
@@ -1829,11 +1935,20 @@ class AppManager:
             tags = parse_tag_lines(self._sub_git(
                 path, "for-each-ref", "--sort=-v:refname",
                 "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
-            newest = newest_release(tags)
+            # What update() would take: the newest release this core and gui
+            # can build, not simply the newest.
+            newest, waits = None, ""
+            if newest_release(tags):
+                newest, waits = pick_release(
+                    tags, lambda t: self._requires_in(path, t), have,
+                    lambda t: self._sub_git(path, "merge-base", "--is-ancestor",
+                                            t, "HEAD").returncode == 0)
             rec = {"tags": [list(t) for t in tags], "default_branch": default,
                    "dev_head": self._sub_git(path, "rev-parse", "--short",
                                              f"origin/{default}").stdout.strip(),
                    "dev_behind": self._count(path, f"HEAD..origin/{default}"),
+                   "dev_waits": self._waits_at(path, f"origin/{default}", default, have),
+                   "release_pick": newest, "release_waits": waits,
                    "release_behind": self._count(path, f"HEAD..{newest}") if newest else 0,
                    "installed_tag": None,
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
@@ -1899,6 +2014,84 @@ class AppManager:
 
     def infra_submodules(self) -> list[str]:
         return [s["path"] for s in self.get_all_submodules() if s["infra"]]
+
+    def _app_id_at(self, path: str) -> str:
+        """The app id whose folder is `path` (registry first, then the folder name)."""
+        for app_id, info in self._load_registry().get("apps", {}).items():
+            if self._resolve_install_path(info) == path:
+                return app_id
+        base = os.path.basename(path)
+        prefix = self.config.lib_prefix
+        return base[len(prefix):] if base.startswith(prefix) else base
+
+    def sync_app_submodules(self) -> list[tuple[str, str]]:
+        """Bring the app folders to what the project pins, after it moved.
+
+        update() moves the apps that follow a release or a branch; this does
+        the rest. An app folder the project added is downloaded; an app that
+        apps.json does not list goes to the commit the project records; an app
+        that stays on a version is checked out at that version. Nothing moves
+        over local work: an app with changes or commits of its own is left
+        where it is, and says why. Returns (app_id, what happened) for every
+        app it moved, downloaded or left alone.
+        """
+        manifest = self._load_manifest()
+        installed = manifest.get("installed", {})
+        out, recorded_moved = [], False
+        for sub in self.get_all_submodules():
+            if not sub["is_app"]:
+                continue
+            path = sub["path"]
+            app_id = self._app_id_at(path)
+            policy = self.app_policy(app_id)
+            if sub["uninitialized"]:
+                r = self._git("submodule", "update", "--init", "--", path,
+                              check=False, capture=True)
+                out.append((app_id, "added" if r.returncode == 0 else "could not be downloaded"))
+                if r.returncode != 0 or policy["track"] != TRACK_PINNED:
+                    continue
+            if policy["track"] == TRACK_PINNED:
+                target = policy.get("commit") or ""
+            elif policy["track"] == TRACK_REGISTRY and app_id not in installed:
+                target = ""
+            else:
+                continue
+            recorded = self._git("rev-parse", f"HEAD:{path}", check=False, capture=True)
+            target = target or recorded.stdout.strip()
+            if not target:
+                continue
+            head = self._sub_git(path, "rev-parse", "HEAD").stdout.strip()
+            want = self._sub_git(path, "rev-parse", "--verify", "--quiet", f"{target}^{{commit}}")
+            if want.returncode != 0:
+                self._sub_git(path, "fetch", "--tags", "--quiet", "origin", timeout=60)
+                want = self._sub_git(path, "rev-parse", "--verify", "--quiet",
+                                     f"{target}^{{commit}}")
+            if want.returncode != 0:
+                out.append((app_id, f"left where it is: {target[:8]} is not on its origin"))
+                continue
+            if want.stdout.strip() == head:
+                continue
+            blocking = self.app_status(app_id)["blocking"]
+            if blocking:
+                out.append((app_id, f"left where it is: {', '.join(blocking)} (your work)"))
+                continue
+            if self._sub_git(path, "checkout", "--quiet", target).returncode != 0:
+                out.append((app_id, f"left where it is: checkout {target[:8]} failed"))
+                continue
+            commit = self._get_submodule_commit(path)
+            if policy["track"] == TRACK_PINNED:
+                self._git("add", path, check=False, capture=True)
+                inst = installed.get(app_id)
+                if inst is not None:
+                    inst["version"] = commit
+                    inst["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    recorded_moved = True
+                out.append((app_id, f"on its version {commit}"))
+            else:
+                out.append((app_id, f"on {commit}, as the project records"))
+        if recorded_moved:
+            self._save_manifest(manifest)
+        return out
 
     def update_project(self, carry_commits: bool = False) -> tuple[str, str]:
         """Fast-forward the project itself to its upstream, carrying local edits.
@@ -3304,6 +3497,9 @@ class AppManager:
 
         skipped = []
         updated = 0
+        # The core and gui the build will use: the pipeline updates the
+        # project (and with it these) before it gets here.
+        have = self.component_versions()
 
         for name in targets:
             info = apps.get(name, {})
@@ -3343,6 +3539,40 @@ class AppManager:
             if r.returncode != 0:
                 skipped.append((name, "fetch failed"))
                 continue
+
+            # Where the app goes, decided before anything is touched: a
+            # version that asks for a core or gui this project does not have
+            # yet would not build, so the app stays where it is.
+            if track == TRACK_BRANCH:
+                why = self._waits_at(install_path, f"origin/{ref}", ref, have)
+                if why:
+                    skipped.append((name, why))
+                    continue
+            else:
+                # Latest release = the newest semver tag on origin that fits
+                # this core and gui; an app without tags follows its default
+                # branch instead.
+                tags = parse_tag_lines(self._sub_git(
+                    install_path, "for-each-ref", "--sort=-v:refname",
+                    "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
+                default = self._get_default_branch(install_path)
+                checkout_ref = _release_target(tags, default)
+                if newest_release(tags):
+                    checkout_ref, why = pick_release(
+                        tags, lambda t: self._requires_in(install_path, t), have,
+                        lambda t: self._sub_git(install_path, "merge-base", "--is-ancestor",
+                                                t, "HEAD").returncode == 0)
+                    if checkout_ref is None:
+                        if why:
+                            skipped.append((name, why))
+                        continue
+                else:
+                    why = self._waits_at(install_path, checkout_ref, default, have)
+                    if why:
+                        skipped.append((name, why))
+                        continue
+                if why:
+                    print(f"  {name}: {why} — takes {_bare_version(checkout_ref)}")
 
             old_head = self._sub_git(install_path, "rev-parse", "HEAD").stdout.strip()
             old_branch = st["git"]["branch"]
@@ -3405,12 +3635,6 @@ class AppManager:
                                     "not fast-forwardable (diverged from origin)"))
                     continue
             else:
-                # Latest release = the newest semver tag on origin; an app
-                # without tags follows its default branch instead.
-                tags = parse_tag_lines(self._sub_git(
-                    install_path, "for-each-ref", "--sort=-v:refname",
-                    "--format=%(refname:short) %(creatordate:short)", "refs/tags").stdout)
-                checkout_ref = _release_target(tags, self._get_default_branch(install_path))
                 r = self._sub_git(install_path, "checkout", "--quiet", checkout_ref)
                 if r.returncode != 0:
                     put_back()
@@ -3463,6 +3687,13 @@ class AppManager:
                   f"{self.describe_status(st):<34} "
                   f"{n_backups if n_backups else ''}")
         print("\n  ! = blocked for updates   ~ = protected by policy\n")
+        registry_apps = self._load_registry().get("apps", {})
+        for name in targets:
+            row = app_row(self.app_status(name), self.available(name), name in registry_apps)
+            if row["state"] == "waits":
+                print(f"  {name}: {row['why']}")
+        for g in self.requirement_problems():
+            print(f"  {g['app']}: {'; '.join(g['unmet'])} — the build stops here")
 
     def sync(self):
         """Detect existing app submodules and sync manifest."""
@@ -3542,10 +3773,12 @@ class AppManager:
 
 # == Update pipeline ==========================================================
 #
-# One Enter: download → firmware components → build → flash → check. The plan
+# One Enter: firmware components → download → build → flash → check. The plan
 # and the error copy are pure; UpdatePipeline (below) runs the subprocesses.
+# The components come first: an app's `requires` is checked against the core
+# and gui the build will use, which are the ones the updated project pins.
 
-STEP_NAMES = ("download", "components", "build", "flash", "check")
+STEP_NAMES = ("components", "download", "build", "flash", "check")
 STEP_TITLES = {"download": "Download updates", "components": "Firmware components",
                "build": "Build", "flash": "Flash", "check": "Check"}
 STEP_IDLE = {"download": "apps that follow a newer version",
@@ -3638,6 +3871,10 @@ def error_line(step: str, reason: str, subject: str = "") -> str:
         ("build", "no-tools"): "Build tools are missing → [3] Something's wrong",
         ("build", "no-board"): "Which board? Answer above, then [r] retry",
         ("build", "failed"): "Build failed in {s} → [c] show the error   [3] Something's wrong",
+        ("build", "needs-newer"): "{s} → [1] Update my CrossPad once a firmware has it, "
+                                  "or [2] put the app on an older version",
+        ("build", "needs-older"): "{s} → [2] let the app follow the latest release, "
+                                  "or pick a version that fits",
         ("flash", "no-answer"): "The board isn't answering → [r] retry   [3] Something's wrong",
         ("flash", "failed"): "Flash failed → [c] show the error   [r] retry",
         ("check", "mismatch"): "The board still runs the old {s} → [r] flash again",
@@ -3654,7 +3891,7 @@ TAIL_LINES = 50
 
 
 class UpdatePipeline:
-    """Download → components → build → flash → check, rendered through `ui`.
+    """Components → download → build → flash → check, rendered through `ui`.
 
     Every step returns instead of raising; the failing step carries the line
     the screen shows. The full output of every subprocess goes to
@@ -3749,7 +3986,7 @@ class UpdatePipeline:
     # -- steps -----------------------------------------------------------------
 
     def _download(self, s: StepResult) -> bool:
-        done, left, clashed = [], [], []
+        done, left, clashed, waiting = [], [], [], []
         for app_id in self.installed:
             st = self.mgr.app_status(app_id)
             name = self.mgr.app_display_name(app_id)
@@ -3770,8 +4007,11 @@ class UpdatePipeline:
             self._render()
             with _capture_stdout(self.log):
                 skipped = self.mgr.update(app_name=app_id, force=force, carry=carry) or []
-            if carry:
-                clashed.extend(f"{name}: {reason}" for _, reason in skipped)
+            for _, reason in skipped:
+                if WAITS_FOR_UPDATE in reason:
+                    waiting.append(f"{name} {reason}")
+                elif carry:
+                    clashed.append(f"{name}: {reason}")
             after = self.mgr.app_status(app_id)["git"]["head"]
             if after != st["git"]["head"]:
                 done.append(f"{name} {after}" + (" + your changes" if carry else ""))
@@ -3779,6 +4019,7 @@ class UpdatePipeline:
         if left:
             bits.append(f"{', '.join(left)} — your changes, left alone")
         bits.extend(clashed)
+        bits.extend(waiting)
         s.detail = "; ".join(bits)
         return True
 
@@ -3792,18 +4033,23 @@ class UpdatePipeline:
             return False
         if state == "updated":
             self.plan["fullclean"] = True      # new app folders arrive with the project
-        project = f"project: {msg}"
+        bits = [f"project: {msg}"]
         paths = self.mgr.infra_submodules()
-        if not paths:
-            s.detail = project
-            return True
-        r = self.mgr._git("submodule", "update", "--init", "--", *paths,
-                          check=False, capture=True)
-        self.log.write((r.stdout or "") + "\n")
-        if r.returncode != 0:
-            s.error = error_line("components", "failed", "core, gui")
-            return False
-        s.detail = f"{project}; " + ", ".join(os.path.basename(p) for p in paths)
+        if paths:
+            r = self.mgr._git("submodule", "update", "--init", "--", *paths,
+                              check=False, capture=True)
+            self.log.write((r.stdout or "") + "\n")
+            if r.returncode != 0:
+                s.error = error_line("components", "failed", "core, gui")
+                return False
+            bits.append(", ".join(os.path.basename(p) for p in paths))
+        for app_id, what in self.mgr.sync_app_submodules():
+            line = f"{self.mgr.app_display_name(app_id)} {what}"
+            self.log.write(line + "\n")
+            bits.append(line)
+            if what == "added":
+                self.plan["fullclean"] = True  # a new app folder: CMake globs at configure
+        s.detail = "; ".join(bits)
         return True
 
     def _build(self, s: StepResult) -> bool:
@@ -3821,6 +4067,16 @@ class UpdatePipeline:
                               getattr(self.mgr, "windows_longpaths", lambda: None)())
         if probs:
             s.error = f"Can't build here: {probs[0]} → move the project to a short plain folder"
+            return False
+        # An app written for another core or gui fails minutes in, as a
+        # compiler error in its own code; say which app and which version now.
+        gaps = self.mgr.requirement_problems()
+        for g in gaps:
+            self.log.write(f"{g['app']}: {'; '.join(g['unmet'])}\n")
+        if gaps:
+            g = gaps[0]
+            s.error = error_line("build", "needs-newer" if g["project_behind"] else "needs-older",
+                                 f"{self.mgr.app_display_name(g['app'])} {g['unmet'][0]}")
             return False
         if plat == "esp-idf":
             b = self.mgr.board_info(refresh=True)
@@ -4270,6 +4526,7 @@ def _json_cli(mgr: "AppManager", args) -> int:
             out["apps"].append(dict(st, follows=rule, follows_target=target,
                                     row=app_row(st, mgr.available(a),
                                                 a in mgr._load_registry().get("apps", {}))))
+        out["requirement_problems"] = mgr.requirement_problems()
     elif args.command == "list":
         installed = mgr._load_manifest().get("installed", {})
         out["apps"] = [dict(info, id=a, installed=a in installed,
@@ -5500,6 +5757,9 @@ class _TUI:
                 name = self.mgr.app_display_name(a)
                 if r["state"] == "update":
                     tail = f"{r['installed']} {G['arrow']} {_C.BGREEN}{r['available']}{_C.RST}"
+                elif r["state"] == "waits":
+                    tail = (f"{r['installed']:<8} {_C.GRAY}{r['available']} "
+                            f"{WAITS_FOR_UPDATE}{_C.RST}")
                 elif r["state"] == "own":
                     tail = f"{r['installed']:<8} {_C.GRAY}your own copy{_C.RST}"
                 elif r["state"] == "changes":
@@ -5698,7 +5958,8 @@ class _TUI:
                     r = self._rows.get(val, {"installed": "", "state": "current"})
                     note = {"own": "your own copy", "changes": "your changes",
                             "broken": "broken — [Enter] to repair",
-                            "update": f"{r.get('available', '')} available"}.get(r["state"], "")
+                            "update": f"{r.get('available', '')} available",
+                            "waits": f"{r.get('available', '')} {WAITS_FOR_UPDATE}"}.get(r["state"], "")
                     _w(f" {mark} {_C.BGREEN}{G['ok']}{_C.RST} {name:<16} {r['installed']:<8} "
                        f"{_C.GRAY}{(note or info.get('description', ''))[:w - 34]}{_C.RST}\n")
                 else:
@@ -6742,9 +7003,11 @@ class _TUI:
             for i in range(start, end):
                 r = rows[i]
                 if r.kind == "version":
-                    unmet[i] = unmet_requirements(self.mgr.requires_at(app_id, r.target), have)
+                    req = self.mgr.requires_at(app_id, r.target)
+                    unmet[i] = unmet_requirements(req, have)
                     if unmet[i]:
-                        r.detail = f"{r.detail}  needs a newer system"
+                        r.detail = (f"{r.detail}  needs a newer system" if project_behind(req, have)
+                                    else f"{r.detail}  needs an older system")
                 mark = f"{_C.BYELLOW}>{_C.RST}" if i == cursor else " "
                 dot = G["dot_on"] if r.current else G["dot_off"]
                 tags = []

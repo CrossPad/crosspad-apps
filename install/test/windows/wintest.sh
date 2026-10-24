@@ -68,7 +68,11 @@ stop() { [ -f "$W/follow_usb.pid" ] && kill "$(cat "$W/follow_usb.pid")" 2>/dev/
          docker --context default rm crosspad-wintest >/dev/null 2>&1 || true; }
 case "$1" in
   golden)
-    stop; rm -f "$W/shared/ready.txt"; run
+    # A disk left in storage/ would boot as it is and be copied as "clean";
+    # only a downloaded ISO is kept.
+    stop; rm -f "$W/shared/ready.txt"
+    find "$W/storage" -maxdepth 1 -type f ! -name '*.iso' -delete
+    run
     echo "installing Windows; waiting for the first logon…"
     until [ -e "$W/shared/ready.txt" ]; do sleep 20; done
     stop

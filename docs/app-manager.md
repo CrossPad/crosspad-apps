@@ -86,6 +86,22 @@ work, is ahead of origin, is on an unexpected branch or points at a fork is
 skipped whatever its mode. `update --all` updates the clean apps and prints a
 table of the skipped ones; `--force` goes ahead but takes a backup first.
 
+## Apps and the firmware they need
+
+Every app declares the crosspad-core and crosspad-gui it builds against
+(`requires` in its `crosspad-app.json`, e.g. `"crosspad-core": "^2.0.0"` or
+`">=1.70.0,<3.0.0"`; a comma means *and*). Update my CrossPad updates the
+firmware components first, then moves each app only to a version they meet:
+the newest release that fits, or the branch it follows once that fits. An app
+whose next version needs a newer firmware stays where it is and says so —
+`0.18.0 waits for a CrossPad update: needs core ^2.0.0, this project has
+1.70.0` — on the dashboard, in `status` and `status --json` (`row.state` is
+`waits`, `row.why` the reason). An app that stays on a version is checked out
+at it, and app folders the project adds are downloaded; an app with your own
+changes or commits is never moved. Before compiling, the build stops on any
+app that does not fit the core and gui it would build with, naming the app,
+the range and the version; `doctor` lists the same.
+
 ## Backups
 
 ```bash

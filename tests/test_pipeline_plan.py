@@ -17,10 +17,10 @@ def test_plan_fullclean_when_app_set_changed_or_no_record():
 
 def test_plan_steps_and_estimate():
     p = cam.plan_update(LAST, ["sampler", "mixer"], True)
-    assert p["steps"] == ["download", "components", "build", "flash", "check"]
+    assert p["steps"] == ["components", "download", "build", "flash", "check"]
     assert p["estimate"] == 240
     p = cam.plan_update(LAST, ["sampler", "mixer"], False)
-    assert p["steps"] == ["download", "components", "build"]
+    assert p["steps"] == ["components", "download", "build"]
     assert p["estimate"] == 205
     assert cam.plan_update(None, [], True)["estimate"] is None
 
