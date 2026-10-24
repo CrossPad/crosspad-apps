@@ -119,40 +119,6 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
-    "dawcontrol": {
-      "name": "DAW Control",
-      "version": "0.4.2",
-      "description": "DAW controller surface: pads to the DAW, LED/text feedback from it (FL Studio, Ableton, REAPER); launches the DAW through the host hub",
-      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
-      "component_path": "components/crosspad-dawcontrol",
-      "icon": "dawcontrol.png",
-      "category": "tools",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "song": {
-      "name": "Song",
-      "version": "0.3.0",
-      "description": "Arrange scenes on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-song.git",
-      "component_path": "components/crosspad-song",
-      "icon": "song.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "serial-monitor": {
       "name": "Serial Monitor",
       "version": "0.1.1",
@@ -234,6 +200,40 @@
       "requires": {
         "crosspad-core": ">=2.7.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "song": {
+      "name": "Song",
+      "version": "0.3.0",
+      "description": "Arrange scenes on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-song.git",
+      "component_path": "components/crosspad-song",
+      "icon": "song.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "dawcontrol": {
+      "name": "DAW Control",
+      "version": "0.4.3",
+      "description": "DAW controller surface: pads play the DAW, the DAW lights the pads and fills the screen (FL Studio, REAPER)",
+      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
+      "component_path": "components/crosspad-dawcontrol",
+      "icon": "dawcontrol.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
     "mixer": {
