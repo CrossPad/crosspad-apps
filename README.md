@@ -40,11 +40,11 @@ Step by step, with screenshots: [install/README.md](install/README.md). Afterwar
 
 <!-- LATEST_UPDATES_START -->
 - **Sampler v0.21.1** — the waveform cache's table (~9.7 kB of names and pointers the UI reads) in PSRAM where the board has it (EXT_RAM_BSS_ATTR), so internal RAM can pay for the 32 kB I-cache the render runs from.
+- **Arrange v0.21.0** — + ADD TRACK > AUDIO opens nothing: the empty audio track is armed and REC records its input over the song from the playhead (core 2.18 ArrangeAudioTake) -- after the count-in, from the next bar line while the song plays, on its own in an empty song -- and lays the take on the track when REC, STOP or PLAY ends it. A long press on an audio track header picks its input -- MIC, LINE, MIC+LINE, USB, PADS -- and arms it, MIX in the same sheet; an unnamed audio track shows its input (AUD MIC). ARM and Input in an audio track menu. No DUB onto audio. Requires core 2.18.
 - **Sampler v0.21.0** — picking a kit for a track opens on the list of its kind (KitSelectorConfig::list, kit_selector_app_pick_for(..., KitList)): Arrange's DRUMS on the drum kits, SLICE on the Slice kits, PERF on the rest. Requires core 2.6.
 - **Arrange v0.20.2** — a new kit or Pitch track opens nothing: it stays picked and armed on an empty lane (core 2.16.1: no empty block over the whole song), REC records the pads into it and CLIP EDIT opens its seq view. A Pitch track with no instrument picked yet still opens Pitch Play, where one is. Requires core 2.16.1.
 - **Arrange v0.20.1** — BOUNCE renders as a freeze does (core 2.14) -- off the clock, a looping block's two passes, nothing rendered for a track already frozen -- and shows in the processing box (BOUNCING TRACK n), the header saying BOUNCING... Requires core 2.14.
 - **Arrange v0.20.0** — a freeze shows in the processing box over the lanes, as a time stretch does -- FREEZING TRACK 2, render 1 of 3, 40 % -- and core 2.13 renders it off the clock where the board can. Requires core 2.13.
-- **Sampler v0.20.0** — the kit types down the kit browser's left are PERF (was KITS), DRUMS, SLICE, PITCH, SONGS, USER -- six keys, 22 px each. SLICE lists the Slice kits ("engine": "slice", what the Slicer writes): one WAV in regions, one voice. Drums are told by KitInfo::isDrums(). Requires core 2.5.
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -53,7 +53,7 @@ Step by step, with screenshots: [install/README.md](install/README.md). Afterwar
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
 | **App Store** | 0.1.1 | Browse, install, and manage CrossPad apps from the registry | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
-| **Arrange** | 0.20.2 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=2.16.1,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
+| **Arrange** | 0.21.0 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=2.18.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
 | **DAW Control** | 0.5.0 | DAW controller surface: pads play the DAW, the DAW lights the pads and fills the screen (FL Studio, Ableton Live, REAPER) | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-dawcontrol](https://github.com/CrossPad/crosspad-dawcontrol) |
 | **DOOM** | 0.1.0 | DOOM (doomgeneric) on the pads, the encoder and the panel; the one app of the doom firmware kit | pc, esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-doom](https://github.com/CrossPad/crosspad-doom) |
 | **Instructions** | 0.3.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
