@@ -20,7 +20,7 @@
     },
     "recorder": {
       "name": "Recorder",
-      "version": "0.5.2",
+      "version": "0.6.0",
       "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
       "repo": "https://github.com/CrossPad/crosspad-recorder.git",
       "component_path": "components/crosspad-recorder",
