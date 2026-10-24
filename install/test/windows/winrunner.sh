@@ -23,8 +23,6 @@ GOLDEN="${WINTEST_HOME:-$HOME/.cache/crosspad-wintest}/golden"
 REPO="${WINRUNNER_REPO:-CrossPad/crosspad-hil}"
 NAME="${WINRUNNER_NAME:-$(hostname)-win}"
 LABEL=crosspad-win
-# Windows' name for the host's zone (Europe/Warsaw): the VM's RTC is host local time.
-WINTZ="${WINRUNNER_TZ:-Central European Standard Time}"
 C=crosspad-winrunner
 D() { docker --context default "$@"; }
 run() {
@@ -46,7 +44,7 @@ case "$1" in
     # Short-lived (1 h) and good for one registration only; the VM deletes the
     # file before it uses it.
     gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq .token > "$W/shared/token.txt"
-    printf 'REPO=%s\nNAME=%s\nLABEL=%s\nTZ=%s\n' "$REPO" "$NAME" "$LABEL" "$WINTZ" > "$W/shared/runner.cfg"
+    printf 'REPO=%s\nNAME=%s\nLABEL=%s\n' "$REPO" "$NAME" "$LABEL" > "$W/shared/runner.cfg"
     cp "$R/jobs/runner-setup.ps1" "$W/shared/run-test.ps1"
     run
     echo "VM booting; Git + runner setup in it (~5 min)…"

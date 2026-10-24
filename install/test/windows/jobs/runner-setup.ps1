@@ -12,13 +12,16 @@ try {
     $token = (Get-Content "$S\token.txt" -Raw).Trim()
     Remove-Item "$S\token.txt" -Force
 
-    # QEMU hands Windows the host's local time as the RTC; under the golden
-    # disk's Pacific zone the clock ran 7 h ahead and GitHub refused the
-    # runner's tokens ("The token is not valid until ..."). The host's zone,
-    # and the time service on, so a drifted clock comes back by itself.
-    Set-TimeZone -Id $cfg.TZ
+    # The VM's RTC runs in UTC and Windows reads it as local time: under the
+    # golden disk's Pacific zone the clock ran 7 h ahead, under CEST 2 h
+    # behind, and GitHub refused the runner's tokens either way ("The token
+    # is not valid until ..."). The time service had never synced: its first
+    # try comes before the network, the next one hours later.
+    Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation `
+        -Name RealTimeIsUniversal -Value 1 -Type DWord
     Set-Service w32time -StartupType Automatic
     Start-Service w32time
+    w32tm /config /manualpeerlist:"time.windows.com,0x8" /syncfromflags:manual /update
     w32tm /resync /force
 
     # Restricted out of the box: actions/setup-python runs the setup.ps1 it

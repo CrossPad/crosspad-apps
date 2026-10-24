@@ -87,8 +87,12 @@ windows/winrunner.sh job FILE.ps1   # run a script in the VM (after start)
 The workflow reads `runs-on: ${{ vars.CI_WIN_RUNNER || 'windows-latest' }}`.
 The container restarts with Docker, the runner with Windows.
 
-- **The clock.** QEMU gives Windows the host's local time as the RTC; under the
-  golden disk's Pacific zone the VM ran 7 h ahead and GitHub refused the
-  runner's tokens (`The token is not valid until …`, then a misleading "runner
-  registration has been deleted"). `runner-setup.ps1` sets the host's zone
-  (`WINRUNNER_TZ`, default Central European) and turns the time service on.
+- **The clock.** The VM's RTC runs in UTC and Windows reads it as local
+  time: 7 h ahead under the golden disk's Pacific zone, 2 h behind under
+  CEST, and GitHub refuses the runner's tokens either way (`The token is not
+  valid until …`, then a misleading "runner registration has been deleted").
+  The time service does not save it: its first sync comes before the network
+  and the next one hours later. `runner-setup.ps1` sets `RealTimeIsUniversal`
+  and a manual NTP peer.
+- **The job queue** runs only after `start`: at the first logon after
+  `create` the setup takes the one `run-test.ps1` slot.
