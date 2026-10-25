@@ -34,6 +34,23 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "recorder": {
+      "name": "Recorder",
+      "version": "0.7.0",
+      "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
+      "repo": "https://github.com/CrossPad/crosspad-recorder.git",
+      "component_path": "components/crosspad-recorder",
+      "icon": "recorder.png",
+      "category": "audio",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
     "pitchplay": {
       "name": "Pitch Play",
       "version": "0.10.3",
@@ -58,23 +75,6 @@
       "component_path": "components/crosspad-slicer",
       "icon": "slicer.png",
       "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "recorder": {
-      "name": "Recorder",
-      "version": "0.7.0",
-      "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
-      "repo": "https://github.com/CrossPad/crosspad-recorder.git",
-      "component_path": "components/crosspad-recorder",
-      "icon": "recorder.png",
-      "category": "audio",
       "platforms": [
         "esp-idf",
         "pc"
