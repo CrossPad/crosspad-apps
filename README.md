@@ -39,12 +39,12 @@ Step by step, with screenshots: [install/README.md](install/README.md). Afterwar
 ## Latest Updates
 
 <!-- LATEST_UPDATES_START -->
+- **Arrange v0.24.0** — elements -- arrangements inside the song (core 2.23). EDIT > New element here lays a four-bar element on a free audio track and opens it; Element from library lays one already made. An element block is ice blue with a layers glyph and its title (dimmed, not baked, until its first leave); CLIP EDIT on it opens it as the song, the context row becomes the breadcrumb SONG > ELEMENT 1 (three levels at most, ... for the rest, a tap goes up to that level), and the power button's click goes one level up, freezing and baking what changed, with the processing box saying how far. Requires core 2.23.
 - **Arrange v0.23.0** — MIX looks like a DAW's mixer -- each strip has the track's number and kind (or name) in its colour, PAN (C / L25 / R40, a tap on its reading centres it; kept with the song, core 2.21 SongTrack::pan), the fader with the track's stereo meter beside it (after the fader and pan, the lanes' scale: green, amber from -6 dB, red from -1), the dB, and M and S side by side; requires core 2.21
 - **Arrange v0.22.0** — an audio track's input sheet (a long press on its header) has MONITOR: the input it records heard live on the speakers and jacks, or not -- the Mixer's MONITOR at all or off for that input's channels (MIC+LINE both), shown in the Mixer and kept with its desk; absent for the pads, heard anyway; requires core 2.20 (IInputMonitor)
 - **Sampler v0.22.0** — the pads' meters through IPadMix (setMetering/takePeaks): the pitched instrument's PadMeters for a pitched kit, the platform's player.setPadMetering/takePadPeak otherwise -- what the Pad Mixer shows. Requires core 2.22.
 - **Arrange v0.21.1** — an audio take round a loop says how many passes it kept -- the last is on the track, the others are clips to pick with EDIT (core 2.19). Requires core 2.19.
 - **Sampler v0.21.1** — the waveform cache's table (~9.7 kB of names and pointers the UI reads) in PSRAM where the board has it (EXT_RAM_BSS_ATTR), so internal RAM can pay for the 32 kB I-cache the render runs from.
-- **Arrange v0.21.0** — + ADD TRACK > AUDIO opens nothing: the empty audio track is armed and REC records its input over the song from the playhead (core 2.18 ArrangeAudioTake) -- after the count-in, from the next bar line while the song plays, on its own in an empty song -- and lays the take on the track when REC, STOP or PLAY ends it. A long press on an audio track header picks its input -- MIC, LINE, MIC+LINE, USB, PADS -- and arms it, MIX in the same sheet; an unnamed audio track shows its input (AUD MIC). ARM and Input in an audio track menu. No DUB onto audio. Requires core 2.18.
 <!-- LATEST_UPDATES_END -->
 
 ## CrossPad Official
@@ -53,7 +53,7 @@ Step by step, with screenshots: [install/README.md](install/README.md). Afterwar
 | App | Version | Description | Platforms | Requires | Repo |
 |-----|---------|-------------|-----------|----------|------|
 | **App Store** | 0.1.1 | Browse, install, and manage CrossPad apps from the registry | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-appstore](https://github.com/CrossPad/crosspad-appstore) |
-| **Arrange** | 0.23.0 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=2.21.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
+| **Arrange** | 0.24.0 | Four audio tracks of bounced clips on a timeline | esp-idf, pc | core >=2.23.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-arrange](https://github.com/CrossPad/crosspad-arrange) |
 | **DAW Control** | 0.5.0 | DAW controller surface: pads play the DAW, the DAW lights the pads and fills the screen (FL Studio, Ableton Live, REAPER) | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-dawcontrol](https://github.com/CrossPad/crosspad-dawcontrol) |
 | **DOOM** | 0.1.0 | DOOM (doomgeneric) on the pads, the encoder and the panel; the one app of the doom firmware kit | pc, esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-doom](https://github.com/CrossPad/crosspad-doom) |
 | **Instructions** | 0.3.0 | Markdown-based instructions and help viewer | esp-idf, arduino, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-instructions](https://github.com/CrossPad/crosspad-instructions) |
