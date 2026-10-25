@@ -84,6 +84,23 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.21.1",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.19.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
     "instructions": {
       "name": "Instructions",
       "version": "0.3.0",
@@ -100,23 +117,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.21.1",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.19.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "serial-monitor": {
