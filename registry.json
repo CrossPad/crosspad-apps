@@ -169,39 +169,6 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
-    "serial-monitor": {
-      "name": "Serial Monitor",
-      "version": "0.1.1",
-      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
-      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
-      "component_path": "components/crosspad-serial-monitor",
-      "icon": "terminal.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "pad-mixer": {
-      "name": "Pad Mixer",
-      "version": "0.3.0",
-      "description": "Sixteen faders, one per pad",
-      "repo": "https://github.com/CrossPad/crosspad-pad-mixer.git",
-      "component_path": "components/crosspad-pad-mixer",
-      "icon": "pad-mixer.png",
-      "category": "audio",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.22.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
     "song": {
       "name": "Song",
       "version": "0.3.0",
@@ -233,6 +200,39 @@
       ],
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "serial-monitor": {
+      "name": "Serial Monitor",
+      "version": "0.1.1",
+      "description": "UART serial monitor with baud rate selection, auto-scroll, clear",
+      "repo": "https://github.com/CrossPad/crosspad-serial-monitor.git",
+      "component_path": "components/crosspad-serial-monitor",
+      "icon": "terminal.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "pad-mixer": {
+      "name": "Pad Mixer",
+      "version": "0.3.0",
+      "description": "Sixteen faders, one per pad",
+      "repo": "https://github.com/CrossPad/crosspad-pad-mixer.git",
+      "component_path": "components/crosspad-pad-mixer",
+      "icon": "pad-mixer.png",
+      "category": "audio",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.22.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
