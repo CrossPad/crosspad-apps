@@ -1,21 +1,21 @@
 {
   "version": 1,
   "apps": {
-    "pianotiles": {
-      "name": "Piano Tiles",
-      "version": "0.1.0",
-      "description": "Piano Tiles for the pads: tiles fall in four lanes, the pads show what comes, each tile plays the next note of a public-domain tune on a small piano synth; levels speed it up, best scores saved on the card; the one app of the pianotiles firmware kit",
-      "repo": "https://github.com/CrossPad/crosspad-pianotiles.git",
-      "component_path": "components/crosspad-pianotiles",
-      "icon": "pianotiles.png",
-      "category": "games",
+    "sampler": {
+      "name": "Sampler",
+      "version": "0.22.0",
+      "description": "Sample player with 16 pads, waveform editing, kit management",
+      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
+      "component_path": "components/crosspad-sampler",
+      "icon": "audio.png",
+      "category": "music",
       "platforms": [
-        "pc",
-        "esp-idf"
+        "esp-idf",
+        "arduino"
       ],
       "requires": {
-        "crosspad-core": ">=2.0.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
+        "crosspad-core": ">=2.22.0,<3.0.0",
+        "crosspad-gui": ">=2.2.0,<3.0.0"
       }
     },
     "recorder": {
@@ -33,90 +33,6 @@
       "requires": {
         "crosspad-core": ">=1.70.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "appstore": {
-      "name": "App Store",
-      "version": "0.1.1",
-      "description": "Browse, install, and manage CrossPad apps from the registry",
-      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
-      "component_path": "components/crosspad-appstore",
-      "icon": "CrossPad_Logo_110w.png",
-      "category": "tools",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "instructions": {
-      "name": "Instructions",
-      "version": "0.3.0",
-      "description": "Markdown-based instructions and help viewer",
-      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
-      "component_path": "components/crosspad-instructions",
-      "icon": "info.png",
-      "category": "tools",
-      "platforms": [
-        "esp-idf",
-        "arduino",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "pitchplay": {
-      "name": "Pitch Play",
-      "version": "0.10.4",
-      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
-      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
-      "component_path": "components/crosspad-pitchplay",
-      "icon": "pitchplay.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.2.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
-    "slicer": {
-      "name": "Slicer",
-      "version": "0.4.0",
-      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
-      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
-      "component_path": "components/crosspad-slicer",
-      "icon": "slicer.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "arrange": {
-      "name": "Arrange",
-      "version": "0.26.0",
-      "description": "Four audio tracks of bounced clips on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
-      "component_path": "components/crosspad-arrange",
-      "icon": "arrange.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.26.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "mixer": {
@@ -152,67 +68,15 @@
         "crosspad-gui": ">=0.2.0"
       }
     },
-    "doom": {
-      "name": "DOOM",
-      "version": "0.1.0",
-      "description": "DOOM (doomgeneric) on the pads, the encoder and the panel; the one app of the doom firmware kit",
-      "repo": "https://github.com/CrossPad/crosspad-doom.git",
-      "component_path": "components/crosspad-doom",
-      "icon": "doom.png",
-      "category": "games",
-      "platforms": [
-        "pc",
-        "esp-idf"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.0.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
-    "sequencer": {
-      "name": "Sequencer",
-      "version": "0.10.1",
-      "description": "Record, loop and erase scenes on the pads",
-      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
-      "component_path": "components/crosspad-sequencer",
-      "icon": "sequencer.png",
+    "piano": {
+      "name": "Piano",
+      "version": "0.1.2",
+      "description": "Synth piano with parameter sliders, presets, octave control",
+      "repo": "https://github.com/CrossPad/crosspad-piano.git",
+      "component_path": "components/crosspad-piano",
+      "icon": "piano.png",
       "category": "music",
       "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=2.7.0,<3.0.0",
-        "crosspad-gui": ">=2.0.0,<3.0.0"
-      }
-    },
-    "dawcontrol": {
-      "name": "DAW Control",
-      "version": "0.5.0",
-      "description": "DAW controller surface: pads play the DAW, the DAW lights the pads and fills the screen (FL Studio, Ableton Live, REAPER)",
-      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
-      "component_path": "components/crosspad-dawcontrol",
-      "icon": "dawcontrol.png",
-      "category": "tools",
-      "platforms": [
-        "esp-idf",
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
-      }
-    },
-    "song": {
-      "name": "Song",
-      "version": "0.3.1",
-      "description": "Arrange scenes on a timeline",
-      "repo": "https://github.com/CrossPad/crosspad-song.git",
-      "component_path": "components/crosspad-song",
-      "icon": "song.png",
-      "category": "music",
-      "platforms": [
-        "esp-idf",
         "pc"
       ],
       "requires": {
@@ -236,6 +100,91 @@
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
+    "instructions": {
+      "name": "Instructions",
+      "version": "0.3.0",
+      "description": "Markdown-based instructions and help viewer",
+      "repo": "https://github.com/CrossPad/crosspad-instructions.git",
+      "component_path": "components/crosspad-instructions",
+      "icon": "info.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "arduino",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "appstore": {
+      "name": "App Store",
+      "version": "0.1.1",
+      "description": "Browse, install, and manage CrossPad apps from the registry",
+      "repo": "https://github.com/CrossPad/crosspad-appstore.git",
+      "component_path": "components/crosspad-appstore",
+      "icon": "CrossPad_Logo_110w.png",
+      "category": "tools",
+      "platforms": [
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "doom": {
+      "name": "DOOM",
+      "version": "0.1.0",
+      "description": "DOOM (doomgeneric) on the pads, the encoder and the panel; the one app of the doom firmware kit",
+      "repo": "https://github.com/CrossPad/crosspad-doom.git",
+      "component_path": "components/crosspad-doom",
+      "icon": "doom.png",
+      "category": "games",
+      "platforms": [
+        "pc",
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.0.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "dawcontrol": {
+      "name": "DAW Control",
+      "version": "0.5.0",
+      "description": "DAW controller surface: pads play the DAW, the DAW lights the pads and fills the screen (FL Studio, Ableton Live, REAPER)",
+      "repo": "https://github.com/CrossPad/crosspad-dawcontrol.git",
+      "component_path": "components/crosspad-dawcontrol",
+      "icon": "dawcontrol.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "arrange": {
+      "name": "Arrange",
+      "version": "0.26.0",
+      "description": "Four audio tracks of bounced clips on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-arrange.git",
+      "component_path": "components/crosspad-arrange",
+      "icon": "arrange.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.26.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
     "pad-mixer": {
       "name": "Pad Mixer",
       "version": "0.3.0",
@@ -251,6 +200,73 @@
       "requires": {
         "crosspad-core": ">=2.22.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "sequencer": {
+      "name": "Sequencer",
+      "version": "0.10.1",
+      "description": "Record, loop and erase scenes on the pads",
+      "repo": "https://github.com/CrossPad/crosspad-pattern-seq.git",
+      "component_path": "components/crosspad-sequencer",
+      "icon": "sequencer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.7.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
+    },
+    "song": {
+      "name": "Song",
+      "version": "0.3.1",
+      "description": "Arrange scenes on a timeline",
+      "repo": "https://github.com/CrossPad/crosspad-song.git",
+      "component_path": "components/crosspad-song",
+      "icon": "song.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "slicer": {
+      "name": "Slicer",
+      "version": "0.4.0",
+      "description": "Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit",
+      "repo": "https://github.com/CrossPad/crosspad-slicer.git",
+      "component_path": "components/crosspad-slicer",
+      "icon": "slicer.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf",
+        "pc"
+      ],
+      "requires": {
+        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-gui": ">=1.28.0,<3.0.0"
+      }
+    },
+    "pitchplay": {
+      "name": "Pitch Play",
+      "version": "0.10.4",
+      "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
+      "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
+      "component_path": "components/crosspad-pitchplay",
+      "icon": "pitchplay.png",
+      "category": "music",
+      "platforms": [
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.2.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
     "pong": {
@@ -270,37 +286,21 @@
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
-    "sampler": {
-      "name": "Sampler",
-      "version": "0.22.0",
-      "description": "Sample player with 16 pads, waveform editing, kit management",
-      "repo": "https://github.com/CrossPad/crosspad-sampler.git",
-      "component_path": "components/crosspad-sampler",
-      "icon": "audio.png",
-      "category": "music",
+    "pianotiles": {
+      "name": "Piano Tiles",
+      "version": "0.1.0",
+      "description": "Piano Tiles for the pads: tiles fall in four lanes, the pads show what comes, each tile plays the next note of a public-domain tune on a small piano synth; levels speed it up, best scores saved on the card; the one app of the pianotiles firmware kit",
+      "repo": "https://github.com/CrossPad/crosspad-pianotiles.git",
+      "component_path": "components/crosspad-pianotiles",
+      "icon": "pianotiles.png",
+      "category": "games",
       "platforms": [
-        "esp-idf",
-        "arduino"
+        "pc",
+        "esp-idf"
       ],
       "requires": {
-        "crosspad-core": ">=2.22.0,<3.0.0",
-        "crosspad-gui": ">=2.2.0,<3.0.0"
-      }
-    },
-    "piano": {
-      "name": "Piano",
-      "version": "0.1.2",
-      "description": "Synth piano with parameter sliders, presets, octave control",
-      "repo": "https://github.com/CrossPad/crosspad-piano.git",
-      "component_path": "components/crosspad-piano",
-      "icon": "piano.png",
-      "category": "music",
-      "platforms": [
-        "pc"
-      ],
-      "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
-        "crosspad-gui": ">=1.28.0,<3.0.0"
+        "crosspad-core": ">=2.0.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     }
   }
