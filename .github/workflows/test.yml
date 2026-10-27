@@ -5,7 +5,7 @@ name: Tests
 # supports (3.10: `X | None` in signatures) and a current one. The installers are parsed on their own systems.
 on:
   push:
-    paths: ['crosspad_app_manager.py', 'tests/**', 'install/**', '.github/workflows/test.yml']
+    paths: ['crosspad_app_manager.py', 'build_registry.py', 'tests/**', 'install/**', '.github/workflows/test.yml']
   pull_request:
 
 jobs:
