@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Build registry.json by discovering CrossPad app repos via GitHub topic.
 
-Searches for repos with the 'crosspad-app' topic in the CrossPad org,
+Lists the CrossPad org's repos, keeps those with the 'crosspad-app' topic,
 fetches each repo's crosspad-app.json, and assembles registry.json.
+
+A failed GitHub call aborts the build instead of writing a registry with
+apps missing: the announcer posts every app that comes back as a new app.
 Also generates README tables and COMMUNITY_APPS.md.
 
 Authentication: uses GITHUB_TOKEN env var, or falls back to `gh` CLI.
@@ -34,7 +37,13 @@ def _get_github_token() -> str | None:
         return None
 
 
-def _api_get(url: str, token: str) -> dict | None:
+class RegistryBuildError(RuntimeError):
+    """A GitHub call failed, so the app list would be incomplete."""
+
+
+def _api_get(url: str, token: str, strict: bool = False) -> dict | list | None:
+    """GET a GitHub API URL. None on any error; with strict, None only on 404
+    and RegistryBuildError on every other error."""
     headers = {
         "User-Agent": "crosspad-registry-builder",
         "Accept": "application/vnd.github.v3+json",
@@ -45,21 +54,30 @@ def _api_get(url: str, token: str) -> dict | None:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
-    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+        if strict and not (isinstance(e, urllib.error.HTTPError) and e.code == 404):
+            raise RegistryBuildError(f"{url} — {e}") from e
         print(f"  Warning: {url} — {e}")
         return None
 
 
 def discover_app_repos(token: str) -> list[dict]:
-    """Find all repos in the org with the crosspad-app topic."""
+    """Find all repos in the org with the crosspad-app topic.
+
+    Lists the org's repos rather than using the search API: search answers
+    from an index that GitHub returns partly (incomplete_results), and on
+    2026-10-27 three builds a minute apart found 3, 18 and 11 of 18 apps.
+    """
     repos = []
     page = 1
     while True:
-        url = f"https://api.github.com/search/repositories?q=org:{ORG}+topic:{TOPIC}&per_page=100&page={page}"
-        data = _api_get(url, token)
-        if not data or not data.get("items"):
-            break
-        for item in data["items"]:
+        url = f"https://api.github.com/orgs/{ORG}/repos?type=all&per_page=100&page={page}"
+        data = _api_get(url, token, strict=True)
+        if not isinstance(data, list):
+            raise RegistryBuildError(f"{url} — no repo list in the answer")
+        for item in data:
+            if TOPIC not in item.get("topics", []):
+                continue
             repos.append({
                 "full_name": item["full_name"],
                 "clone_url": item["clone_url"],
@@ -67,7 +85,7 @@ def discover_app_repos(token: str) -> list[dict]:
                 "stars": item.get("stargazers_count", 0),
                 "source": "official",
             })
-        if len(data["items"]) < 100:
+        if len(data) < 100:
             break
         page += 1
     return repos
@@ -85,7 +103,7 @@ def fetch_app_metadata(repo: str, token: str, branch: str = None) -> dict | None
     """Fetch crosspad-app.json from a GitHub repo via API."""
     ref_param = f"?ref={branch}" if branch else ""
     url = f"https://api.github.com/repos/{repo}/contents/crosspad-app.json{ref_param}"
-    data = _api_get(url, token)
+    data = _api_get(url, token, strict=True)
     if not data or "content" not in data:
         return None
     try:
@@ -335,4 +353,7 @@ def update_community_apps(apps: dict):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RegistryBuildError as e:
+        raise SystemExit(f"Error: {e}\nregistry.json not written.")
