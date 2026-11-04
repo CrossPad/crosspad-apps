@@ -20,7 +20,7 @@
     },
     "recorder": {
       "name": "Recorder",
-      "version": "0.7.0",
+      "version": "0.9.0",
       "description": "Record a sample from the mics, the line-in or the pads, and trim it to a loop",
       "repo": "https://github.com/CrossPad/crosspad-recorder.git",
       "component_path": "components/crosspad-recorder",
@@ -31,13 +31,13 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=1.70.0,<3.0.0",
+        "crosspad-core": ">=2.44.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
     "mixer": {
       "name": "Mixer",
-      "version": "0.19.0",
+      "version": "0.21.0",
       "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
       "repo": "https://github.com/CrossPad/crosspad-mixer.git",
       "component_path": "components/crosspad-mixer",
@@ -48,7 +48,7 @@
         "esp-idf"
       ],
       "requires": {
-        "crosspad-core": ">=2.16.0,<3.0.0",
+        "crosspad-core": ">=2.42.0,<3.0.0",
         "crosspad-gui": ">=1.28.0,<3.0.0"
       }
     },
@@ -170,7 +170,7 @@
     },
     "arrange": {
       "name": "Arrange",
-      "version": "0.27.0",
+      "version": "0.42.1",
       "description": "Four audio tracks of bounced clips on a timeline",
       "repo": "https://github.com/CrossPad/crosspad-arrange.git",
       "component_path": "components/crosspad-arrange",
@@ -181,7 +181,7 @@
         "pc"
       ],
       "requires": {
-        "crosspad-core": ">=2.27.0,<3.0.0",
+        "crosspad-core": ">=2.43.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
     },
@@ -255,7 +255,7 @@
     },
     "pitchplay": {
       "name": "Pitch Play",
-      "version": "0.12.0",
+      "version": "0.13.0",
       "description": "One sample or many, played chromatically on the pads and from a MIDI keyboard",
       "repo": "https://github.com/CrossPad/crosspad-pitchplay.git",
       "component_path": "components/crosspad-pitchplay",
