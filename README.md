@@ -65,13 +65,14 @@ Step by step, with screenshots: [install/README.md](install/README.md). Afterwar
 | **Pong** | 0.1.0 | Pong against the CPU over nine levels, or two players: encoder and pads as paddles, the pads light the court, square-wave effects; the one app of the pong firmware kit | pc, esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pong](https://github.com/CrossPad/crosspad-pong) |
 | **Recorder** | 0.9.0 | Record a sample from the mics, the line-in or the pads, and trim it to a loop | esp-idf, pc | core >=2.44.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-recorder](https://github.com/CrossPad/crosspad-recorder) |
 | **Sampler** | 0.24.3 | Sample player with 16 pads, waveform editing, kit management | esp-idf, arduino | core >=2.42.0,<3.0.0, gui >=2.10.2,<3.0.0 | [CrossPad/crosspad-sampler](https://github.com/CrossPad/crosspad-sampler) |
+| **SDR** | 0.1.1 | The board's own Wi-Fi radio as a receiver (ESP-SDR): the 2.4 GHz band as a spectrum, a waterfall or an I/Q constellation on the panel, frequency, rate, gain, filter and averaging on the encoder; the one app of the sdr firmware kit | esp-idf | core >=2.0.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-sdr](https://github.com/CrossPad/crosspad-sdr) |
 | **Sequencer** | 0.13.1 | Record, loop and erase scenes on the pads | esp-idf, pc | core >=2.43.0,<3.0.0, gui >=2.0.0,<3.0.0 | [CrossPad/crosspad-pattern-seq](https://github.com/CrossPad/crosspad-pattern-seq) |
 | **Serial Monitor** | 0.1.1 | UART serial monitor with baud rate selection, auto-scroll, clear | pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-serial-monitor](https://github.com/CrossPad/crosspad-serial-monitor) |
 | **Slicer** | 0.5.0 | Chop a loop into slices -- by its hits, into equal parts, or live on the pads -- and save it as a kit | esp-idf, pc | core >=2.44.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-slicer](https://github.com/CrossPad/crosspad-slicer) |
 | **Song** | 0.3.1 | Arrange scenes on a timeline | esp-idf, pc | core >=1.70.0,<3.0.0, gui >=1.28.0,<3.0.0 | [CrossPad/crosspad-song](https://github.com/CrossPad/crosspad-song) |
 | **Synthesizer** | 0.1.0 | Polyphonic synth with 3 oscillators, ADSR, filter, effects | arduino | core >=0.3.0, gui >=0.2.0 | [CrossPad/crosspad-synthesizer](https://github.com/CrossPad/crosspad-synthesizer) |
 
-*18 official app(s)*
+*19 official app(s)*
 <!-- APP_TABLE_END -->
 
 ## Top 10 Community Apps

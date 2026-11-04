@@ -302,6 +302,22 @@
         "crosspad-core": ">=2.0.0,<3.0.0",
         "crosspad-gui": ">=2.0.0,<3.0.0"
       }
+    },
+    "sdr": {
+      "name": "SDR",
+      "version": "0.1.1",
+      "description": "The board's own Wi-Fi radio as a receiver (ESP-SDR): the 2.4 GHz band as a spectrum, a waterfall or an I/Q constellation on the panel, frequency, rate, gain, filter and averaging on the encoder; the one app of the sdr firmware kit",
+      "repo": "https://github.com/CrossPad/crosspad-sdr.git",
+      "component_path": "components/crosspad-sdr",
+      "icon": "sdr.png",
+      "category": "tools",
+      "platforms": [
+        "esp-idf"
+      ],
+      "requires": {
+        "crosspad-core": ">=2.0.0,<3.0.0",
+        "crosspad-gui": ">=2.0.0,<3.0.0"
+      }
     }
   }
 }
