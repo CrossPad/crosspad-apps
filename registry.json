@@ -37,7 +37,7 @@
     },
     "mixer": {
       "name": "Mixer",
-      "version": "0.21.0",
+      "version": "0.21.1",
       "description": "Audio mixer/router \u2014 dynamic IAudioNode channels, multi-output routing",
       "repo": "https://github.com/CrossPad/crosspad-mixer.git",
       "component_path": "components/crosspad-mixer",
@@ -170,7 +170,7 @@
     },
     "arrange": {
       "name": "Arrange",
-      "version": "0.42.1",
+      "version": "0.42.2",
       "description": "Four audio tracks of bounced clips on a timeline",
       "repo": "https://github.com/CrossPad/crosspad-arrange.git",
       "component_path": "components/crosspad-arrange",
