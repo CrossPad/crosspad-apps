@@ -6,6 +6,10 @@ it end to end, step by step, and check each step before the next one. This
 file is kept current with the CrossPad repositories; when it and something
 older you know disagree, this file wins.
 
+**Talk to the developer in the language their message was written in** (this
+file is in English; your questions, summaries and the Step 7 hand-over are in
+their language). Commands, file names and on-screen labels stay as they are.
+
 **Goal.** At the end, on the developer's computer:
 
 1. the toolchain is installed (ESP-IDF 5.5, git, Python, the CrossPad commands),

@@ -32,17 +32,26 @@ Using Claude Code, Cursor, GitHub Copilot's agent mode or another AI coding
 assistant that can run commands? Paste this message into it:
 
 ```text
-Set up CrossPad firmware development on this computer for me.
-Fetch https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/AI_SETUP.md
-and follow it step by step, from Step 0 to Step 7. That file is kept up to date,
-so trust it over anything you remember about CrossPad. Ask me only where it says
-to (passwords, anything that touches my board), and stop before flashing.
+Przygotuj na tym komputerze środowisko do rozwijania firmware CrossPada.
+Postępuj krok po kroku według instrukcji z
+https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/AI_SETUP.md
+sprawdzaj każdy krok i zapytaj mnie, zanim cokolwiek dotknie mojej płytki.
 ```
 
-The assistant checks your computer, asks you to run the one command that needs
-your password, runs this installer without questions, builds the firmware for
-your board and stops before it touches the board. The instructions it follows
-are [AI_SETUP.md](AI_SETUP.md) in this folder.
+In English:
+
+```text
+Set up a CrossPad firmware development environment on this computer.
+Follow the instructions at
+https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/AI_SETUP.md
+step by step, check every step, and ask me before anything touches my board.
+```
+
+The assistant answers in the language you wrote in. It checks your computer,
+asks you to run the one command that needs your password, runs this installer
+without questions, builds the firmware for your board and stops before it
+touches the board. The instructions it follows are [AI_SETUP.md](AI_SETUP.md)
+in this folder.
 
 ---
 
