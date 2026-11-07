@@ -51,7 +51,7 @@ Find out, without asking:
 |---|---|---|
 | OS and version | `uname -s; cat /etc/os-release 2>/dev/null; sw_vers 2>/dev/null` | `[Environment]::OSVersion` |
 | CPU | `uname -m` | `$env:PROCESSOR_ARCHITECTURE` |
-| Free disk in the home folder (need **≥ 15 GB**) | `df -h ~` | `Get-PSDrive C` |
+| Free disk in the home folder (need **≥ 10 GB**) | `df -h ~` | `Get-PSDrive C` |
 | User name | `id -un` | `$env:USERNAME` |
 | Passwordless sudo (Linux) | `sudo -n true 2>/dev/null && echo yes || echo no` | — |
 | Existing setup | `ls -d ~/CrossPad ~/esp/esp-idf* 2>/dev/null` | `Test-Path C:\CrossPad\firmware` |
@@ -65,7 +65,9 @@ Find out, without asking:
 - Paths must not contain spaces or non-ASCII letters (ESP-IDF cannot build there).
   If the home folder does, ask the developer for a folder without them and pass
   it as `CROSSPAD_DIR` (Linux/macOS) or `CROSSPAD_ROOT` (Windows) in Step 2.
-- Less than 15 GB free: tell the developer and stop.
+- Less than 10 GB free: tell the developer and stop. (A finished setup with one
+  build takes about 6 GB: ESP-IDF's tools ~4 GB, ESP-IDF ~0.7 GB, the project
+  with `build_v2` ~0.9 GB.)
 
 Then go to the section for the OS: [Linux](#step-1-linux--system-packages),
 [macOS](#step-1-macos--command-line-tools-and-homebrew),
@@ -258,7 +260,8 @@ Every build names the board revision; there is no default build.
 
 - It prints a revision and where it came from, e.g. `v2  (device …)` with a
   board plugged in, or `v2  (memory)`. Use that revision.
-- It prints no revision (no board plugged in, nothing remembered): use **v2**.
+- It prints `no board revision known — connect a board, or tools/crosspad_board.py --set v2`
+  and exits with 2 (no board plugged in, nothing remembered): use **v2**.
   The CrossPads people have are v2 boards (PCB revision 2.0, "r20", printed on
   the circuit board). Only an early prototype with PCB 1.6 or 1.9 is **v1**;
   do not ask unless the developer mentions a prototype.
@@ -285,8 +288,8 @@ Windows (PowerShell; the quotes around `-D…` are required there):
 Start-Process C:\CrossPad\firmware\bin\crosspad-idf.cmd -ArgumentList '-B build_v2 "-DSDKCONFIG=sdkconfig.v2" build' -RedirectStandardOutput $HOME\crosspad-build.log -RedirectStandardError $HOME\crosspad-build.err -WindowStyle Hidden
 ```
 
-The first build compiles ~2000 files and downloads components: **10–40
-minutes** depending on the machine. Check the log every few minutes.
+The first build compiles ~2000 files and downloads components: from about
+**3 minutes** on a 16-core machine to **40 minutes** on a small laptop. Check the log every few minutes.
 
 **Success:** the log ends with `Project build complete. To flash, run:` and
 these files exist:
@@ -417,6 +420,7 @@ Tell the developer these in your closing message (short):
 | installer: `✗ Some packages did not install` | Step 1 was skipped or incomplete | do Step 1, run the installer again |
 | installer: `USER: unbound variable` | the shell has no `USER` variable | `export USER="$(id -un)"`, run again |
 | installer: `✗ Python … is too old` | Python < 3.10 | install a newer `python3` with the package manager (needs the developer, as in Step 1) |
+| installer log: `RPC failed`, `early EOF` or `Retry scheduled` while cloning | the network dropped for a moment | nothing, if the step still ends with `✓`: git retries by itself. If it ends with `✗ … download failed`, run the installer again |
 | installer: `✗ ESP-IDF did not install` | download cut off, or a broken Python environment | read `/tmp/crosspad-idf-install.log`, run the installer again (it repairs its own ESP-IDF) |
 | installer: `✗ your ESP-IDF at … does not start` | an ESP-IDF 5.5 that was already there is broken | run again with `CROSSPAD_IDF_DIR=~/esp/crosspad-idf` for a separate one |
 | installer: `✗ GitHub CLI (gh) is missing` | no `gh` | harmless for building; install `gh` later to publish apps |
@@ -427,7 +431,7 @@ Tell the developer these in your closing message (short):
 | build: `FATAL_ERROR` naming `sdkconfig.v1` and `sdkconfig.v2` | `idf.py build` without `-B build_v2 -DSDKCONFIG=sdkconfig.v2` | use the full Step 5 command |
 | build: `circular import` around littlefs | `build_v2/littlefs_py_venv` made by another Python | delete `~/CrossPad/build_v2/littlefs_py_venv`, build again |
 | build: a component or submodule file not found | a submodule did not download | `git -C ~/CrossPad submodule update --init --recursive`, then `crosspad-idf -B build_v2 fullclean` and build |
-| build: `No space left on device` | disk full (a build needs ~5 GB, ESP-IDF ~4 GB) | tell the developer; delete nothing of theirs |
+| build: `No space left on device` | disk full | tell the developer; delete nothing of theirs |
 | flash: `CDC port not found` and no MIDI port | board off, charge-only cable, or (Linux) no access to serial/MIDI devices | ask the developer to check the cable and the power; Linux: log out and in once (`dialout` group) |
 | flash: times out waiting for the CDC port | **Allow** not pressed in time, or **Ask before USB serial** prompt missed | ask the developer to switch with Settings → USB → Mode → MIDI + Serial, then run `crosspad-flash` again |
 | flash: `expected OTA_READY` / times out waiting for confirmation | **Update** not pressed within 60 s | run again, the developer presses **Update** |
