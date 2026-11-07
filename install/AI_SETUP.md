@@ -84,6 +84,7 @@ The installer needs these packages. Check which are missing:
 ```bash
 for t in git curl python3 cmake ninja wget flex bison gperf dfu-util node npm gh; do command -v $t >/dev/null || echo "missing: $t"; done
 python3 -c "import venv, ensurepip" 2>/dev/null || echo "missing: python3-venv"
+ldconfig -p 2>/dev/null | grep -q 'libasound\.so\.2' || echo "missing: ALSA library"
 python3 -c 'import sys; print("python ok" if sys.version_info >= (3,10) else "python too old")'
 id -nG "$(id -un)" | tr ' ' '\n' | grep -qxE 'dialout|uucp' && echo "serial access ok" || echo "missing: serial port group"
 ```
@@ -98,25 +99,25 @@ above again.
 Ubuntu / Debian / Mint / Pop!_OS:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git curl wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0 nodejs npm gh && sudo usermod -aG dialout "$USER"
+sudo apt-get update && sudo apt-get install -y git curl wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0 libasound2-dev nodejs npm gh && sudo usermod -aG dialout "$USER"
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install -y git curl wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-devel openssl-devel dfu-util libusb1 nodejs npm gh && sudo usermod -aG dialout "$USER"
+sudo dnf install -y git curl wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-devel openssl-devel dfu-util libusb1 alsa-lib nodejs npm gh && sudo usermod -aG dialout "$USER"
 ```
 
 Arch / Manjaro:
 
 ```bash
-sudo pacman -S --needed --noconfirm git curl wget flex bison gperf python python-pip cmake ninja ccache libffi openssl dfu-util libusb nodejs npm github-cli && sudo usermod -aG uucp "$USER"
+sudo pacman -S --needed --noconfirm git curl wget flex bison gperf python python-pip cmake ninja ccache libffi openssl dfu-util libusb alsa-lib nodejs npm github-cli && sudo usermod -aG uucp "$USER"
 ```
 
 openSUSE:
 
 ```bash
-sudo zypper -n install git curl wget flex bison gperf python3 python3-pip cmake ninja ccache libffi-devel libopenssl-devel dfu-util libusb-1_0-0 nodejs npm gh && sudo usermod -aG dialout "$USER"
+sudo zypper -n install git curl wget flex bison gperf python3 python3-pip cmake ninja ccache libffi-devel libopenssl-devel dfu-util libusb-1_0-0 alsa nodejs npm gh && sudo usermod -aG dialout "$USER"
 ```
 
 Notes:
@@ -124,6 +125,9 @@ Notes:
 - The serial-port group (`dialout`, on Arch `uucp`) takes effect after the
   developer **logs out and back in once**. Tell them; it matters only for
   flashing (Step 7), not for building.
+- The ALSA library (`libasound2-dev`, `alsa-lib`, `alsa`) is for the flash tool:
+  it talks MIDI to the board to switch its USB mode. Desktop systems have it
+  already; minimal and server installs do not.
 - `gh` (GitHub CLI) is needed only to publish apps. If the distribution has no
   `gh` package, drop it from the line; the installer then prints one
   `✗ GitHub CLI (gh) is missing` line, which does not stop anything else.
@@ -148,18 +152,25 @@ command -v brew >/dev/null && echo "brew ok" || echo "missing: Homebrew"
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   ```
 
-  Afterwards make `brew` visible in your shell:
-  `eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"`.
+Then, in the shell you run Step 2 from, put Homebrew first on the PATH (the
+Python that comes with the Command Line Tools is too old, Homebrew's is used):
+
+```bash
+eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+```
 
 The installer installs everything else with Homebrew itself (git, cmake, ninja,
-dfu-util, python3, gh, node), no password needed. Go to Step 2.
+dfu-util, python3, gh, node, VS Code), no password needed. Go to Step 2.
 
 ## Step 1 (Windows) — nothing to prepare
 
 The Windows installer installs git, Python, ESP-IDF, Node.js and the rest for
 the current user with `winget` (built into Windows 10 and 11), no
 administrator rights. It puts everything in `C:\CrossPad` (the project in
-`C:\CrossPad\firmware`). Go to Step 2.
+`C:\CrossPad\firmware`). When winget cannot install a program for the user
+alone it installs it for the whole computer, and Windows may show a permission
+(UAC) prompt: tell the developer it may appear and that they should accept it.
+Go to Step 2.
 
 If your shell is Git Bash or another POSIX shell, run the Windows commands
 below through `powershell -NoProfile -Command "…"`.
@@ -175,7 +186,7 @@ run with options that make it ask nothing and skip what is not available:
 | `CROSSPAD_YES=1` | answer every question with yes; the PC simulator and Arduino extras stay off |
 | `CROSSPAD_NO_HIL=1` | skip the board test tools (not publicly available yet) |
 | `CROSSPAD_NO_TUI=1` | do not open the CP Tools menu at the end (it waits for keys) |
-| `CROSSPAD_NO_VSCODE=1` | add this **only if `code` is not installed** (Linux/macOS: `command -v code`; Windows: `Get-Command code`). With VS Code present, leave it out: the installer adds the ESP-IDF extension and points VS Code at the project. Installing VS Code itself would need the developer's password |
+| `CROSSPAD_NO_VSCODE=1` | **Linux only, and only if `code` is not installed** (`command -v code`): installing VS Code there needs the developer's password. With VS Code present, leave it out: the installer adds the ESP-IDF extension and points VS Code at the project. On macOS and Windows the installer installs VS Code without a password; leave it out there too |
 | `CROSSPAD_WITH_PC=1` | add this only if the developer asked for the PC simulator (Linux also needs `build-essential libsdl2-dev pkg-config`, installed with `sudo` as in Step 1) |
 
 Linux and macOS:
@@ -185,7 +196,7 @@ curl -fsSL https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install
 CROSSPAD_YES=1 CROSSPAD_NO_HIL=1 CROSSPAD_NO_TUI=1 nohup bash /tmp/crosspad-install.sh > ~/crosspad-install.log 2>&1 &
 ```
 
-(add `CROSSPAD_NO_VSCODE=1` before `nohup` when VS Code is not installed).
+(on Linux add `CROSSPAD_NO_VSCODE=1` before `nohup` when VS Code is not installed).
 
 Windows (PowerShell):
 
@@ -194,8 +205,6 @@ $env:CROSSPAD_YES="1"; $env:CROSSPAD_NO_HIL="1"; $env:CROSSPAD_NO_TUI="1"
 irm https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/install.ps1 -OutFile $env:TEMP\crosspad-install.ps1
 Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $env:TEMP\crosspad-install.ps1" -RedirectStandardOutput $HOME\crosspad-install.log -RedirectStandardError $HOME\crosspad-install.err -WindowStyle Hidden
 ```
-
-(set `$env:CROSSPAD_NO_VSCODE="1"` too when VS Code is not installed).
 
 **It takes 15–30 minutes** (ESP-IDF is the long part). Check the log every few
 minutes (`tail -n 30 ~/crosspad-install.log`, PowerShell
@@ -238,7 +247,10 @@ Where things are now:
 Your own shell started before the installer, so it may not see the new PATH.
 **Call the commands by their full path** from here on:
 `~/CrossPad/bin/crosspad-idf` (Windows `C:\CrossPad\firmware\bin\crosspad-idf.cmd`), and so on.
-Each of them loads ESP-IDF by itself; you never need `export.sh`.
+Each of them loads ESP-IDF by itself; you never need `export.sh`. On Windows,
+if `git` or `python` is not found in your shell either, reload the PATH the
+installer wrote:
+`$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')`.
 
 ## Step 3 — Check the toolchain
 
@@ -436,6 +448,8 @@ Tell the developer these in your closing message (short):
 | build: `circular import` around littlefs | `build_v2/littlefs_py_venv` made by another Python | delete `~/CrossPad/build_v2/littlefs_py_venv`, build again |
 | build: a component or submodule file not found | a submodule did not download | `git -C ~/CrossPad submodule update --init --recursive`, then `crosspad-idf -B build_v2 fullclean` and build |
 | build: `No space left on device` | disk full | tell the developer; delete nothing of theirs |
+| flash: `ImportError: libasound.so.2` | the ALSA library is missing (minimal Linux install) | the developer installs `libasound2-dev` (Fedora/Arch `alsa-lib`, openSUSE `alsa`) with `sudo`, as in Step 1 |
+| flash: `error creating ALSA sequencer client` | the ALSA MIDI sequencer is not available (no `/dev/snd/seq`: a VM or container without sound, or the `snd-seq` module not loaded) | `sudo modprobe snd-seq` (the developer runs it); in a VM pass the USB device through, or switch the board to serial first (Settings → USB → Mode → MIDI + Serial) so no MIDI is needed |
 | flash: `CDC port not found` and no MIDI port | board off, charge-only cable, or (Linux) no access to serial/MIDI devices | ask the developer to check the cable and the power; Linux: log out and in once (`dialout` group) |
 | flash: times out waiting for the CDC port | **Allow** not pressed in time, or **Ask before USB serial** prompt missed | ask the developer to switch with Settings → USB → Mode → MIDI + Serial, then run `crosspad-flash` again |
 | flash: `expected OTA_READY` / times out waiting for confirmation | **Update** not pressed within 60 s | run again, the developer presses **Update** |
