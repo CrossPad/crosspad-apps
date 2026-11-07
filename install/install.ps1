@@ -345,6 +345,8 @@ if ($lp -ne 1) { Note "Windows long paths are off; the short folders above keep 
 Step "Test tools (optional)" "crosspad-hil: lets CP Tools and AI agents check the board automatically"
 if ($env:CROSSPAD_NO_HIL) { Note "skipped" } else {
     $venv = "$CrossPadDir\.venv"
+    # pip's git must fail, not ask for a login, when the repo is out of reach.
+    $env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "never"
     if ((Test-Path "$venv\Scripts\crosspad-hil.exe")) {
         # It knows the firmware's commands, so it moves with the project.
         & "$venv\Scripts\pip.exe" install -q --upgrade "git+https://github.com/CrossPad/crosspad-hil" *> "$tmp\hil-install.log"
@@ -355,6 +357,7 @@ if ($env:CROSSPAD_NO_HIL) { Note "skipped" } else {
         & "$venv\Scripts\pip.exe" install -q "git+https://github.com/CrossPad/crosspad-hil" *> "$tmp\hil-install.log"
         if ($LASTEXITCODE -eq 0) { Ok "crosspad-hil" } else { Note "crosspad-hil could not be installed (it needs access to CrossPad/crosspad-hil) - CP Tools works without it" }
     }
+    Remove-Item Env:GIT_TERMINAL_PROMPT, Env:GCM_INTERACTIVE -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------------------
