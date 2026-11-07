@@ -19,10 +19,39 @@ opens **CP Tools** — the program that updates the CrossPad and chooses its app
 
 You type one line. Everything else happens by itself.
 
-**In this guide:** [Windows](#windows) · [Mac and Linux](#mac-and-linux) ·
+**In this guide:** [With an AI assistant](#set-up-with-an-ai-assistant) · [Windows](#windows) · [Mac and Linux](#mac-and-linux) ·
 [Commands you get](#commands-you-get) · [CP Tools](#the-first-time-in-cp-tools) ·
 [VS Code](#vs-code) · [FL Studio](#fl-studio) · [The PC simulator](#the-pc-simulator) ·
 [The Arduino version](#the-arduino-version) · [If something goes wrong](#if-something-goes-wrong)
+
+---
+
+## Set up with an AI assistant
+
+Using Claude Code, Cursor, GitHub Copilot's agent mode or another AI coding
+assistant that can run commands? Paste this message into it:
+
+```text
+Przygotuj na tym komputerze środowisko do rozwijania firmware CrossPada.
+Postępuj krok po kroku według instrukcji z
+https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/AI_SETUP.md
+sprawdzaj każdy krok i zapytaj mnie, zanim cokolwiek dotknie mojej płytki.
+```
+
+In English:
+
+```text
+Set up a CrossPad firmware development environment on this computer.
+Follow the instructions at
+https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/AI_SETUP.md
+step by step, check every step, and ask me before anything touches my board.
+```
+
+The assistant answers in the language you wrote in. It checks your computer,
+asks you to run the one command that needs your password, runs this installer
+without questions, builds the firmware for your board and stops before it
+touches the board. The instructions it follows are [AI_SETUP.md](AI_SETUP.md)
+in this folder.
 
 ---
 
@@ -286,7 +315,7 @@ regular one back. `crosspad_rev2` is the older 1.9 board — never flash it on a
   and the rest of [Troubleshooting](https://crosspad.app/docs/troubleshooting/).
 - Still stuck? In *Something's wrong* press **s**. It saves one file with
   everything a helper needs (no passwords). Send it on the CrossPad Discord,
-  channel **#support**, with one line about what you were doing.
+  channel **#help**, with one line about what you were doing.
 
 ![Something's wrong, with a fix under each problem](img/cp-3-wrong.png)
 

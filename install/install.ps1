@@ -333,7 +333,7 @@ if (-not (Idf-Ok)) {
 }
 if (Idf-Ok) { Ok "ESP-IDF $(git -C $IdfDir describe --tags 2>$null) at $IdfDir" }
 elseif (-not $ownIdf) { Bad "your ESP-IDF at $IdfDir does not start" "repair it with the tool you installed it with, or set CROSSPAD_IDF_DIR=$IdfHome\crosspad-idf and run this again for a separate one" }
-else { Bad "ESP-IDF did not install" "the details are in $idfLog - send it on Discord (#support)" }
+else { Bad "ESP-IDF did not install" "the details are in $idfLog - send it on Discord (#help)" }
 
 # ---------------------------------------------------------------------------
 Step "USB access" "Windows has the drivers built in"
@@ -490,7 +490,7 @@ if ($env:CROSSPAD_NO_MCP) { Note "skipped" } else {
         $mcpAnswersPy | Set-Content -Encoding UTF8 "$tmp\mcp_answers.py"
         $n = & python "$tmp\mcp_answers.py" $CrossPadDir $IdfDir
         if ($LASTEXITCODE -eq 0) { Ok "the MCP server starts and offers $n tools" }
-        else { Bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server@latest - and send what it prints on Discord (#support)" }
+        else { Bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server@latest - and send what it prints on Discord (#help)" }
     } else { Bad "Node.js 18 or newer is missing" "install it from https://nodejs.org and run this again" }
 }
 
@@ -533,7 +533,7 @@ if ($WithPc) {
             # build.bat names Visual Studio Community; vswhere finds any edition.
             cmd /c "call `"$vcvars`" x64 >nul && cd /d `"$PcDir`" && cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=$($Vcpkg -replace '\\', '/')/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug && cmake --build build" *> "$tmp\pc-build.log"
             if ($LASTEXITCODE -eq 0 -and (Test-Path "$PcDir\bin\CrossPad.exe")) { Ok "the simulator is built - start it with: crosspad-sim" }
-            else { Bad "the PC simulator did not build" "details in $tmp\pc-build.log - send it on Discord (#support)" }
+            else { Bad "the PC simulator did not build" "details in $tmp\pc-build.log - send it on Discord (#help)" }
         } else { Bad "crosspad-pc did not download" "check the connection and run this again" }
     }
 }

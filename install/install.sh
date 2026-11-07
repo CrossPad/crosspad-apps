@@ -368,7 +368,7 @@ if idf_ok; then ok "ESP-IDF $(git -C "$IDF_DIR" describe --tags 2>/dev/null || e
 elif [ $own_idf -eq 0 ]; then
     bad "your ESP-IDF at $IDF_DIR does not start" \
         "repair it with the tool you installed it with, or run this installer with CROSSPAD_IDF_DIR=$HOME/esp/crosspad-idf for a separate one"
-else bad "ESP-IDF did not install" "the details are in /tmp/crosspad-idf-install.log — send it on Discord (#support)"; fi
+else bad "ESP-IDF did not install" "the details are in /tmp/crosspad-idf-install.log — send it on Discord (#help)"; fi
 
 # ---------------------------------------------------------------------------
 step "USB access" "so the tools can talk to the board"
@@ -548,7 +548,7 @@ else
             claude mcp get crosspad >/dev/null 2>&1 && ok "Claude Code knows it too"
         fi
         if n=$(mcp_answers); then ok "the MCP server starts and offers $n tools"
-        else bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server@latest — and send what it prints on Discord (#support)"; fi
+        else bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server@latest — and send what it prints on Discord (#help)"; fi
     else
         bad "Node.js 18 or newer is missing" "install it from https://nodejs.org and run this again"
     fi
@@ -586,7 +586,7 @@ if [ -n "$WITH_PC" ]; then
                 && cmake --build build) >/tmp/crosspad-pc-build.log 2>&1 && [ -x "$PC_DIR/bin/CrossPad" ]; then
             ok "the simulator is built — start it with: crosspad-sim"
         else
-            bad "the PC simulator did not build" "details in /tmp/crosspad-pc-build.log — send it on Discord (#support)"
+            bad "the PC simulator did not build" "details in /tmp/crosspad-pc-build.log — send it on Discord (#help)"
         fi
     else
         bad "crosspad-pc did not download" "check the connection and run this again"
