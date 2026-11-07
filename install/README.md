@@ -172,8 +172,8 @@ Every command works in any new terminal (PowerShell, cmd, Terminal) — no
 | `crosspad-files` | files on the board: `crosspad-files ls /sdcard`, `push`, `pull`, `assets` |
 | `crosspad-board` | which board version is plugged in |
 | `crosspad-idf` | `idf.py` in the project folder, e.g. `crosspad-idf board`, then `crosspad-idf -B build_v2 -DSDKCONFIG=sdkconfig.v2 build` (every build names the board version) |
-| `crosspad-hil` | the board's test tools, e.g. `crosspad-hil devices` |
-| `crosspad-bench` | check, prepare and flash the board on your desk: `check`, `ready`, `flash`, `test smoke` |
+| `crosspad-hil` | the board's test tools, e.g. `crosspad-hil devices` (not public yet: the installer skips it when it cannot reach it) |
+| `crosspad-bench` | check, prepare and flash the board on your desk: `check`, `ready`, `flash` (`test` needs crosspad-hil) |
 | `crosspad-sim`, `crosspad-pc` | the PC simulator and its app manager (if you said yes to it) |
 | `crosspad-arduino`, `pio` | the Arduino version's app manager and PlatformIO (if you said yes to it) |
 

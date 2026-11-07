@@ -134,7 +134,8 @@ if (-not (Have gh)) {
 }
 if (Have gh) { Ok "GitHub CLI" } else { Bad "GitHub CLI (gh) is missing" "https://cli.github.com" }
 
-# The project repository is private until the CrossPad OS is open.
+# The project repository is public; the probe catches a network problem
+# before the long steps.
 # Probe it with every credential helper and prompt off: a plain `git
 # ls-remote` opens Git Credential Manager's own sign-in window, and the
 # user would sign in twice (there, then in gh).
@@ -158,7 +159,7 @@ if (-not $reach -and (Have gh)) {
     $reach = Can-See-Repo
 }
 if ($reach) { Ok "CrossPad project is reachable" }
-else { Bad "Your GitHub account can't see $Repo yet" "ask for access on the CrossPad Discord with your GitHub user name, then run this again"; exit 1 }
+else { Bad "github.com/$Repo cannot be reached" "check the internet connection, then run this again"; exit 1 }
 
 # ---------------------------------------------------------------------------
 Step "The CrossPad project" $CrossPadDir

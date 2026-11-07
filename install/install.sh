@@ -127,12 +127,13 @@ elif [ -n "$pkg" ]; then
     missing=0
     for t in git python3 cmake ninja wget flex bison gperf dfu-util; do have "$t" || missing=1; done
     python3 -c "import venv, ensurepip" 2>/dev/null || missing=1
+    ldconfig -p 2>/dev/null | grep -q 'libasound\.so\.2' || missing=1   # the flash tool talks MIDI through ALSA
     if [ $missing -eq 1 ]; then
         note "Installing packages with $pkg (your password may be asked once)."
-        install_pkgs git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0 \
-            -- git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-devel openssl-devel dfu-util libusb1 \
-            -- git wget flex bison gperf python python-pip cmake ninja ccache libffi openssl dfu-util libusb \
-            -- git wget flex bison gperf python3 python3-pip cmake ninja ccache libffi-devel libopenssl-devel dfu-util libusb-1_0-0 \
+        install_pkgs git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0 libasound2-dev \
+            -- git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-devel openssl-devel dfu-util libusb1 alsa-lib \
+            -- git wget flex bison gperf python python-pip cmake ninja ccache libffi openssl dfu-util libusb alsa-lib \
+            -- git wget flex bison gperf python3 python3-pip cmake ninja ccache libffi-devel libopenssl-devel dfu-util libusb-1_0-0 alsa \
             || bad "Some packages did not install" "install them with your package manager and run this again"
     fi
 else
@@ -164,9 +165,9 @@ if ! have gh; then
 fi
 if have gh; then ok "GitHub CLI"; else bad "GitHub CLI (gh) is missing" "https://cli.github.com — install it and run this again"; fi
 
-# The project repository is private until the CrossPad OS is open: cloning it
-# needs a GitHub account with access. Reading apps does not. The probe never
-# prompts: git would ask for a user name, or open a credential manager's own
+# The project repository is public; the probe catches a network problem
+# before the long steps. It never prompts: git would ask for a user name,
+# or open a credential manager's own
 # sign-in window, and the user would sign in twice.
 can_see_repo() {
     GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git -c credential.helper= \
@@ -188,8 +189,8 @@ elif have gh; then
     if can_see_repo; then
         ok "Signed in to GitHub as $(gh api user --jq .login 2>/dev/null)"
     else
-        bad "Your GitHub account can't see $CROSSPAD_REPO yet" \
-            "ask for access on the CrossPad Discord with your GitHub user name, then run this again"
+        bad "github.com/$CROSSPAD_REPO cannot be reached" \
+            "check the internet connection, then run this again"
         exit 1
     fi
 fi
