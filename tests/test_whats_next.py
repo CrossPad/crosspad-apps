@@ -82,7 +82,7 @@ def test_whats_next_priority():
 
 def test_wrong_rows_without_board_and_with_guard_on():
     rows = cam.wrong_rows({"device": None, "board": {"rev": "v2", "source": "memory"},
-                           "idf_path": "/x", "gh_ok": True, "gh_user": "matixan",
+                           "idf_path": "/x", "gh_ok": True, "gh_user": "octocat",
                            "python": "3.12.3", "usb_guard": None, "registry_age": 200000,
                            "last_update": {"finished": "2026-09-14T21:14:00+00:00", "ok": True},
                            "remembered_board": "v2"})
@@ -96,10 +96,10 @@ def test_wrong_rows_without_board_and_with_guard_on():
 
 def test_wrong_rows_do_not_claim_a_firmware_nobody_reported():
     # A board seen only over MIDI says nothing about its firmware.
-    rows = cam.wrong_rows({"device": {"id": "dev_6dd8", "board_rev": None, "fw_rev": None,
+    rows = cam.wrong_rows({"device": {"id": "dev_a001", "board_rev": None, "fw_rev": None,
                                       "usb_mode": "unknown"},
                            "board": {"rev": "v2", "source": "memory", "mismatch": False},
-                           "idf_path": "/x", "gh_ok": True, "gh_user": "matixan",
+                           "idf_path": "/x", "gh_ok": True, "gh_user": "octocat",
                            "python": "3.12.3", "usb_guard": None, "registry_age": 10,
                            "last_update": None, "remembered_board": "v2"})
     fw = next(r for r in rows if r["title"] == "Firmware")
@@ -107,7 +107,7 @@ def test_wrong_rows_do_not_claim_a_firmware_nobody_reported():
 
 
 def test_wrong_rows_usb_guard_and_mismatch():
-    rows = cam.wrong_rows({"device": {"id": "dev_31ea", "board_rev": "v2", "fw_rev": "v1",
+    rows = cam.wrong_rows({"device": {"id": "dev_a003", "board_rev": "v2", "fw_rev": "v1",
                                       "usb_mode": "default"},
                            "board": {"rev": "v2", "source": "device", "fw_rev": "v1", "mismatch": True},
                            "idf_path": "", "gh_ok": False, "gh_user": "", "python": "3.12.3",
@@ -139,7 +139,7 @@ def test_whats_next_offline_does_not_hide_what_is_already_known():
 
 def test_wrong_rows_internet_row_says_which_way_it_is():
     facts = {"device": None, "board": {}, "idf_path": "/x", "gh_ok": True,
-             "gh_user": "matixan", "python": "3.12.3", "usb_guard": None,
+             "gh_user": "octocat", "python": "3.12.3", "usb_guard": None,
              "registry_age": 10, "last_update": None, "remembered_board": None}
     off = {r["title"]: r for r in cam.wrong_rows(dict(facts, offline=True))}["Internet"]
     assert off["ok"] is False and off["action"] == "refresh"

@@ -42,7 +42,7 @@ class FakeHil:
                 if op == "cdc.verb" and a.get("verb") == verb]
 
 
-DEV = {"id": "dev_6dd8", "serial": "CP2-0042", "usb_mode": "default", "board_rev": "v2",
+DEV = {"id": "dev_a001", "serial": "CP2-0001", "usb_mode": "default", "board_rev": "v2",
        "pcb": 20, "fw_rev": "v2", "ports": {"cdc": {"path": "/dev/ttyACM0"}}}
 
 
@@ -52,7 +52,7 @@ def plain(lines) -> str:
 
 WALL = 1_000_000.0
 HOLDER = {"client": "crosspad-hil", "purpose": "kit_churn", "pid": 4121, "since": WALL - 180}
-HUB = {"running": True, "board": "dev_6dd8", "usb_mode": "default", "cdc_open": True,
+HUB = {"running": True, "board": "dev_a001", "usb_mode": "default", "cdc_open": True,
        "clients": [{"client": "cp-tools", "purpose": "screen", "pid": 11},
                    {"client": "crosspad-mcp", "purpose": "query", "pid": 12}],
        "lease": None}
@@ -65,7 +65,7 @@ LEDS = {"brightness": 40, "anim": False, "coalesce": True, "cfgbri": 40, "pwr": 
 UI = {"display": "on", "touch": "on", "drawer": 0, "lcd": 1, "rgb": 1, "theme": 0,
       "bt_icon": None, "app": "Sampler"}
 FOCUS = {"index": 2, "label": "KIT", "ptr": "0x3fc9a000", "editing": False}
-BENCH_FREE = {"device": "dev_6dd8", "lease": None, "queue": [], "firmware": None, "history": []}
+BENCH_FREE = {"device": "dev_a001", "lease": None, "queue": [], "firmware": None, "history": []}
 BASE = {"devices.list": {"result": {"devices": [DEV]}},
         "hub.status": {"result": HUB},
         "bench.status": {"result": {"devices": [BENCH_FREE]}},

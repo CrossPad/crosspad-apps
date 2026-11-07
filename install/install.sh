@@ -392,14 +392,14 @@ else
     venv="$CROSSPAD_DIR/.venv"
     if [ -x "$venv/bin/crosspad-hil" ] && "$venv/bin/crosspad-hil" --help >/dev/null 2>&1; then
         # It knows the firmware's commands, so it moves with the project.
-        if "$venv/bin/pip" install -q --upgrade "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
+        if GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never "$venv/bin/pip" install -q --upgrade "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
             ok "crosspad-hil (up to date)"
         else
             note "crosspad-hil could not be updated — the one already here stays"
         fi
     else
         rm -rf "$venv"
-        if python3 -m venv "$venv" && "$venv/bin/pip" install -q "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
+        if python3 -m venv "$venv" && GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never "$venv/bin/pip" install -q "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
             ok "crosspad-hil"
         else
             note "crosspad-hil could not be installed (it needs access to CrossPad/crosspad-hil) — CP Tools works without it"

@@ -15,10 +15,6 @@ opens **CP Tools** — the program that updates the CrossPad and chooses its app
 - a Windows, Mac or Linux computer with about **10 GB free** (about **25 GB**
   with the PC simulator and the Arduino version)
 - the **USB-C cable** of your CrossPad
-- while the CrossPad project is private: a **GitHub account** that has access
-  to it (ask on the CrossPad Discord with your GitHub user name if you don't
-  have access yet). The installer asks you to sign in only when it cannot reach
-  the project without an account.
 - **30 minutes** the first time (mostly waiting for downloads)
 
 You type one line. Everything else happens by itself.
@@ -62,19 +58,7 @@ Answer them and the rest runs without you.
 
 ![Both questions answered with y, steps 1 and 2 done, step 3 downloading the project into C:\CrossPad\firmware](img/win-7-extras.png)
 
-### 3. Sign in to GitHub (if it asks)
-
-Only while the CrossPad project is private: when the installer cannot reach the
-project without an account, early on (step 2) GitHub asks *Authenticate Git
-with your GitHub credentials?* — press **Enter** for yes. Then the installer
-shows a **one-time code** — it is already copied for you. Press **Enter**: your browser opens GitHub. Sign in if it asks,
-press **Ctrl+V** to paste the code, and click **Continue**, then
-**Authorize**. Come back to the PowerShell window — it carries on by itself.
-Next time it remembers you.
-
-![The one-time code, copied, and "Press Enter to open github.com/login/device"](img/win-4-code.png)
-
-### 4. Wait while the steps tick by
+### 3. Wait while the steps tick by
 
 The installer works through 10 steps (12 with the PC and Arduino extras). Each
 one ends with a green **[OK]**. The longest is step 4, ESP-IDF — about 15
@@ -96,7 +80,7 @@ permission) and the Arduino version brings PlatformIO:
 
 ![Steps 4 to 10 with [OK]: ESP-IDF, USB, test tools, VS Code, AI tools, PC simulator in C:\CrossPad\pc, Arduino in C:\CrossPad\arduino](img/win-8-extras-steps.png)
 
-### 5. "All set"
+### 4. "All set"
 
 The installer checks everything once more and prints **All set**, then opens
 CP Tools. A line that says *No CrossPad found* only means the board is not
@@ -104,7 +88,7 @@ plugged in yet.
 
 ![The final check and "All set."](img/win-5-done.png)
 
-### 6. Open CP Tools
+### 5. Open CP Tools
 
 From now on, open **CP Tools** from the shortcut on your desktop.
 
@@ -124,8 +108,7 @@ From now on, open **CP Tools** from the shortcut on your desktop.
 3. Type your computer password when asked (it installs a few system tools).
    On a Mac, if a window asks to install the *Command Line Tools*, click
    **Install**, wait, then paste the line again.
-4. If a code appears, sign in to GitHub (same as step 3 above).
-5. Wait for **All set**. It looks like this:
+4. Wait for **All set**. It looks like this:
 
    ```
    Step 4 of 10: ESP-IDF 5.5
@@ -141,7 +124,7 @@ From now on, open **CP Tools** from the shortcut on your desktop.
    Plug your CrossPad in with a USB cable before [1] Update my CrossPad.
    ```
 
-6. From now on, open a terminal and type `cptools`.
+5. From now on, open a terminal and type `cptools`.
 
 On Linux, **log out and back in once** after the first install, so your user
 may talk to USB devices.
@@ -161,7 +144,7 @@ Every command works in any new terminal (PowerShell, cmd, Terminal) — no
 | `crosspad-board` | which board version is plugged in |
 | `crosspad-idf` | `idf.py` in the project folder, e.g. `crosspad-idf board`, then `crosspad-idf -B build_v2 -DSDKCONFIG=sdkconfig.v2 build` (every build names the board version) |
 | `crosspad-hil` | the board's test tools, e.g. `crosspad-hil devices` |
-| `crosspad-bench` | the developer bench: `check`, `ready`, `flash`, `test smoke` |
+| `crosspad-bench` | check, prepare and flash the board on your desk: `check`, `ready`, `flash`, `test smoke` |
 | `crosspad-sim`, `crosspad-pc` | the PC simulator and its app manager (if you said yes to it) |
 | `crosspad-arduino`, `pio` | the Arduino version's app manager and PlatformIO (if you said yes to it) |
 
