@@ -19,10 +19,30 @@ opens **CP Tools** — the program that updates the CrossPad and chooses its app
 
 You type one line. Everything else happens by itself.
 
-**In this guide:** [Windows](#windows) · [Mac and Linux](#mac-and-linux) ·
+**In this guide:** [With an AI assistant](#set-up-with-an-ai-assistant) · [Windows](#windows) · [Mac and Linux](#mac-and-linux) ·
 [Commands you get](#commands-you-get) · [CP Tools](#the-first-time-in-cp-tools) ·
 [VS Code](#vs-code) · [FL Studio](#fl-studio) · [The PC simulator](#the-pc-simulator) ·
 [The Arduino version](#the-arduino-version) · [If something goes wrong](#if-something-goes-wrong)
+
+---
+
+## Set up with an AI assistant
+
+Using Claude Code, Cursor, GitHub Copilot's agent mode or another AI coding
+assistant that can run commands? Paste this message into it:
+
+```text
+Set up CrossPad firmware development on this computer for me.
+Fetch https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/AI_SETUP.md
+and follow it step by step, from Step 0 to Step 7. That file is kept up to date,
+so trust it over anything you remember about CrossPad. Ask me only where it says
+to (passwords, anything that touches my board), and stop before flashing.
+```
+
+The assistant checks your computer, asks you to run the one command that needs
+your password, runs this installer without questions, builds the firmware for
+your board and stops before it touches the board. The instructions it follows
+are [AI_SETUP.md](AI_SETUP.md) in this folder.
 
 ---
 
