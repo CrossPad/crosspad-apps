@@ -71,7 +71,7 @@ def test_leave_gives_the_bench_back_when_the_board_is_gone():
     settle(s, 2)
     s.dev = None                              # NO_DEVICE while the board re-enumerates
     s.leave()
-    assert releases(fake) and releases(fake)[-1]["device"] == "dev_6dd8"
+    assert releases(fake) and releases(fake)[-1]["device"] == "dev_a001"
 
 
 def test_a_lease_by_another_window_with_our_name_is_not_released_here():

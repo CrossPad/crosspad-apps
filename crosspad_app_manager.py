@@ -1274,8 +1274,8 @@ class AppManager:
                 capture_output=True, text=True, check=False, timeout=5,
             )
             if r.returncode == 0:
-                # "Logged in to github.com account matixan (keyring)" (gh ≥ 2.40)
-                # or "Logged in to github.com as matixan" (older gh).
+                # "Logged in to github.com account octocat (keyring)" (gh ≥ 2.40)
+                # or "Logged in to github.com as octocat" (older gh).
                 m = _re.search(r"Logged in to \S+ (?:account|as) (\S+)", r.stdout + r.stderr)
                 return True, m.group(1) if m else "authenticated"
             return False, ""

@@ -1,10 +1,10 @@
 import crosspad_app_manager as cam
 from tests.hil_fakes import BASE, DEV, FakeHil, make_screen, plain, settle
 
-WIFI = {"state": "connected", "ssid": "Home", "rssi": -55, "ip": "10.42.0.254", "enabled": 1}
+WIFI = {"state": "connected", "ssid": "Home", "rssi": -55, "ip": "192.0.2.10", "enabled": 1}
 BLE_ON = {"supported": 1, "running": 1, "state": "advertising", "mode": "server", "peer": None}
 TABLE = {**BASE, "cdc.verb:wifi_status": {"result": WIFI},
-         "cdc.verb:wifi_list": {"result": ["Home", "Bench"]},
+         "cdc.verb:wifi_list": {"result": ["Home", "Office"]},
          "cdc.verb:ble_status": {"result": BLE_ON},
          "usbmode.set": {"result": {**DEV, "usb_mode": "audio"}}}
 
@@ -19,8 +19,8 @@ def test_shows_usb_wifi_and_bluetooth():
     text = plain(conn(FakeHil(TABLE)).render(100, 30))
     assert "CDC" in text and "[u] switch to USB audio" in text
     assert "asks on its screen" in text
-    assert "connected · Home · 10.42.0.254 · -55 dBm" in text
-    assert "Bench" in text and "on · server" in text
+    assert "connected · Home · 192.0.2.10 · -55 dBm" in text
+    assert "Office" in text and "on · server" in text
 
 
 def test_usb_switch_asks_then_switches(monkeypatch):
@@ -52,7 +52,7 @@ def test_add_and_forget_a_network(monkeypatch):
     monkeypatch.setattr(cam, "_confirm", lambda prompt: True)
     s.handle_key("down")
     s.handle_key("x")
-    assert fake.verb_calls("wifi_forget") == [{"ssid": "Bench"}]
+    assert fake.verb_calls("wifi_forget") == [{"ssid": "Office"}]
 
 
 def test_a_short_password_is_refused_here(monkeypatch):

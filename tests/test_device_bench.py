@@ -6,7 +6,7 @@ PIDF = {"holder": "pidf", "purpose": "firmware_app", "since": WALL - 600, "ttl_s
 TAKEN = {**BENCH_FREE, "lease": PIDF}
 MINE = {**BENCH_FREE, "lease": {"holder": "cp-tools", "purpose": "CP Tools CrossPad screen",
                                 "since": WALL, "ttl_s": 1800, "expires": WALL + 1800}}
-BENCH_BUSY_ERR = {"code": "BENCH_BUSY", "message": "dev_6dd8 is claimed by pidf (firmware_app)",
+BENCH_BUSY_ERR = {"code": "BENCH_BUSY", "message": "dev_a001 is claimed by pidf (firmware_app)",
                   "hint": "claim it to join the queue",
                   "details": {"holder": "pidf", "purpose": "firmware_app", "since": WALL - 600,
                               "expires": WALL + 720, "queue": []}}
@@ -92,7 +92,7 @@ def test_a_queued_claim_shows_its_place_and_asks_again():
     s.handle_key("b")
     s.tick()
     assert bench_calls(fake, "bench.claim") == [{
-        "device": "dev_6dd8", "holder": "cp-tools",
+        "device": "dev_a001", "holder": "cp-tools",
         "purpose": cam._DeviceScreen.BENCH_PURPOSE, "ttl_s": cam._DeviceScreen.BENCH_TTL_S}]
     assert "Queued for the bench: #1 behind pidf" in plain(s.render(100, 30))
     t[0] += cam._DeviceScreen.BENCH_REQUEUE_S + 0.5
@@ -124,7 +124,7 @@ def test_a_granted_claim_is_renewed_at_half_its_ttl():
     assert bench_calls(fake, "bench.renew") == []
     t[0] += 2
     s.tick()
-    assert bench_calls(fake, "bench.renew") == [{"device": "dev_6dd8", "holder": "cp-tools",
+    assert bench_calls(fake, "bench.renew") == [{"device": "dev_a001", "holder": "cp-tools",
                                                   "ttl_s": cam._DeviceScreen.BENCH_TTL_S}]
 
 
@@ -136,7 +136,7 @@ def test_the_key_again_gives_it_back_saying_what_firmware_is_on_it():
     s.handle_key("b")
     settle(s, 2)
     assert bench_calls(fake, "bench.release") == [{
-        "device": "dev_6dd8", "holder": "cp-tools", "firmware_left": "app_sha256 " + "ab" * 8}]
+        "device": "dev_a001", "holder": "cp-tools", "firmware_left": "app_sha256 " + "ab" * 8}]
     assert "Gave the bench back" in plain(s.render(100, 30))
 
 
@@ -148,7 +148,7 @@ def test_leaving_gives_the_bench_back():
     assert s.handle_key("esc") is False
     s.leave()
     assert bench_calls(fake, "bench.release") == [{
-        "device": "dev_6dd8", "holder": "cp-tools", "firmware_left": "app_sha256 " + "ab" * 8}]
+        "device": "dev_a001", "holder": "cp-tools", "firmware_left": "app_sha256 " + "ab" * 8}]
 
 
 def test_leaving_without_a_claim_releases_nothing():

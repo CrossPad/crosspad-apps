@@ -53,10 +53,10 @@ def test_every_board_call_names_the_bench_holder(tmp_path, monkeypatch):
 
 
 def test_a_claimed_bench_reads_as_busy(tmp_path):
-    err = {"code": "BENCH_BUSY", "message": "dev_6dd8 is claimed by pidf (firmware_app)",
+    err = {"code": "BENCH_BUSY", "message": "dev_a001 is claimed by pidf (firmware_app)",
            "hint": None, "details": {"holder": "pidf", "purpose": "firmware_app"}}
     r = mgr_with(tmp_path, {"cdc.verb:app_versions": {"error": err}}).query_device_versions()
-    assert not r["ok"] and r["error"] == "busy: dev_6dd8 is claimed by pidf (firmware_app)"
+    assert not r["ok"] and r["error"] == "busy: dev_a001 is claimed by pidf (firmware_app)"
 
 
 def test_fw_slots_keep_their_shape_for_previous_firmware(tmp_path):
@@ -77,9 +77,9 @@ def test_switch_firmware_is_the_named_verb(tmp_path):
 
 def test_a_chosen_board_is_named_in_every_board_call(tmp_path):
     mgr = mgr_with(tmp_path, {"cdc.transact": {"result": {"line": "USB_GUARD: 0"}}})
-    mgr.chosen_device = "dev_31ea"
+    mgr.chosen_device = "dev_a003"
     mgr.cdc_verb("USB_GUARD")
-    assert mgr._hil.calls[-1][1]["device"] == "dev_31ea"
+    assert mgr._hil.calls[-1][1]["device"] == "dev_a003"
 
 
 def test_a_busy_board_reads_as_busy(tmp_path):

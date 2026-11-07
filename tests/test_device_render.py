@@ -6,7 +6,7 @@ from tests.hil_fakes import DEV, plain
 NOW = 1_000_000.0
 HOLDER = {"client": "crosspad-hil", "purpose": "kit_churn", "pid": 4121, "since": NOW - 180}
 BG24 = re.compile(r"\x1b\[48;2;(\d+);(\d+);(\d+)m")
-FREE = {"device": "dev_6dd8", "lease": None, "queue": []}
+FREE = {"device": "dev_a001", "lease": None, "queue": []}
 PIDF = {"holder": "pidf", "purpose": "firmware_app", "since": NOW - 600, "ttl_s": 1800,
         "expires": NOW + 720}
 
@@ -98,7 +98,7 @@ def test_status_line_without_board_hub_or_bench():
 def test_bench_segment_says_whose_it_is():
     mine = {**PIDF, "holder": "cp-tools"}
     assert cam.bench_segment({**FREE, "lease": mine}, "cp-tools", NOW) == "bench: yours (12 min left)"
-    queued = {**FREE, "lease": PIDF, "queue": [{"holder": "codex", "position": 1},
+    queued = {**FREE, "lease": PIDF, "queue": [{"holder": "agent", "position": 1},
                                                {"holder": "cp-tools", "position": 2}]}
     assert cam.bench_segment(queued, "cp-tools", NOW) == \
         "bench: pidf (firmware_app, 12 min left), you #2"
@@ -109,12 +109,12 @@ def test_bench_segment_says_whose_it_is():
 
 
 def test_bench_busy_lines_from_the_refusal():
-    err = cam.HilFailure("BENCH_BUSY", "dev_6dd8 is claimed by pidf", details={
+    err = cam.HilFailure("BENCH_BUSY", "dev_a001 is claimed by pidf", details={
         "holder": "pidf", "purpose": "firmware_app", "since": NOW - 600, "expires": NOW + 720,
-        "queue": ["codex", "cp-tools"]})
+        "queue": ["agent", "cp-tools"]})
     text = plain(cam.bench_busy_lines(err, None, NOW, "cp-tools", "c"))
     assert "The bench is claimed" in text and "pidf (firmware_app), since" in text
-    assert "12 min left" in text and "queue: codex, cp-tools (you)" in text
+    assert "12 min left" in text and "queue: agent, cp-tools (you)" in text
     assert "[c] leave the queue" in text and "comes back by itself" in text
 
 

@@ -211,7 +211,7 @@ def test_a_silent_board_never_freezes_the_keys():
 
 
 def test_two_boards_the_first_is_named_on_every_call():
-    fake = FakeHil({**BASE, "devices.list": {"result": {"devices": [DEV, {**DEV, "id": "dev_31ea"}]}}})
+    fake = FakeHil({**BASE, "devices.list": {"result": {"devices": [DEV, {**DEV, "id": "dev_a003"}]}}})
     s = make_screen(fake)
     settle(s)
     s.handle_key("z")
