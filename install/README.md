@@ -315,7 +315,7 @@ regular one back. `crosspad_rev2` is the older 1.9 board — never flash it on a
   and the rest of [Troubleshooting](https://crosspad.app/docs/troubleshooting/).
 - Still stuck? In *Something's wrong* press **s**. It saves one file with
   everything a helper needs (no passwords). Send it on the CrossPad Discord,
-  channel **#support**, with one line about what you were doing.
+  channel **#help**, with one line about what you were doing.
 
 ![Something's wrong, with a fix under each problem](img/cp-3-wrong.png)
 

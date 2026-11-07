@@ -426,7 +426,7 @@ Tell the developer these in your closing message (short):
   again with `CROSSPAD_WITH_PC=1`).
 - **Help:** https://crosspad.app/docs/troubleshooting/, and `cptools support`
   writes one file with everything a helper needs (no passwords) for the
-  CrossPad Discord, channel #support.
+  CrossPad Discord, channel #help.
 
 ## When something fails
 
