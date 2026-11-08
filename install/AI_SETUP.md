@@ -43,9 +43,6 @@ step here fails in a way this file does not cover.
 - Do not edit the project's tracked files to make a step pass (no changes to
   `sdkconfig.*`, `CMakeLists.txt`, submodules). If a step fails, find the cause.
 - After each step, tell the developer in one line what you did and what you saw.
-- **Board testing tools (crosspad-hil, `tools/bench.py test`, smoke tests) are
-  not publicly available yet.** Skip every step that needs them, here and on
-  the docs site. The setup is complete without them.
 
 ## Step 0 — Look at the computer
 
@@ -184,7 +181,6 @@ run with options that make it ask nothing and skip what is not available:
 | Option | Why |
 |---|---|
 | `CROSSPAD_YES=1` | answer every question with yes; the PC simulator and Arduino extras stay off |
-| `CROSSPAD_NO_HIL=1` | skip the board test tools (not publicly available yet) |
 | `CROSSPAD_NO_TUI=1` | do not open the CP Tools menu at the end (it waits for keys) |
 | `CROSSPAD_NO_VSCODE=1` | **Linux only, and only if `code` is not installed** (`command -v code`): installing VS Code there needs the developer's password. With VS Code present, leave it out: the installer adds the ESP-IDF extension and points VS Code at the project. On macOS and Windows the installer installs VS Code without a password; leave it out there too |
 | `CROSSPAD_WITH_PC=1` | add this only if the developer asked for the PC simulator (Linux also needs `build-essential libsdl2-dev pkg-config`, installed with `sudo` as in Step 1) |
@@ -193,7 +189,7 @@ Linux and macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/install.sh -o /tmp/crosspad-install.sh
-CROSSPAD_YES=1 CROSSPAD_NO_HIL=1 CROSSPAD_NO_TUI=1 nohup bash /tmp/crosspad-install.sh > ~/crosspad-install.log 2>&1 &
+CROSSPAD_YES=1 CROSSPAD_NO_TUI=1 nohup bash /tmp/crosspad-install.sh > ~/crosspad-install.log 2>&1 &
 ```
 
 (on Linux add `CROSSPAD_NO_VSCODE=1` before `nohup` when VS Code is not installed).
@@ -201,7 +197,7 @@ CROSSPAD_YES=1 CROSSPAD_NO_HIL=1 CROSSPAD_NO_TUI=1 nohup bash /tmp/crosspad-inst
 Windows (PowerShell):
 
 ```powershell
-$env:CROSSPAD_YES="1"; $env:CROSSPAD_NO_HIL="1"; $env:CROSSPAD_NO_TUI="1"
+$env:CROSSPAD_YES="1"; $env:CROSSPAD_NO_TUI="1"
 irm https://raw.githubusercontent.com/CrossPad/crosspad-apps/main/install/install.ps1 -OutFile $env:TEMP\crosspad-install.ps1
 Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $env:TEMP\crosspad-install.ps1" -RedirectStandardOutput $HOME\crosspad-install.log -RedirectStandardError $HOME\crosspad-install.err -WindowStyle Hidden
 ```
@@ -219,7 +215,7 @@ Step 4 of 10: ESP-IDF 5.5
   ✓ ESP-IDF v5.5.5 at /home/<user>/esp/esp-idf
 …
 Step 6 of 10: Test tools (optional)
-  skipped
+  ✓ crosspad-hil
 …
 Step 10 of 10: Final check
   ✓ idf.py works inside cptools
@@ -330,9 +326,17 @@ Check that the flash tools start:
 OTA update over USB; `crosspad-files` = `tools/fs_transfer.py`, files and the
 assets partition).
 
-Optional, if the developer uses Claude Code: the installer registered the
-CrossPad MCP server (`claude mcp list` shows `crosspad`); other assistants
-can use `~/CrossPad/.vscode/mcp.json` (`npx -y crosspad-mcp-server@latest`).
+If you are Claude Code: the installer added the CrossPad plugin (its tools,
+and the guides for apps, games and firmware kits). Its tools reach you after a
+restart, so in the Step 7 hand-over tell the developer to type `/exit` and
+start `claude` again in the project folder. Check with
+`claude mcp list` (run from the project folder): a line
+`plugin:crosspad:crosspad: … ✔ Connected`. Other assistants can use
+`~/CrossPad/.vscode/mcp.json` (the same server, installed in
+`~/.local/crosspad-mcp`). The installer does not install Claude Code itself in
+this unattended run; a developer who wants it runs
+`curl -fsSL https://claude.ai/install.sh | bash` (Windows:
+`irm https://claude.ai/install.ps1 | iex`) and then the installer once more.
 
 ## Step 7 — Stop here and hand over
 

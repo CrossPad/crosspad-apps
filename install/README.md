@@ -99,8 +99,10 @@ first ([how](https://crosspad.app/docs/how-to/esp-idf-versions/)), or point
 installer puts v5.5.5 in `C:\CrossPad\esp-idf` (Mac/Linux: `~/esp/esp-idf`), or next
 to it in `C:\CrossPad\esp-idf-v5.5` (`~/esp/esp-idf-v5.5`) when that folder is
 taken. The installer also sets up **VS Code** (with the ESP-IDF extension and
-the CP Tools buttons, pointed at the right ESP-IDF) and **Node.js** with the
-CrossPad MCP server for AI assistants (VS Code and Claude Code), and checks at
+the CP Tools buttons, pointed at the right ESP-IDF), **Node.js** with the
+CrossPad MCP server for AI assistants, offers to install **Claude Code** (the
+AI assistant you sign in to with your Claude subscription) with the CrossPad
+plugin, and checks at
 the end that every command below works in a new terminal. You can leave the window alone.
 
 With both extras the list is longer — the PC simulator needs Visual Studio's
@@ -227,8 +229,11 @@ task-button extensions, and points it at the ESP-IDF it set up.
 
 **AI assistants:** `.vscode/mcp.json` gives Copilot's agent mode the CrossPad
 MCP server — build, flash, check the board, search the code. Claude Code gets
-the same server (`claude mcp list` shows `crosspad`). The server starts on
-its own the first time an assistant asks for it (Node.js, installed in step 8).
+it through the CrossPad plugin, with the guides for apps, games and firmware
+kits: in a terminal, `cd ~/CrossPad` (Windows `cd C:\CrossPad\firmware`),
+then `claude`; sign in the first time and say what you want, for example
+*"Is my CrossPad connected and ready?"*. Claude Code installed later? Run the
+installer once more and it adds the plugin.
 
 ---
 
