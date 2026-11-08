@@ -570,7 +570,8 @@ else
         ok "Node.js $(node --version)"
         if (cd "$HOME" && npm install --prefix "$MCP_PREFIX" --no-audit --no-fund --loglevel=error \
                 crosspad-mcp-server@latest) >/tmp/crosspad-mcp-install.log 2>&1; then
-            ok "CrossPad MCP server $(node -p "require('$MCP_PREFIX/node_modules/crosspad-mcp-server/package.json').version")"
+            mcp_version=$(node -p 'require(process.argv[1]).version' "$MCP_PREFIX/node_modules/crosspad-mcp-server/package.json")
+            ok "CrossPad MCP server $mcp_version"
         else
             bad "the CrossPad MCP server did not install" "see /tmp/crosspad-mcp-install.log, then run this again"
         fi
@@ -579,7 +580,7 @@ else
         if n=$(mcp_answers); then ok "the MCP server starts and offers $n tools"
         else bad "the MCP server did not answer" "run: node $MCP_SERVER — and send what it prints on Discord (#help)"; fi
 
-        # Claude Code's native installer puts it in ~/.local/bin.
+        # The native installer of Claude Code puts it in ~/.local/bin.
         [ -x "$HOME/.local/bin/claude" ] && export PATH="$HOME/.local/bin:$PATH"
         if ! have claude && [ -z "${CROSSPAD_YES:-}" ] && ask "Install Claude Code, the AI assistant (you sign in with your Claude subscription)?"; then
             if curl -fsSL https://claude.ai/install.sh | bash >/tmp/claude-install.log 2>&1; then
@@ -589,7 +590,8 @@ else
             fi
         fi
         if have claude; then
-            ok "Claude Code $(claude --version </dev/null 2>/dev/null | cut -d' ' -f1)"
+            claude_version=$(claude --version </dev/null 2>/dev/null)
+            ok "Claude Code ${claude_version%% *}"
             if hand_added_server && claude mcp remove crosspad -s user </dev/null >/dev/null 2>&1; then
                 ok "the crosspad server added by an older installer is gone (the plugin brings it now)"
             fi
