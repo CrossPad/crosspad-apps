@@ -18,6 +18,7 @@
 #   CROSSPAD_YES=1                 answer yes to every question (extras and Claude Code stay off)
 #   CROSSPAD_WITH_PC=1             also set up the PC simulator (C:\CrossPad\pc)
 #   CROSSPAD_WITH_ARDUINO=1        also set up the Arduino version (C:\CrossPad\arduino)
+#   CROSSPAD_MCP_MARKETPLACE=CrossPad/crosspad-mcp   where the Claude Code plugin comes from (a path tests a checkout)
 #   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_VSCODE=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
 
 $ErrorActionPreference = "Continue"
@@ -535,7 +536,7 @@ if ($env:CROSSPAD_NO_MCP) { Note "skipped" } else {
                 claude mcp remove crosspad -s user *> $null
                 if ($LASTEXITCODE -eq 0) { Ok "the crosspad server added by an older installer is gone (the plugin brings it now)" }
             }
-            claude plugin marketplace add CrossPad/crosspad-mcp *> $null
+            claude plugin marketplace add (Env-Or "CROSSPAD_MCP_MARKETPLACE" "CrossPad/crosspad-mcp") *> $null
             claude plugin marketplace update crosspad *> $null
             claude plugin install crosspad@crosspad *> $null
             if ($LASTEXITCODE -eq 0) {
