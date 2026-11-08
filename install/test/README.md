@@ -37,6 +37,8 @@ windows/wintest.sh golden-fl     # once: the clean disk + FL Studio (trial)
 gh auth token > ~/.cache/crosspad-wintest/shared/token.txt   # every job deletes it at the end
 windows/wintest.sh start         # the clean disk again (~1 min), waits for logon
 windows/wintest.sh job windows/jobs/run-test.ps1             # fresh + broken, logs in shared/win-*.log
+windows/wintest.sh job windows/jobs/agent-setup.ps1          # Claude Code + the CrossPad plugin, PASS/FAIL in shared/agent-setup.log
+                                 # (shared/install.ps1 and shared/mcp-plugin/ test a checkout instead of main)
 WINTEST_USB=1 windows/wintest.sh start
 windows/wintest.sh job windows/jobs/run-board.ps1            # with the real board: update-board
 windows/wintest.sh fl            # golden-fl + the board: full setup with both extras, then fl-check.ps1

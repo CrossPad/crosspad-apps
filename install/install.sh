@@ -13,9 +13,10 @@
 #   CROSSPAD_DIR=~/CrossPad        where the project goes
 #   CROSSPAD_BRANCH=main           which branch of CrossPad/platform-idf
 #   CROSSPAD_IDF_DIR=~/esp/esp-idf where ESP-IDF goes (default: an ESP-IDF 5.5 already here, else this)
-#   CROSSPAD_YES=1                 answer yes to every question (extras stay off)
+#   CROSSPAD_YES=1                 answer yes to every question (extras and Claude Code stay off)
 #   CROSSPAD_WITH_PC=1             also set up the PC simulator (~/CrossPad-PC)
 #   CROSSPAD_WITH_ARDUINO=1        also set up the Arduino version (~/CrossPad-Arduino)
+#   CROSSPAD_MCP_MARKETPLACE=CrossPad/crosspad-mcp   where the Claude Code plugin comes from (a path tests a checkout)
 #   CROSSPAD_NO_HIL=1 / CROSSPAD_NO_VSCODE=1 / CROSSPAD_NO_MCP=1 / CROSSPAD_NO_TUI=1
 #                                  skip the test tools, VS Code, the AI tools, opening CP Tools
 
@@ -403,7 +404,7 @@ else
         if python3 -m venv "$venv" && GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never "$venv/bin/pip" install -q "git+https://github.com/CrossPad/crosspad-hil" >/tmp/crosspad-hil-install.log 2>&1; then
             ok "crosspad-hil"
         else
-            note "crosspad-hil could not be installed (it needs access to CrossPad/crosspad-hil) — CP Tools works without it"
+            note "crosspad-hil could not be installed (details in /tmp/crosspad-hil-install.log) — CP Tools works without it"
         fi
     fi
 fi
@@ -475,11 +476,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "AI assistant tools" "Node.js and the CrossPad MCP server, for VS Code and Claude Code"
-mcp_config() {   # .vscode/mcp.json, merged: the server knows this project and ESP-IDF
+step "AI assistant" "Claude Code with the CrossPad plugin: it builds, flashes and tests the board when you ask"
+MCP_PREFIX="$HOME/.local/crosspad-mcp"
+MCP_SERVER="$MCP_PREFIX/node_modules/crosspad-mcp-server/dist/index.js"
+mcp_user_config() {   # where the server finds this project and ESP-IDF; other keys are kept
     python3 - "$CROSSPAD_DIR" "$IDF_DIR" <<'PY'
+import json, os, pathlib, sys
+base = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+out = base / "crosspad-mcp" / "config.json"
+cfg = {}
+if out.exists():
+    try:
+        cfg = json.loads(out.read_text())
+    except ValueError:
+        pass
+cfg["idf_root"], cfg["idf_path"] = sys.argv[1], sys.argv[2]
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps(cfg, indent=2) + "\n")
+os.chmod(out, 0o600)
+PY
+}
+mcp_config() {   # .vscode/mcp.json, merged: the server knows this project and ESP-IDF
+    python3 - "$CROSSPAD_DIR" "$IDF_DIR" "$MCP_SERVER" <<'PY'
 import json, pathlib, sys
-proj, idf = pathlib.Path(sys.argv[1]), sys.argv[2]
+proj, idf, server = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 out = proj / ".vscode" / "mcp.json"
 cfg = {}
 if out.exists():
@@ -488,14 +508,14 @@ if out.exists():
     except ValueError:
         pass
 cfg.setdefault("servers", {})["crosspad"] = {
-    "type": "stdio", "command": "npx", "args": ["-y", "crosspad-mcp-server@latest"],
+    "type": "stdio", "command": "node", "args": [server],
     "env": {"CROSSPAD_IDF_ROOT": str(proj), "IDF_PATH": idf}}
 out.parent.mkdir(exist_ok=True)
 out.write_text(json.dumps(cfg, indent=4) + "\n")
 PY
 }
 mcp_answers() {   # start the server the way an editor does and ask for its tools
-    python3 - "$CROSSPAD_DIR" "$IDF_DIR" <<'PY'
+    python3 - "$CROSSPAD_DIR" "$IDF_DIR" "$MCP_SERVER" <<'PY'
 import json, os, shutil, subprocess, sys, threading
 env = dict(os.environ, CROSSPAD_IDF_ROOT=sys.argv[1], IDF_PATH=sys.argv[2])
 msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -505,7 +525,7 @@ msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
 # stdin stays open until the answer: a stdio server ends when its client does.
 try:
-    p = subprocess.Popen([shutil.which("npx") or "npx", "-y", "crosspad-mcp-server@latest"],
+    p = subprocess.Popen([shutil.which("node") or "node", sys.argv[3]],
                          env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
 except OSError:
@@ -531,6 +551,13 @@ if not found:
 print(found[0])
 PY
 }
+# The `crosspad` server earlier versions of this script added by hand: the
+# plugin brings the server now, and both at once would offer every tool twice.
+hand_added_server() {
+    local out
+    out=$(claude mcp get crosspad </dev/null 2>/dev/null) || return 1
+    printf '%s' "$out" | grep -q "Scope: User" && printf '%s' "$out" | grep -q "crosspad-mcp-server"
+}
 node_ok() { have node && node -e 'process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)' 2>/dev/null; }
 if [ -n "${CROSSPAD_NO_MCP:-}" ]; then
     note "skipped"
@@ -539,17 +566,51 @@ else
         if [ "$os" = "Darwin" ] && have brew; then brew install -q node >/dev/null 2>&1
         else install_pkgs nodejs npm -- nodejs npm -- nodejs npm -- nodejs npm >/dev/null 2>&1; fi
     fi
-    if node_ok && have npx; then
+    if node_ok && have npm; then
         ok "Node.js $(node --version)"
-        mcp_config && ok "VS Code knows the CrossPad MCP server (.vscode/mcp.json)"
-        if have claude; then
-            claude mcp get crosspad >/dev/null 2>&1 \
-                || claude mcp add --scope user crosspad -e "CROSSPAD_IDF_ROOT=$CROSSPAD_DIR" \
-                       -e "IDF_PATH=$IDF_DIR" -- npx -y crosspad-mcp-server@latest >/dev/null 2>&1
-            claude mcp get crosspad >/dev/null 2>&1 && ok "Claude Code knows it too"
+        if (cd "$HOME" && npm install --prefix "$MCP_PREFIX" --no-audit --no-fund --loglevel=error \
+                crosspad-mcp-server@latest) >/tmp/crosspad-mcp-install.log 2>&1; then
+            mcp_version=$(node -p 'require(process.argv[1]).version' "$MCP_PREFIX/node_modules/crosspad-mcp-server/package.json")
+            ok "CrossPad MCP server $mcp_version"
+        else
+            bad "the CrossPad MCP server did not install" "see /tmp/crosspad-mcp-install.log, then run this again"
         fi
+        mcp_user_config && ok "it knows this project and ESP-IDF (~/.config/crosspad-mcp/config.json)"
+        mcp_config && ok "VS Code knows it too (.vscode/mcp.json)"
         if n=$(mcp_answers); then ok "the MCP server starts and offers $n tools"
-        else bad "the MCP server did not answer" "run: npx -y crosspad-mcp-server@latest — and send what it prints on Discord (#help)"; fi
+        else bad "the MCP server did not answer" "run: node $MCP_SERVER — and send what it prints on Discord (#help)"; fi
+
+        # The native installer of Claude Code puts it in ~/.local/bin.
+        [ -x "$HOME/.local/bin/claude" ] && export PATH="$HOME/.local/bin:$PATH"
+        if ! have claude && [ -z "${CROSSPAD_YES:-}" ] && ask "Install Claude Code, the AI assistant (you sign in with your Claude subscription)?"; then
+            if curl -fsSL https://claude.ai/install.sh | bash >/tmp/claude-install.log 2>&1; then
+                export PATH="$HOME/.local/bin:$PATH"
+            else
+                bad "Claude Code did not install" "see /tmp/claude-install.log, or https://code.claude.com/docs/en/setup"
+            fi
+        fi
+        if have claude; then
+            claude_version=$(claude --version </dev/null 2>/dev/null)
+            ok "Claude Code ${claude_version%% *}"
+            if hand_added_server && claude mcp remove crosspad -s user </dev/null >/dev/null 2>&1; then
+                ok "the crosspad server added by an older installer is gone (the plugin brings it now)"
+            fi
+            claude plugin marketplace add "${CROSSPAD_MCP_MARKETPLACE:-CrossPad/crosspad-mcp}" </dev/null >/dev/null 2>&1
+            claude plugin marketplace update crosspad </dev/null >/dev/null 2>&1
+            if claude plugin install crosspad@crosspad </dev/null >/dev/null 2>&1; then
+                claude plugin update crosspad@crosspad </dev/null >/dev/null 2>&1
+                ok "Claude Code has the CrossPad plugin: its tools and its guides"
+                if (cd "$CROSSPAD_DIR" && claude mcp list </dev/null 2>/dev/null) | grep -q "plugin:crosspad:crosspad:.*Connected"; then
+                    ok "Claude Code reaches the CrossPad tools"
+                else
+                    bad "Claude Code does not reach the CrossPad tools yet" "open Claude Code in $CROSSPAD_DIR, type /mcp and pick crosspad"
+                fi
+            else
+                bad "the CrossPad plugin did not install" "run: claude plugin marketplace add CrossPad/crosspad-mcp && claude plugin install crosspad@crosspad"
+            fi
+        else
+            note "no Claude Code: run this installer again any time to add it"
+        fi
     else
         bad "Node.js 18 or newer is missing" "install it from https://nodejs.org and run this again"
     fi
@@ -712,6 +773,12 @@ printf '\n'
 if [ ${#failed[@]} -eq 0 ]; then
     printf '%sAll set.%s Next time, open a terminal and type:  cptools\n' "$green" "$off"
     printf 'Plug your CrossPad in with a USB cable before [1] Update my CrossPad.\n'
+    if have claude; then
+        printf '\nTo work with the AI assistant: open a terminal and type  cd %s && claude\n' "$CROSSPAD_DIR"
+        printf 'Sign in with your Claude account the first time, then just say what you want, e.g.\n'
+        printf '  "Is my CrossPad connected and ready?"\n'
+        printf '  "Make me a simple app for my CrossPad that lights the pads I press."\n'
+    fi
 else
     printf '%sAlmost:%s the lines marked ✗ above say what is left.\n' "$yellow" "$off"
     printf 'Run this installer again after fixing them — it only redoes what is missing.\n'
